@@ -15,7 +15,9 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import signal
+import stat
 import subprocess
 import sys
 import threading
@@ -213,11 +215,22 @@ class Executor:
             if len(content.encode()) > MAX_WRITE:
                 raise ToolError("content too large")
             p = jail(root, args["path"], for_write=True)
+            
             before = p.read_bytes() if p.exists() else None
             p.parent.mkdir(parents=True, exist_ok=True)
-            tmp = p.with_name(f".{p.name}.ci-tmp")
-            tmp.write_text(content)
-            os.replace(tmp, p)
+            # A new temp file, never an existing name: a fixed name could already be in the
+            # workspace as a symlink (a cloned repo can carry one) and take the write outside it.
+            tmp = p.with_name(f".{p.name}.{secrets.token_hex(6)}.ci-tmp")
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o666)
+            try:
+                with os.fdopen(fd, "wb") as f:
+                    f.write(content.encode())
+                if before is not None:  # an overwritten file keeps its permissions (a script stays executable)
+                    os.chmod(tmp, stat.S_IMODE(p.stat().st_mode) & 0o777)
+                os.replace(tmp, p)
+            except BaseException:
+                tmp.unlink(missing_ok=True)
+                raise
             return {"path": args["path"], "created": before is None, "bytes": len(content.encode()),
                     "sha256_before": _sha(before) if before is not None else None,
                     "sha256_after": _sha(content.encode()),
