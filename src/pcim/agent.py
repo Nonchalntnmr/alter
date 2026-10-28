@@ -38,7 +38,7 @@ from .registry import vendor_of
 from .tasks import TERMINAL, Task, TaskQueue
 from .tools import TOOL_SCHEMAS
 from .types import Trust, new_id, utcnow
-from .workspace import Workspace, render_briefing
+from .workspace import Workspace, briefing_lineage, render_briefing
 
 SYSTEM = """You are CI, a collaborator working with one person on one of their projects, inside a workspace they authorized.
 
@@ -237,7 +237,7 @@ class Agent:
             disclosure = {"at": utcnow().isoformat(), "session": sid, "provider": provider, "vendor": vendor,
                           "model": model or ad.model, "briefing_sha256": None, "briefing_text": None,
                           "briefing_notes": [], "briefing_claims": [], "briefing_withheld": [],
-                          "system_memory_items": []}
+                          "briefing_lineage": [], "system_memory_items": []}
             if not st["briefing_sent"]:
                 b = self.briefing(user_id, project_id, vendor=vendor)
                 rendered = render_briefing(b)
@@ -247,7 +247,7 @@ class Agent:
                                   briefing_notes=[n["id"] for k in ("open_questions", "decisions", "next_steps")
                                                   for n in b[k]],
                                   briefing_claims=[c["id"] for c in b.get("claims", [])],
-                                  briefing_withheld=b.get("withheld", []),
+                                  briefing_withheld=b.get("withheld", []), briefing_lineage=briefing_lineage(b),
                                   system_memory_items=st.get("system_memory_items", []))
             cx = self.ci.select_context(user_id, text, provider, ad.model, self.ci.budget_tokens, ref=sid,
                                         project_id=project_id)

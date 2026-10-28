@@ -395,11 +395,12 @@ class Workspace:
 
     @staticmethod
     def session_exposure(st: dict) -> list[str]:
-        """Memory items a session's model had been shown (its system section, and the personal
-        context of every message): what anything the session writes may be derived from."""
+        """Memory items a session's model had been shown (its system section, the personal
+        context of every message, and the lineage of what its briefing showed): what anything
+        the session writes may be derived from."""
         ids = list(st.get("system_memory_items", []))
         for d in st.get("disclosures", []):
-            ids += d.get("memory_items", [])
+            ids += d.get("memory_items", []) + d.get("briefing_lineage", [])
         return list(dict.fromkeys(ids))
 
     def provider_allowed(self, user_id: str, project_id: str, provider: str) -> bool:
@@ -442,11 +443,14 @@ class Workspace:
         if last:
             st = self.store.open_json(key, last[0]["state_ct"], last[0]["id"])
             reflection = st.get("reflection")
-            why = self.derived_blocked(user_id, self.session_exposure(st), vendor) \
-                if reflection and vendor is not None else None
-            if why:  # every line can repeat text the model chose: its last message, a path, a failure reason
-                withheld.append({"id": f"{last[0]['id']}#last_session", "reason": why})
-                reflection = None
+            if reflection:
+                exposure = self.session_exposure(st)
+                why = self.derived_blocked(user_id, exposure, vendor) if vendor is not None else None
+                if why:  # every line can repeat text the model chose: its last message, a path, a failure reason
+                    withheld.append({"id": f"{last[0]['id']}#last_session", "reason": why})
+                    reflection = None
+                else:  # a model shown these lines may pass on what they came from (briefing_lineage)
+                    reflection = dict(reflection, exposure=exposure)
         pending = self.store.query(
             "SELECT id, tool, created_at FROM tasks WHERE project_id=? AND status='awaiting_approval' ORDER BY created_at",
             (project_id,))
@@ -464,6 +468,18 @@ class Workspace:
             "mode": self.get_mode(user_id),
             "withheld": withheld,
         }
+
+
+def briefing_lineage(b: dict) -> list[str]:
+    """Memory items behind what a briefing shows: the lineage of its model-written notes and
+    claims (none once the person released them) and what its last session had been shown. A
+    model given the briefing may pass any of it on, so lineage is carried through: whoever
+    receives the briefing is exposed to these too."""
+    ids = [i for k in ("open_questions", "decisions", "next_steps") for n in b[k] if not n.get("released_at")
+           for i in n.get("lineage", [])]
+    ids += [i for c in b.get("claims", []) for i in c.get("lineage", [])]
+    ids += (b.get("last_session") or {}).get("exposure", [])
+    return list(dict.fromkeys(ids))
 
 
 def _one_line(text) -> str:

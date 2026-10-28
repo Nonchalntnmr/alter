@@ -154,3 +154,23 @@ def test_no_reflection_line_reaches_a_vendor_that_may_not_see_the_session(tmp_pa
     assert any(w["id"].endswith("#last_session") for w in b["withheld"])
     mine = agent.briefing("u", p.id)  # the person's own view keeps every line
     assert any(x.startswith("tried to read person has type 2 diabetes") for x in mine["last_session"]["lines"])
+
+
+# 6 ---------------------------------------------------------------- transitive lineage
+def test_lineage_carries_through_what_a_briefing_showed(tmp_path):
+    ci, ws, _, _, agent, _ = make(tmp_path)
+    p = ws.create_project("u", "Diet plan", providers=["mock", "anthropic"])
+    m1 = restricted(ci)
+    agent.set_adapter("mock", None, MockAgentAdapter(script=[
+        {"tool_uses": [{"id": "a", "name": "record_note", "input": {"kind": "decision", "text": "Low-carb because of type 2 diabetes"}}]},
+        {"text": "ok"},
+        {"tool_uses": [{"id": "b", "name": "record_note", "input": {"kind": "next_step", "text": "Draft low-carb menu (type 2 diabetes)"}}]},
+        {"text": "ok"}]))
+    agent.send("u", p.id, "plan meals around my health", provider="mock")
+    ci.budget_tokens = 1  # session 2 is shown no memory directly, only the briefing with the first note
+    agent.send("u", p.id, "what next?", provider="mock", new_session=True)
+    n1, n2 = ws.get_project("u", p.id).notes
+    assert m1.id in n1["lineage"] and m1.id in n2["lineage"]
+    assert agent.disclosures("u", p.id)[-1]["memory_items"] == []  # it came through the briefing, not directly
+    b = agent.briefing("u", p.id, vendor="anthropic")
+    assert {n1["id"], n2["id"]} <= {w["id"] for w in b["withheld"]} and "diabetes" not in render_briefing(b)
