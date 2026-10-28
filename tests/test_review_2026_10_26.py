@@ -174,3 +174,26 @@ def test_lineage_carries_through_what_a_briefing_showed(tmp_path):
     assert agent.disclosures("u", p.id)[-1]["memory_items"] == []  # it came through the briefing, not directly
     b = agent.briefing("u", p.id, vendor="anthropic")
     assert {n1["id"], n2["id"]} <= {w["id"] for w in b["withheld"]} and "diabetes" not in render_briefing(b)
+
+
+# 7 ---------------------------------------------------------------- MCP note lineage
+def test_mcp_notes_carry_the_lineage_of_what_the_server_served(tmp_path):
+    pytest.importorskip("mcp")
+    from pcim.mcp_server import build_server
+
+    ci, ws, _, _, agent, _ = make(tmp_path)
+    p = ws.create_project("u", "Diet plan", providers=["mock", "anthropic"])
+    m1 = restricted(ci)
+    srv = build_server(ci, "u", provider="mock")
+    assert "diabetes" in mcp_call(srv, "ci_personal_context", {"task": "diabetes HbA1c health"})
+    mcp_call(srv, "ci_add_project_note", {"project_id": p.id, "kind": "decision", "text": "Type 2 diabetes; plan low-carb"})
+    assert m1.id in ws.get_project("u", p.id).notes[0]["lineage"]
+    assert "diabetes" not in render_briefing(agent.briefing("u", p.id, vendor="anthropic"))
+    # a briefing served over MCP passes its notes' lineage on as well
+    srv2 = build_server(ci, "u", provider="mock")
+    mcp_call(srv2, "ci_project_briefing", {"project_id": p.id})
+    mcp_call(srv2, "ci_add_project_note", {"project_id": p.id, "kind": "next_step", "text": "menu per the decision"})
+    assert m1.id in ws.get_project("u", p.id).notes[1]["lineage"]
+    fresh = build_server(ci, "u", provider="mock")  # it served nothing, so its notes restrict nothing
+    mcp_call(fresh, "ci_add_project_note", {"project_id": p.id, "kind": "open_question", "text": "q"})
+    assert "lineage" not in ws.get_project("u", p.id).notes[2]
