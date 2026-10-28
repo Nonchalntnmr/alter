@@ -132,6 +132,27 @@ def _search(root: Path, pattern: str, glob: str) -> dict:
     return {"matches": matches, "truncated": False}
 
 
+def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
+    """git with nothing from the repository's config that runs a command. The repository may
+    have arrived with its .git (an archive, a shared folder) or a model may have written to
+    it, and git status would otherwise start core.fsmonitor, the post-index-change hook, and
+    the clean filter of every file whose stat data changed. Filter drivers have names of the
+    repository's choosing, so each one configured is disabled by name; reading config runs
+    nothing."""
+    env = scrubbed_env()
+    keys = subprocess.run(["git", "-C", str(root), "config", "--null", "--name-only", "--get-regexp", r"^filter\."],
+                          capture_output=True, text=True, timeout=15, env=env).stdout.split("\0")
+    drivers = dict.fromkeys(k[len("filter."):k.rindex(".")] for k in keys if k.count(".") >= 2)
+    over = [("core.fsmonitor", "false"), ("core.hooksPath", "/dev/null")]
+    for d in drivers:
+        over += [(f"filter.{d}.clean", ""), (f"filter.{d}.smudge", ""), (f"filter.{d}.process", ""),
+                 (f"filter.{d}.required", "false")]
+    env["GIT_CONFIG_COUNT"] = str(len(over))  # unlike -c, a key here cannot be split by an "=" in a driver name
+    for n, (k, v) in enumerate(over):
+        env[f"GIT_CONFIG_KEY_{n}"], env[f"GIT_CONFIG_VALUE_{n}"] = k, v
+    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=15, env=env)
+
+
 def _search_in_child(root: Path, pattern: str, glob: str, timeout_s: float) -> dict:
     """The model writes the regex, and Python's re has no timeout: a pattern like (a+)+$ can
     backtrack for hours. The search runs in a child process that is killed at the deadline."""
@@ -198,15 +219,14 @@ class Executor:
             # A folder with no repository of its own makes git walk up to an enclosing one. On a
             # machine where $HOME is itself a repository that would mean listing (and leaking)
             # the whole home directory, so the real top level is checked first.
-            top = subprocess.run(["git", "-C", str(root), "rev-parse", "--show-toplevel"], capture_output=True,
-                                 text=True, timeout=15, env=scrubbed_env())
+            top = _git(root, "rev-parse", "--show-toplevel")
             if top.returncode != 0:
                 raise ToolError("not a git repository")
             toplevel = Path(top.stdout.strip()).resolve()
             if toplevel == Path.home().resolve() or toplevel in Path.home().resolve().parents:
                 raise ToolError("refusing git in the home-directory repository")
-            r = subprocess.run(["git", "-C", str(root), "status", "--porcelain=v1", "-b"], capture_output=True,
-                               text=True, timeout=15, env=scrubbed_env())
+            # dirty: otherwise git runs inside each submodule, under that submodule's own config
+            r = _git(root, "status", "--porcelain=v1", "-b", "--ignore-submodules=dirty")
             if r.returncode != 0:
                 raise ToolError(r.stderr.strip()[:500] or "not a git repository")
             return {"status": r.stdout[:20_000]}

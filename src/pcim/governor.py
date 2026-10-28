@@ -47,8 +47,9 @@ class Decision:
 
 
 def is_secret(path: Path) -> bool:
+    # Case-folded: on a case-insensitive filesystem (macOS by default) .SSH is .ssh.
     return any(fnmatch.fnmatch(path.name.lower(), pat) for pat in SECRET_NAMES) or any(
-        part in SECRET_DIRS for part in path.parts)
+        part.lower() in SECRET_DIRS for part in path.parts)
 
 
 def jail(root: str | Path, rel: str, for_write: bool = False) -> Path:
@@ -62,7 +63,7 @@ def jail(root: str | Path, rel: str, for_write: bool = False) -> Path:
     rel_parts = p.relative_to(root_r).parts
     if is_secret(p.relative_to(root_r)) if rel_parts else False:
         raise PathError(f"{rel} looks like a secret; CI never reads or writes it")
-    if for_write and ".git" in rel_parts:
+    if for_write and any(part.lower() == ".git" for part in rel_parts):  # .GIT/config is .git/config on macOS
         raise PathError("writing inside .git is not allowed")
     return p
 

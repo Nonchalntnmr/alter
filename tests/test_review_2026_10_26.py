@@ -1,9 +1,15 @@
 """Fixes from the independent review of 2026-10-26. Each test is one finding, numbered as in
 the review."""
 
+import os
+import subprocess
+import time
+from pathlib import Path
+
 import pytest
 
 from pcim.adapters.mock_agent import MockAgentAdapter
+from pcim.governor import PathError, is_secret, jail
 from pcim.types import Trust
 from pcim.workspace import render_briefing
 
@@ -18,6 +24,11 @@ def restricted(ci, content=HEALTH, **kw):
         ci.consent("u", "ingest:health", "store")
         ci.consent("u", "ingest:health", "egress", provider="mock")
     return ci.memory.remember("u", content, "fact", source="ingest:health", trust=Trust.IMPORTED, **kw).item
+
+
+def git(*args, cwd):
+    subprocess.run(["git", "-c", "user.email=a@b", "-c", "user.name=a", *args], cwd=cwd, check=True,
+                   capture_output=True)
 
 
 @pytest.fixture
@@ -65,3 +76,34 @@ def test_write_file_cannot_be_redirected_through_a_planted_temp_name(tmp_path, r
     assert (repo / "run.sh").read_text() == "attacker\n" and not (repo / "run.sh").is_symlink()
     assert (repo / "run.sh").stat().st_mode & 0o777 == 0o755  # the file keeps its permissions
     assert sorted(x.name for x in repo.iterdir()) == [".run.sh.ci-tmp", "a.txt", "run.sh"]  # no temp file left
+
+
+# 3 ---------------------------------------------------------------- .git case, git config
+def test_git_and_secret_directories_match_in_any_case(tmp_path):
+    for rel in (".GIT/config", ".Git/hooks/pre-commit", "sub/.gIt/config"):
+        with pytest.raises(PathError, match="inside .git"):
+            jail(tmp_path, rel, for_write=True)
+    assert is_secret(Path(".SSH/id_x")) and is_secret(Path("a/.Aws/config"))
+
+
+def test_git_status_runs_nothing_from_the_repository_config(tmp_path, repo):
+    _, ws, _, q, _, _ = make(tmp_path)
+    git("init", "-q", cwd=repo)
+    git("add", ".", cwd=repo)
+    git("commit", "-qm", "x", cwd=repo)
+    ran = tmp_path / "ran"
+    ran.mkdir()
+    git("config", "core.fsmonitor", f"touch '{ran}/fsmonitor'; false", cwd=repo)
+    hook = repo / ".git" / "hooks" / "post-index-change"
+    hook.write_text(f"#!/bin/sh\ntouch '{ran}/hook'\n")
+    hook.chmod(0o755)
+    (repo / ".git" / "info").mkdir(exist_ok=True)
+    (repo / ".git" / "info" / "attributes").write_text("* filter=evil\n")
+    git("config", "filter.evil.clean", f"touch '{ran}/filter'; cat", cwd=repo)
+    git("config", "filter.evil.required", "true", cwd=repo)
+    os.utime(repo / "a.txt", (time.time() + 5, time.time() + 5))  # stat data changed: git re-reads the file
+    p = ws.create_project("u", "Downloaded", providers=["mock"])
+    ws.authorize_workspace("u", p.id, str(repo))  # read-only, no tests: git_status runs without approval
+    t = q.propose("u", p.id, "git_status", {})
+    assert t.status == "succeeded", t.reason
+    assert sorted(x.name for x in ran.iterdir()) == []
