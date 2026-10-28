@@ -255,10 +255,7 @@ class TaskQueue:
         if not rows:
             return []
         st = self.store.open_json(self._key(user_id, t.project_id), rows[0]["state_ct"], t.session_id)
-        ids = list(st.get("system_memory_items", []))
-        for d in st.get("disclosures", []):
-            ids += d.get("memory_items", [])
-        return list(dict.fromkeys(ids))
+        return self.ws.session_exposure(st)
 
     def undo(self, user_id: str, task_id: str) -> dict:
         """Restore the file a write_file task replaced (or remove the one it created)."""

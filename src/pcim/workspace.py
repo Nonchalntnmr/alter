@@ -393,6 +393,15 @@ class Workspace:
                 return f"derived from {iid}, which {vendor} may not see ({why})"
         return None
 
+    @staticmethod
+    def session_exposure(st: dict) -> list[str]:
+        """Memory items a session's model had been shown (its system section, and the personal
+        context of every message): what anything the session writes may be derived from."""
+        ids = list(st.get("system_memory_items", []))
+        for d in st.get("disclosures", []):
+            ids += d.get("memory_items", [])
+        return list(dict.fromkeys(ids))
+
     def provider_allowed(self, user_id: str, project_id: str, provider: str) -> bool:
         return vendor_of(provider) in self.provider_vendors(user_id, project_id)
 
@@ -410,7 +419,9 @@ class Workspace:
         """Everything a new session needs to resume, compiled from stored state only.
 
         With `vendor`, model-written notes derived from memory that vendor may not see are
-        left out and listed under "withheld"; without it (the person's own view) nothing is."""
+        left out and listed under "withheld", and so is the last session if that vendor may
+        not see what the session was shown; without it (the person's own view) nothing is.
+        Every caller (the agent, the MCP server, the API preview) gets the same filtering."""
         p = self.get_project(user_id, project_id)
         withheld = []
         if vendor is not None:
@@ -431,6 +442,11 @@ class Workspace:
         if last:
             st = self.store.open_json(key, last[0]["state_ct"], last[0]["id"])
             reflection = st.get("reflection")
+            why = self.derived_blocked(user_id, self.session_exposure(st), vendor) \
+                if reflection and vendor is not None else None
+            if why:  # every line can repeat text the model chose: its last message, a path, a failure reason
+                withheld.append({"id": f"{last[0]['id']}#last_session", "reason": why})
+                reflection = None
         pending = self.store.query(
             "SELECT id, tool, created_at FROM tasks WHERE project_id=? AND status='awaiting_approval' ORDER BY created_at",
             (project_id,))

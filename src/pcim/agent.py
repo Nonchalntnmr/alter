@@ -278,21 +278,13 @@ class Agent:
             return self._run(user_id, project_id, sid, st)
 
     def briefing(self, user_id: str, project_id: str, vendor: str | None = None) -> dict:
-        """The project briefing; with `vendor`, as that vendor may see it (Workspace.briefing)."""
+        """The project briefing; with `vendor`, as that vendor may see it (Workspace.briefing,
+        which also decides whether the last session is shown at all)."""
         b = self.ws.briefing(user_id, project_id, vendor=vendor)
         if b.get("last_session"):  # statuses change after a session closes (a late denial, an approval)
             sid = b["last_session"]["session"]
-            last = self._load(user_id, project_id, sid)
-            lines = self._reflection_lines(user_id, project_id, sid, last)
-            if vendor is not None:  # the last model message may quote memory this vendor may not see
-                exposure = list(last.get("system_memory_items", []))
-                for d in last.get("disclosures", []):
-                    exposure += d.get("memory_items", [])
-                why = self.ws.derived_blocked(user_id, exposure, vendor)
-                if why:
-                    lines = [x for x in lines if not x.startswith("CI's last message")]
-                    b["withheld"].append({"id": f"{sid}#last_message", "reason": why})
-            b["last_session"]["lines"] = lines
+            b["last_session"]["lines"] = self._reflection_lines(user_id, project_id, sid,
+                                                                self._load(user_id, project_id, sid))
         if self.ledger is not None:
             claims = self.ledger.summary(user_id, project_id)
             if vendor is not None:

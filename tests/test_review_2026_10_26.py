@@ -1,6 +1,7 @@
 """Fixes from the independent review of 2026-10-26. Each test is one finding, numbered as in
 the review."""
 
+import asyncio
 import os
 import subprocess
 import time
@@ -24,6 +25,16 @@ def restricted(ci, content=HEALTH, **kw):
         ci.consent("u", "ingest:health", "store")
         ci.consent("u", "ingest:health", "egress", provider="mock")
     return ci.memory.remember("u", content, "fact", source="ingest:health", trust=Trust.IMPORTED, **kw).item
+
+
+def mcp_call(srv, name, args):
+    mcp = pytest.importorskip("mcp")
+
+    async def go():
+        async with mcp.Client(srv) as c:
+            r = await c.call_tool(name, args)
+            return "\n".join(getattr(x, "text", "") for x in r.content)
+    return asyncio.run(go())
 
 
 def git(*args, cwd):
@@ -107,3 +118,39 @@ def test_git_status_runs_nothing_from_the_repository_config(tmp_path, repo):
     t = q.propose("u", p.id, "git_status", {})
     assert t.status == "succeeded", t.reason
     assert sorted(x.name for x in ran.iterdir()) == []
+
+
+# 4 ---------------------------------------------------------------- MCP briefing
+def test_mcp_briefing_withholds_the_last_session_from_a_vendor_that_may_not_see_it(tmp_path):
+    pytest.importorskip("mcp")
+    from pcim.mcp_server import build_server
+
+    ci, ws, _, _, agent, _ = make(tmp_path)
+    p = ws.create_project("u", "Diet plan", providers=["mock", "anthropic"])
+    restricted(ci)
+    agent.set_adapter("mock", None, MockAgentAdapter(script=[{"text": "Got it: with type 2 diabetes, keep carbs low."}]))
+    agent.send("u", p.id, "plan meals around my health", provider="mock")
+    agent.close_session("u", p.id)
+    out = mcp_call(build_server(ci, "u", provider="anthropic"), "ci_project_briefing", {"project_id": p.id})
+    assert "<project_briefing" in out and "diabetes" not in out
+    b = ws.briefing("u", p.id, vendor="anthropic")
+    assert b["last_session"] is None and any(w["id"].endswith("#last_session") for w in b["withheld"])
+    assert "diabetes" in render_briefing(ws.briefing("u", p.id, vendor="mock"))
+
+
+# 5 ---------------------------------------------------------------- reflection lines
+def test_no_reflection_line_reaches_a_vendor_that_may_not_see_the_session(tmp_path, repo):
+    ci, ws, _, _, agent, _ = make(tmp_path)
+    p = ws.create_project("u", "Diet plan", providers=["mock", "anthropic"])
+    ws.authorize_workspace("u", p.id, str(repo))
+    restricted(ci)
+    agent.set_adapter("mock", None, MockAgentAdapter(script=[
+        {"tool_uses": [{"id": "t1", "name": "read_file", "input": {"path": "person has type 2 diabetes, HbA1c 7.9"}}]},
+        {"text": "Noted."}]))
+    agent.send("u", p.id, "plan meals around my health", provider="mock")
+    agent.close_session("u", p.id)
+    b = agent.briefing("u", p.id, vendor="anthropic")
+    assert "diabetes" not in render_briefing(b) and b["last_session"] is None
+    assert any(w["id"].endswith("#last_session") for w in b["withheld"])
+    mine = agent.briefing("u", p.id)  # the person's own view keeps every line
+    assert any(x.startswith("tried to read person has type 2 diabetes") for x in mine["last_session"]["lines"])
