@@ -93,7 +93,10 @@ def validate_args(tool: str, args: dict) -> dict:
 
 
 def scrubbed_env() -> dict:
-    return {k: v for k, v in os.environ.items() if not _SCRUB.search(k) and not k.startswith(_SCRUB_PREFIX)}
+    # GIT_CONFIG_KEY_n matches KEY, so drop the whole GIT_CONFIG_* family together: a leftover
+    # GIT_CONFIG_COUNT without its keys makes every git call fail ("missing config key").
+    return {k: v for k, v in os.environ.items()
+            if not _SCRUB.search(k) and not k.startswith(_SCRUB_PREFIX) and not k.startswith("GIT_CONFIG_")}
 
 
 def _iter_files(root: Path, pattern: str):
