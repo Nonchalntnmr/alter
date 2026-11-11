@@ -285,11 +285,30 @@ def test_independent_performance_is_measured_apart_from_assisted_success(tmp_pat
     assert s["trend"]["direction"] == "not enough evidence"
     later = ci.skill_report("u", now=utcnow() + dt.timedelta(days=8))["skills"]["bayes rule"]
     assert "due_for_review" in later["flags"]
+    assert later["evidence"]["due_for_review"].endswith("(4 unassisted attempts, 1 correct)")
     assert len(ci.export("u")["growth"]["attempts"]) == 8
     assert ci.forget_skill("u", "bayes rule") == {"skill": "bayes rule", "attempts_deleted": 8, "state_deleted": True}
     assert ci.skill_report("u")["skills"] == {} and ci.store.list_skills("u") == {}
     with pytest.raises(ValueError):
         ci.probe("u", "   ", True)
+
+
+def test_review_dates_follow_the_evidence_not_a_fixed_week(tmp_path, clock):
+    ci = PersonalCI(tmp_path, seed=0)
+    ci.onboard("u")
+    t0 = clock[0]
+    for d in (0, 4, 18):  # three spaced unassisted successes
+        clock[0] = t0 + dt.timedelta(days=d)
+        ci.probe("u", "sql joins", True)
+    ci.probe("u", "regex", False)  # one unassisted failure, same day
+    for _ in range(3):
+        ci.probe("u", "css grid", True, assisted=True)
+    rep = ci.skill_report("u", now=t0 + dt.timedelta(days=26))["skills"]
+    assert "due_for_review" not in rep["sql joins"]["flags"]  # idle 8 days: the old 7-day rule flagged it
+    assert rep["sql joins"]["review"]["interval_days"] > 8
+    assert "due_for_review" in rep["regex"]["flags"]
+    assert rep["regex"]["evidence"]["due_for_review"].endswith("(1 unassisted attempt, 0 correct)")
+    assert "due_for_review" not in rep["css grid"]["flags"] and rep["css grid"]["review"]["due"] is None
 
 
 def test_an_outcome_is_verified_feedback_and_optionally_an_assisted_attempt(env, tmp_path):

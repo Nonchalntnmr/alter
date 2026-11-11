@@ -105,7 +105,7 @@ and every mode is refused once grants are revoked).
 - `independence_report`: per skill, alone vs with help (Wilson intervals), trend only with ≥6
   unassisted attempts, and three flags with their counts: `dependency_gap` (assisted rate ≥0.25
   above unassisted, ≥3 each side), `recurring_difficulty` (≥3 of the last 5 unassisted wrong),
-  `due_for_review` (no unassisted attempt in 7 days). No trait or ability is inferred.
+  `due_for_review` (an FSRS-4.5 schedule in `spacing.py`, published default weights, not fitted to the person, says an unassisted check is due). No trait or ability is inferred.
 - `ci skills --forget <skill>` deletes the state and every attempt; export includes the log;
   erasure already covered `policy_states`.
 
