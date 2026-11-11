@@ -2,8 +2,11 @@
 # locally with the project venv; keep the ruff and pytest flags here and there in step.
 name: tests
 
+# Pushes run only on main; branches with a pull request are covered by pull_request, so a
+# push to a PR branch does not run the matrix twice.
 on:
   push:
+    branches: [main]
   pull_request:
 
 # Read-only token, no secrets: nothing here calls a model, a provider, or the network
@@ -58,9 +61,13 @@ jobs:
     timeout-minutes: 15
     strategy:
       fail-fast: false
+      # macOS minutes cost several times Linux minutes on a private repository: macOS runs the
+      # interpreter used for development only; Linux covers the supported range.
       matrix:
-        os: [ubuntu-latest, macos-latest]
-        python-version: ["3.12", "3.14"]
+        include:
+          - {os: ubuntu-latest, python-version: "3.12"}
+          - {os: ubuntu-latest, python-version: "3.14"}
+          - {os: macos-latest, python-version: "3.14"}
     steps:
       - uses: actions/checkout@v5
         with:
