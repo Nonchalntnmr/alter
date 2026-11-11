@@ -850,6 +850,11 @@ class Store:
                 (user_id, skill, ct, _ts(utcnow())),
             )
 
+    def delete_skill(self, user_id: str, skill: str) -> bool:
+        with self._lock:
+            cur = self._db.execute("DELETE FROM skills WHERE user_id=? AND skill=?", (user_id, skill))
+            return cur.rowcount > 0
+
     def list_skills(self, user_id: str) -> dict[str, dict]:
         with self._lock:
             dek = self._user_dek(user_id)

@@ -1,0 +1,208 @@
+{
+ "format": "pcim-routing-heldout/1",
+ "written": "2026-11-11, by a separate agent given only the labelling rubric, with no access to any CI code or to routing.py",
+ "label": "tier = the lowest capability tier (1 light, 2 standard, 3 deep) the labeller would trust to do the task well",
+ "registered": "hashed before routing.estimate was run on it; run once; not used to tune the estimator",
+ "tasks": [
+  {
+   "id": "h01",
+   "tier": 1,
+   "text": "72 f in celsius?"
+  },
+  {
+   "id": "h02",
+   "tier": 2,
+   "text": "getting this when the page first loads:\nTypeError: Cannot read properties of undefined (reading 'map')\n\nconst [posts, setPosts] = useState();\nuseEffect(() => { fetch('/api/posts').then(r => r.json()).then(setPosts); }, []);\nreturn <ul>{posts.map(p => <li key={p.id}>{p.title}</li>)}</ul>;\n\nwhy and whats the cleanest fix"
+  },
+  {
+   "id": "h03",
+   "tier": 1,
+   "text": "whats the git command to undo my last commit but keep the changes staged"
+  },
+  {
+   "id": "h04",
+   "tier": 3,
+   "text": "is this pop() safe when several threads push and pop concurrently and popped nodes are deleted right away?\n\nbool pop(T& out) {\n  Node* old = head.load();\n  while (old && !head.compare_exchange_weak(old, old->next)) {}\n  if (!old) return false;\n  out = old->val;\n  delete old;\n  return true;\n}"
+  },
+  {
+   "id": "h05",
+   "tier": 1,
+   "text": "make this sound less passive aggressive: \"As I already mentioned in my last email, the slides were due Friday. Please make sure this doesn't happen again.\""
+  },
+  {
+   "id": "h06",
+   "tier": 2,
+   "text": "postgres or mongodb for a small inventory app? ~10k products, orders reference products, need reports like stock by warehouse and monthly sales. just me building it"
+  },
+  {
+   "id": "h07",
+   "tier": 1,
+   "text": "sort these alphabetically by last name and remove duplicates:\nPriya Natarajan\nMarcus Bell\nAiko Tanaka\nLuis Ortega\nMarcus Bell\nHannah Schmidt\nOmar Haddad\nGrace Kim\nLuis Ortega\nDaniel Okafor\nSofia Rossi\nBen Carter\nAiko Tanaka\nFatima Zahra\nIvan Petrov\nGrace Kim\nChloe Martin\nRaj Mehta\nEmma Johansson\nTom Nguyen"
+  },
+  {
+   "id": "h08",
+   "tier": 3,
+   "text": "me and my wife keep a shared shopping and chores list and the apps we tried sometimes lose one person's change when we both edit while one of us has no signal. i want to build my own little app where nothing ever gets lost or duplicated, even if we both edit the same item offline. how should it actually work under the hood?"
+  },
+  {
+   "id": "h09",
+   "tier": 1,
+   "text": "design a folder structure for my semester notes. classes are calc 2, intro psych, data structures, and english comp"
+  },
+  {
+   "id": "h10",
+   "tier": 2,
+   "text": "when should i use a mann-whitney u test instead of a t-test? my data is reaction times from 2 groups of 18 people and it's kind of skewed"
+  },
+  {
+   "id": "h11",
+   "tier": 2,
+   "text": "write a python function that reads an nginx access log and returns the 10 IPs with the most requests, ignoring lines that dont parse. log lines look like:\n203.0.113.7 - - [10/Nov/2026:13:55:36 +0000] \"GET /index.html HTTP/1.1\" 200 512 \"-\" \"Mozilla/5.0\""
+  },
+  {
+   "id": "h12",
+   "tier": 1,
+   "text": "is my m2 macbook air arm64 or x86_64 architecture? need to pick the right installer"
+  },
+  {
+   "id": "h13",
+   "tier": 3,
+   "text": "Is it safe to encrypt about 2^40 messages under one AES-GCM key using random 96-bit nonces?"
+  },
+  {
+   "id": "h14",
+   "tier": 2,
+   "text": "my backup script runs fine when i run it by hand but from cron i get `pg_dump: command not found` in the mail. cron line is `0 3 * * * /home/deploy/backup.sh`"
+  },
+  {
+   "id": "h15",
+   "tier": 1,
+   "text": "convert this to yaml, keep the key order:\n{\n  \"service\": {\"name\": \"inventory-api\", \"port\": 8080, \"replicas\": 3, \"env\": \"staging\"},\n  \"database\": {\"host\": \"db.internal\", \"port\": 5432, \"name\": \"inventory\", \"pool\": {\"min\": 2, \"max\": 10}},\n  \"logging\": {\"level\": \"info\", \"format\": \"json\", \"outputs\": [\"stdout\", \"file\"]},\n  \"features\": {\"bulk_import\": true, \"audit_log\": false, \"beta_dashboard\": true},\n  \"cors\": {\"allowed_origins\": [\"https://app.example.com\", \"https://admin.example.com\"], \"allow_credentials\": true},\n  \"retry\": {\"max_attempts\": 5, \"backoff_ms\": [100, 200, 400, 800, 1600]}\n}"
+  },
+  {
+   "id": "h16",
+   "tier": 2,
+   "text": "orgo exam friday. explain SN1 vs SN2 in a way that actually sticks (substrate, nucleophile, solvent, stereochem) and then give me 5 practice problems with the answers at the very end"
+  },
+  {
+   "id": "h17",
+   "tier": 1,
+   "text": "optimize this query pls: SELECT * FROM orders WHERE customer_id = 42; i only ever use the order id and total from it"
+  },
+  {
+   "id": "h18",
+   "tier": 3,
+   "text": "I estimated a tutoring program's effect on test scores with a two-way fixed effects regression (school and year FE), 30 schools adopting in different years between 2017 and 2022. A reviewer says my TWFE estimate could have the wrong sign even if every school benefited. Is that actually possible here, how do I check, and what should I estimate instead?"
+  },
+  {
+   "id": "h19",
+   "tier": 2,
+   "text": "two offers: A pays 118k, hybrid 3 days, 1hr commute each way. B is fully remote, 106k, smaller company, maybe less stable. i have a 2 year old and my partner works evenings. help me think through it, not just list pros and cons"
+  },
+  {
+   "id": "h20",
+   "tier": 1,
+   "text": "prove that 0.999... = 1 in a way my 12 year old brother would buy"
+  },
+  {
+   "id": "h21",
+   "tier": 2,
+   "text": "why does this binary search loop forever sometimes?\n\ndef search(a, x):\n    lo, hi = 0, len(a) - 1\n    while lo < hi:\n        mid = (lo + hi) // 2\n        if a[mid] < x:\n            lo = mid\n        else:\n            hi = mid\n    return lo if a and a[lo] == x else -1"
+  },
+  {
+   "id": "h22",
+   "tier": 3,
+   "text": "secretary problem variant: n candidates arrive in random order, I only see relative ranks, and must accept or reject each on the spot. Payoff is 1 if I pick the overall best, 1/2 if I pick the second best, 0 otherwise. Derive the optimal stopping rule and its asymptotic payoff as n goes to infinity."
+  },
+  {
+   "id": "h23",
+   "tier": 1,
+   "text": "whats a good strategy for memorizing the order of the planets"
+  },
+  {
+   "id": "h24",
+   "tier": 2,
+   "text": "make me a 6 week study plan for GRE quant. i'm decent at algebra but rusty on geometry and probability, about 1 hour on weekdays and 3 hours on saturdays. test is dec 22"
+  },
+  {
+   "id": "h25",
+   "tier": 3,
+   "text": "We need to move our production Postgres 11 database (about 2 TB, writes 24/7) to Postgres 16 on new hardware with less than 5 minutes of downtime. Write the step-by-step runbook, including how we verify data before cutover and how we roll back if something goes wrong afterwards."
+  },
+  {
+   "id": "h26",
+   "tier": 1,
+   "text": "just fix the spelling and typos, dont change anything else:\n\nHi Profesor Alvarez,\n\nI hope your week is going well. I wanted to follow up on our conversaton after class on Tuesday about my final project. I have finished collecting the survey responces and I am now working on the analysis section. I was wondering if it would be posible to meet during your office hours next week to go over my results, since I am a little unsure wether I am interpreting the regression output corectly. I am free on Monday after 2pm and on Wednesday morning. Please let me know if either of those times work for you, or if their is a better time.\n\nThank you for your help this semester, I have realy enjoyed the class.\n\nBest,\nJordan"
+  },
+  {
+   "id": "h27",
+   "tier": 2,
+   "text": "why is double checked locking broken in java without volatile"
+  },
+  {
+   "id": "h28",
+   "tier": 3,
+   "text": "Can you tear apart my thesis study design before my committee does? I'm testing whether our mindfulness app reduces anxiety. Plan: recruit 120 people who already downloaded the app and score high on the GAD-7, have them use it for 8 weeks, measure GAD-7 again, and call the drop the app's effect. Ethics won't let me withhold the app from anyone, and I can't afford a second site. What's wrong with this, and what's the strongest design I can still run under those constraints?"
+  },
+  {
+   "id": "h29",
+   "tier": 1,
+   "text": "plan my day tomorrow: class 10-12, 2 hours of calc homework, 1 hour bio reading, gym sometime before 6, lunch around noon"
+  },
+  {
+   "id": "h30",
+   "tier": 2,
+   "text": "write pytest tests for this, including edge cases:\n\nimport re\n\ndef slugify(title: str) -> str:\n    s = title.strip().lower()\n    s = re.sub(r\"[^a-z0-9]+\", \"-\", s)\n    return s.strip(\"-\")"
+  },
+  {
+   "id": "h31",
+   "tier": 3,
+   "text": "asyncio question. I have an async cache where if 50 coroutines ask for the same missing key at once, only one should actually call the backend and the rest should await its result. If the coroutine doing the fetch gets cancelled, the others shouldn't all fail or hang, and a failed fetch shouldn't stay cached forever. How do I write this correctly?"
+  },
+  {
+   "id": "h32",
+   "tier": 1,
+   "text": "how do you say 'where is the train station' in spanish and french"
+  },
+  {
+   "id": "h33",
+   "tier": 2,
+   "text": "my dad is 68 and wants to use most of his savings to pay off his house early. mortgage is 3.1% with 14 years left, his pension covers about 70% of his expenses, the savings are in index funds. what should he be thinking about before doing that?"
+  },
+  {
+   "id": "h34",
+   "tier": 2,
+   "text": "summarize this for a general audience in 3 sentences and tell me if the conclusion actually follows: \"In a cross-sectional survey of 2,400 adults, participants who reported drinking three or more cups of coffee daily had 18% lower odds of reporting depressive symptoms (OR 0.82, 95% CI 0.70-0.96) after adjusting for age and sex. These findings suggest coffee consumption may protect against depression.\""
+  },
+  {
+   "id": "h35",
+   "tier": 1,
+   "text": "regex for a US zip code, either 12345 or 12345-6789"
+  },
+  {
+   "id": "h36",
+   "tier": 2,
+   "text": "my son's school is saying their new reading program works because the kids who signed up for it scored higher at the end of the year than kids who didn't. kids could choose whether to join. does that actually show anything? what should i ask them"
+  },
+  {
+   "id": "h37",
+   "tier": 3,
+   "text": "Our paper reports 91.4% test accuracy with a bootstrap 95% CI. Problems I just found: we picked hyperparameters by looking at test accuracy across ~200 runs, and about 6% of test images are near-duplicates of training images. We have no budget for new labels. How biased is our number likely to be, and how do we redo the evaluation so the claim is defensible?"
+  },
+  {
+   "id": "h38",
+   "tier": 3,
+   "text": "Design the ingestion side of a product analytics system: peaks of 2M events/sec, clients retry so duplicates happen, events can arrive up to 48h late, and we need per-customer dashboards under 1 min freshness plus correct daily billing counts. Team of 3, on AWS. Compare a Kafka + Flink setup against Kinesis + Lambda + a warehouse, tell me which you'd pick, and say what breaks first."
+  },
+  {
+   "id": "h39",
+   "tier": 2,
+   "text": "ok what does a p-value actually mean. my textbook says 'probability of observing data at least as extreme assuming H0 is true' and i still dont get why that isnt the chance H0 is true"
+  },
+  {
+   "id": "h40",
+   "tier": 1,
+   "text": "affect or effect: 'the new policy will ___ everyone in the department'"
+  }
+ ]
+}

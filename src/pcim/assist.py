@@ -22,8 +22,12 @@ import numpy as np
 
 from .types import TASK_TYPES
 
-MODES = ("direct", "explain", "hint_first", "socratic", "verify_only", "clarify_first")
+MODES = ("direct", "explain", "hint_first", "socratic", "verify_only", "clarify_first", "amplify")
 GROWTH_MODES = frozenset({"hint_first", "socratic", "explain"})
+# Chosen by a rule or by the person, never by the bandit: clarify by Layer C's VOI rule,
+# amplify by the AMPLIFY intelligence mode (modes.py). Keeping amplify out of the bandit means
+# a request with no mode behaves exactly as it did before amplify existed.
+_NOT_SAMPLED = frozenset({"clarify_first", "amplify"})
 
 DIRECTIVES = {
     "direct": "Give the answer or the finished work directly and concisely.",
@@ -34,6 +38,9 @@ DIRECTIVES = {
     "verify_only": "The person wants their own work checked: point out errors and gaps, do not rewrite it.",
     "clarify_first": "The request is ambiguous in a way that changes the answer. Ask one short clarifying "
                      "question before doing the work.",
+    "amplify": "Work as the person's thinking partner, briefly: give your recommendation, the strongest "
+               "alternative and the main trade-off between them, and name any assumption in the request that "
+               "the evidence does not support. Agree only where the evidence does; do not flatter.",
 }
 
 
@@ -52,14 +59,18 @@ class AssistPolicy:
     def eligible(self, task_type: str) -> list[str]:
         if task_type in self.growth_tasks:
             return [m for m in MODES if m in GROWTH_MODES]
-        return [m for m in MODES if m != "clarify_first"]  # clarify is chosen by Layer C's VOI rule
+        return [m for m in MODES if m not in _NOT_SAMPLED]
 
-    def select(self, task_type: str, rng: np.random.Generator, requested: str | None = None) -> str:
+    def select(self, task_type: str, rng: np.random.Generator, requested: str | None = None,
+               among: frozenset[str] | None = None) -> str:
+        """`among` narrows the bandit's choice (LEARN mode samples only growth modes)."""
         if requested:
             if requested not in MODES:
                 raise ValueError(f"mode must be one of {MODES}")
             return requested
         modes = self.eligible(task_type)
+        if among is not None:
+            modes = [m for m in MODES if m in among and m not in _NOT_SAMPLED] or modes
         draws = [rng.beta(*self._ab(task_type, m)) for m in modes]
         return modes[int(np.argmax(draws))]
 

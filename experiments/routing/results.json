@@ -1,0 +1,512 @@
+{
+  "dataset_sha256": "92630d77a21f0facda5f2ead99f9f9355b17d5e110f5571ad4ac8838f14eac2c",
+  "heldout_sha256": "47f42367e1fdb483bd6b88419d815c858791bc315e66686d00a9ee0ad0901d0c",
+  "n": 36,
+  "requirement_dev": {
+    "n": 36,
+    "exact": 36,
+    "accuracy": 1.0,
+    "under_routed": 0,
+    "over_routed": 0,
+    "deep_recall": 1.0,
+    "confusion_label_by_estimate": {
+      "1": {
+        "1": 14,
+        "2": 0,
+        "3": 0
+      },
+      "2": {
+        "1": 0,
+        "2": 14,
+        "3": 0
+      },
+      "3": {
+        "1": 0,
+        "2": 0,
+        "3": 8
+      }
+    },
+    "misses": []
+  },
+  "requirement_heldout": {
+    "n": 40,
+    "exact": 15,
+    "accuracy": 0.375,
+    "under_routed": 18,
+    "over_routed": 7,
+    "deep_recall": 0.3,
+    "confusion_label_by_estimate": {
+      "1": {
+        "1": 8,
+        "2": 4,
+        "3": 3
+      },
+      "2": {
+        "1": 11,
+        "2": 4,
+        "3": 0
+      },
+      "3": {
+        "1": 6,
+        "2": 1,
+        "3": 3
+      }
+    },
+    "misses": [
+      {
+        "id": "h02",
+        "label": 2,
+        "estimate": 1,
+        "signals": [
+          "no reasoning or construction markers"
+        ]
+      },
+      {
+        "id": "h06",
+        "label": 2,
+        "estimate": 1,
+        "signals": [
+          "no reasoning or construction markers"
+        ]
+      },
+      {
+        "id": "h08",
+        "label": 3,
+        "estimate": 1,
+        "signals": [
+          "no reasoning or construction markers"
+        ]
+      },
+      {
+        "id": "h09",
+        "label": 1,
+        "estimate": 3,
+        "signals": [
+          "asks for deep reasoning: 'design a'"
+        ]
+      },
+      {
+        "id": "h10",
+        "label": 2,
+        "estimate": 1,
+        "signals": [
+          "no reasoning or construction markers"
+        ]
+      },
+      {
+        "id": "h12",
+        "label": 1,
+        "estimate": 3,
+        "signals": [
+          "asks for deep reasoning: 'architect'"
+        ]
+      },
+      {
+        "id": "h13",
+        "label": 3,
+        "estimate": 1,
+        "signals": [
+          "no reasoning or construction markers"
+        ]
+      },
+      {
+        "id": "h14",
+        "label": 2,
+        "estimate": 1,
+        "signals": [
+          "no reasoning or construction markers"
+        ]
+      },
+      {
+        "id": "h16",
+        "label": 2,
+        "estimate": 1,
+        "signals": [
+          "no reasoning or construction markers"
+        ]
+      },
+      {
+        "id": "h17",
+        "label": 1,
+        "estimate": 2,
+        "signals": [
+          "asks for analysis or construction: 'optimize'"
+        ]
+      },
+      {
+        "id": "h18",
+        "label": 3,
+        "estimate": 2,
+        "signals": [
+          "no reasoning or construction markers",
+          "mathematics"
+        ]
+      },
+      {
+        "id": "h20",
+        "label": 1,
+        "estimate": 2,
+        "signals": [
+          "asks for analysis or construction: 'prove'"
+        ]
+      },
+      {
+        "id": "h21",
+        "label": 2,
+        "estimate": 1,
+        "signals": [
+          "no reasoning or construction markers"
+        ]
+      },
+      {
+        "id": "h23",
+        "label": 1,
+        "estimate": 3,
+        "signals": [
+          "asks for deep reasoning: 'strategy'"
+        ]
+      },
+      {
+        "id": "h25",
+        "label": 3,
+        "estimate": 1,
+        "signals": [
+          "no reasoning or construction markers"
+        ]
+      },
+      {
+        "id": "h26",
+        "label": 1,
+        "estimate": 2,
+        "signals": [
+          "asks for analysis or construction: 'analys'"
+        ]
+      },
+      {
+        "id": "h27",
+        "label": 2,
+        "estimate": 1,
+        "signals": [
+          "no reasoning or construction markers"
+        ]
+      },
+      {
+        "id": "h28",
+        "label": 3,
+        "estimate": 1,
+        "signals": [
+          "no reasoning or construction markers"
+        ]
+      },
+      {
+        "id": "h30",
+        "label": 2,
+        "estimate": 1,
+        "signals": [
+          "no reasoning or construction markers"
+        ]
+      },
+      {
+        "id": "h31",
+        "label": 3,
+        "estimate": 1,
+        "signals": [
+          "no reasoning or construction markers"
+        ]
+      },
+      {
+        "id": "h33",
+        "label": 2,
+        "estimate": 1,
+        "signals": [
+          "no reasoning or construction markers"
+        ]
+      },
+      {
+        "id": "h34",
+        "label": 2,
+        "estimate": 1,
+        "signals": [
+          "no reasoning or construction markers"
+        ]
+      },
+      {
+        "id": "h35",
+        "label": 1,
+        "estimate": 2,
+        "signals": [
+          "asks for analysis or construction: 'regex'"
+        ]
+      },
+      {
+        "id": "h36",
+        "label": 2,
+        "estimate": 1,
+        "signals": [
+          "no reasoning or construction markers"
+        ]
+      },
+      {
+        "id": "h37",
+        "label": 3,
+        "estimate": 1,
+        "signals": [
+          "no reasoning or construction markers"
+        ]
+      }
+    ]
+  },
+  "requirement_heldout_with_floor_posthoc": {
+    "n": 40,
+    "exact": 18,
+    "accuracy": 0.45,
+    "under_routed": 7,
+    "over_routed": 15,
+    "deep_recall": 0.3,
+    "confusion_label_by_estimate": {
+      "1": {
+        "1": 0,
+        "2": 12,
+        "3": 3
+      },
+      "2": {
+        "1": 0,
+        "2": 15,
+        "3": 0
+      },
+      "3": {
+        "1": 0,
+        "2": 7,
+        "3": 3
+      }
+    },
+    "misses": [
+      {
+        "id": "h01",
+        "label": 1,
+        "estimate": 2,
+        "signals": [
+          "no reasoning or construction markers",
+          "balanced routing starts at standard (held-out: the estimate under-routed 18 of 40)"
+        ]
+      },
+      {
+        "id": "h03",
+        "label": 1,
+        "estimate": 2,
+        "signals": [
+          "no reasoning or construction markers",
+          "balanced routing starts at standard (held-out: the estimate under-routed 18 of 40)"
+        ]
+      },
+      {
+        "id": "h05",
+        "label": 1,
+        "estimate": 2,
+        "signals": [
+          "no reasoning or construction markers",
+          "balanced routing starts at standard (held-out: the estimate under-routed 18 of 40)"
+        ]
+      },
+      {
+        "id": "h07",
+        "label": 1,
+        "estimate": 2,
+        "signals": [
+          "no reasoning or construction markers",
+          "balanced routing starts at standard (held-out: the estimate under-routed 18 of 40)"
+        ]
+      },
+      {
+        "id": "h08",
+        "label": 3,
+        "estimate": 2,
+        "signals": [
+          "no reasoning or construction markers",
+          "balanced routing starts at standard (held-out: the estimate under-routed 18 of 40)"
+        ]
+      },
+      {
+        "id": "h09",
+        "label": 1,
+        "estimate": 3,
+        "signals": [
+          "asks for deep reasoning: 'design a'"
+        ]
+      },
+      {
+        "id": "h12",
+        "label": 1,
+        "estimate": 3,
+        "signals": [
+          "asks for deep reasoning: 'architect'"
+        ]
+      },
+      {
+        "id": "h13",
+        "label": 3,
+        "estimate": 2,
+        "signals": [
+          "no reasoning or construction markers",
+          "balanced routing starts at standard (held-out: the estimate under-routed 18 of 40)"
+        ]
+      },
+      {
+        "id": "h15",
+        "label": 1,
+        "estimate": 2,
+        "signals": [
+          "no reasoning or construction markers",
+          "balanced routing starts at standard (held-out: the estimate under-routed 18 of 40)"
+        ]
+      },
+      {
+        "id": "h17",
+        "label": 1,
+        "estimate": 2,
+        "signals": [
+          "asks for analysis or construction: 'optimize'"
+        ]
+      },
+      {
+        "id": "h18",
+        "label": 3,
+        "estimate": 2,
+        "signals": [
+          "no reasoning or construction markers",
+          "mathematics"
+        ]
+      },
+      {
+        "id": "h20",
+        "label": 1,
+        "estimate": 2,
+        "signals": [
+          "asks for analysis or construction: 'prove'"
+        ]
+      },
+      {
+        "id": "h23",
+        "label": 1,
+        "estimate": 3,
+        "signals": [
+          "asks for deep reasoning: 'strategy'"
+        ]
+      },
+      {
+        "id": "h25",
+        "label": 3,
+        "estimate": 2,
+        "signals": [
+          "no reasoning or construction markers",
+          "balanced routing starts at standard (held-out: the estimate under-routed 18 of 40)"
+        ]
+      },
+      {
+        "id": "h26",
+        "label": 1,
+        "estimate": 2,
+        "signals": [
+          "asks for analysis or construction: 'analys'"
+        ]
+      },
+      {
+        "id": "h28",
+        "label": 3,
+        "estimate": 2,
+        "signals": [
+          "no reasoning or construction markers",
+          "balanced routing starts at standard (held-out: the estimate under-routed 18 of 40)"
+        ]
+      },
+      {
+        "id": "h29",
+        "label": 1,
+        "estimate": 2,
+        "signals": [
+          "no reasoning or construction markers",
+          "balanced routing starts at standard (held-out: the estimate under-routed 18 of 40)"
+        ]
+      },
+      {
+        "id": "h31",
+        "label": 3,
+        "estimate": 2,
+        "signals": [
+          "no reasoning or construction markers",
+          "balanced routing starts at standard (held-out: the estimate under-routed 18 of 40)"
+        ]
+      },
+      {
+        "id": "h32",
+        "label": 1,
+        "estimate": 2,
+        "signals": [
+          "no reasoning or construction markers",
+          "balanced routing starts at standard (held-out: the estimate under-routed 18 of 40)"
+        ]
+      },
+      {
+        "id": "h35",
+        "label": 1,
+        "estimate": 2,
+        "signals": [
+          "asks for analysis or construction: 'regex'"
+        ]
+      },
+      {
+        "id": "h37",
+        "label": 3,
+        "estimate": 2,
+        "signals": [
+          "no reasoning or construction markers",
+          "balanced routing starts at standard (held-out: the estimate under-routed 18 of 40)"
+        ]
+      },
+      {
+        "id": "h40",
+        "label": 1,
+        "estimate": 2,
+        "signals": [
+          "no reasoning or construction markers",
+          "balanced routing starts at standard (held-out: the estimate under-routed 18 of 40)"
+        ]
+      }
+    ]
+  },
+  "estimated_cost_usd": {
+    "routed": 1.194,
+    "always_opus": 1.699,
+    "always_sonnet": 0.8495,
+    "always_haiku": 0.0425,
+    "oracle_label": 0.9543
+  },
+  "fallback_recovery": [
+    {
+      "failing": 0,
+      "completed": true,
+      "served_by": "claude-cli:sonnet",
+      "attempts": 1,
+      "served_meets_requirement": true
+    },
+    {
+      "failing": 1,
+      "completed": true,
+      "served_by": "claude-cli:opus",
+      "attempts": 2,
+      "served_meets_requirement": true
+    },
+    {
+      "failing": 2,
+      "completed": true,
+      "served_by": "claude-cli:haiku",
+      "attempts": 3,
+      "served_meets_requirement": false
+    },
+    {
+      "failing": 3,
+      "completed": false,
+      "attempts": 3
+    }
+  ]
+}

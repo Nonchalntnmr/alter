@@ -78,6 +78,24 @@ run twice.
 .venv/bin/python -m pcim.observatory.g0 --exp g0b --dev --seed 10
 ```
 
+## The `ci` command
+
+One terminal command over the same store. CI picks the model (the cheapest authorized one
+whose tier meets the request), says why, falls back if a provider fails, and never routes to a
+vendor you have not granted, or anywhere off this machine when the request looks like it
+contains a key. See [docs/CI_AMPLIFY.md](docs/CI_AMPLIFY.md).
+
+```bash
+ci "why does this test pass locally but fail in CI?"   # execute mode by default
+ci -a "should we move from SQLite to Postgres?"         # amplify: options, trade-offs, challenge
+ci -l "explain Bayes' rule"                             # learn: hints, recall, practice
+ci route "…"                                            # the routing decision, no model call
+ci outcome <interaction> worked|failed                  # a verified outcome
+ci practice "bayes rule" right                          # an unassisted attempt
+ci skills                                               # alone vs with help, per skill
+ci weekly                                               # the Cognitive Twin's weekly review
+```
+
 ## Docs
 
 - **Start with these five:**

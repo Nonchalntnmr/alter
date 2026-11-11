@@ -89,6 +89,16 @@ def entries() -> list[ModelEntry]:
     out.append(ModelEntry("openai", openai_model, "openai", f"OpenAI {openai_model or '(model not set)'}",
                           ("chat", "verify"), "api", "OPENAI_API_KEY and PCIM_OPENAI_MODEL",
                           "Sent to OpenAI under the API terms", openai_model or None))
+    # Single-turn only ("ask"): these adapters have no tool-using session in the registry's
+    # sense, so `route("chat"|"verify")` never considers them; routing.py does, for `ask`.
+    gemini_model = os.environ.get("PCIM_GEMINI_MODEL", "")
+    out.append(ModelEntry("google", gemini_model, "google", f"Google {gemini_model or '(model not set)'}",
+                          ("ask",), "api", "GEMINI_API_KEY (or GOOGLE_API_KEY) and PCIM_GEMINI_MODEL",
+                          "Sent to Google under the API terms", gemini_model or None))
+    local_model = os.environ.get("PCIM_LOCAL_MODEL", "")
+    out.append(ModelEntry("local", local_model, "local", f"Local model {local_model or '(model not set)'}",
+                          ("ask",), "api", "PCIM_LOCAL_MODEL and PCIM_LOCAL_BASE_URL (a loopback server)",
+                          "Stays on this machine", None))
     out.append(ModelEntry("mock", "mock-agent", "mock", "Mock agent (test double, not a model)", ("chat", "verify"),
                           "test-double", "nothing", "Never leaves this process", None, test_double=True))
     return out
@@ -108,6 +118,15 @@ def availability(e: ModelEntry) -> tuple[bool, str]:
         if not os.environ.get("OPENAI_API_KEY"):
             return False, "OPENAI_API_KEY is not set"
         return (True, "API key in the environment") if e.model else (False, "PCIM_OPENAI_MODEL is not set")
+    if e.provider == "google":
+        if not (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")):
+            return False, "GEMINI_API_KEY is not set"
+        return (True, "API key in the environment") if e.model else (False, "PCIM_GEMINI_MODEL is not set")
+    if e.provider == "local":
+        if not e.model:
+            return False, "PCIM_LOCAL_MODEL is not set"
+        base = os.environ.get("PCIM_LOCAL_BASE_URL", "")
+        return (True, f"local server at {base}") if base else (False, "PCIM_LOCAL_BASE_URL is not set")
     return False, "no adapter with tool use"
 
 

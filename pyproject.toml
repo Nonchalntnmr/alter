@@ -36,6 +36,7 @@ all = ["contextual-intelligence[api,anthropic,neural,mcp,test]"]
 
 [project.scripts]
 pcim = "pcim.cli:main"
+ci = "pcim.terminal:main"
 pcim-mcp = "pcim.mcp_server:main"
 
 [tool.setuptools.packages.find]
