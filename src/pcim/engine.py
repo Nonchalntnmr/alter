@@ -56,6 +56,7 @@ from .types import KINDS, TASK_TYPES, Sensitivity, Trust, new_id, utcnow
 ASSIST_STATE = "pcim-assist"
 ATTEMPTS_STATE = "pcim-attempts"  # growth.py's attempt log, one sealed JSON document per person
 TWIN_STATE = "pcim-twin"  # weekly reviews (twin.py), one version per week
+CHALLENGES_STATE = "pcim-challenges"  # challenge.py's log, sealed like the attempt log
 SETTING_MODE = "intelligence_mode"
 SETTING_PREFERENCE = "routing_preference"
 
@@ -673,7 +674,8 @@ class PersonalCI:
                         for g in self.ledger.grants(user_id)],
             "interactions": self.store.list_interactions(user_id, with_payload=True),
             "dna": self.dna(user_id),
-            "growth": {"attempts": self.attempts(user_id), "weekly_reviews": self.weekly_snapshots(user_id)},
+            "growth": {"attempts": self.attempts(user_id), "weekly_reviews": self.weekly_snapshots(user_id),
+                       "challenges": self._state_json(user_id, CHALLENGES_STATE, [])[1]},
             "audit": self.audit.entries(user_id),
             "audit_head": self.audit.head(),
         }

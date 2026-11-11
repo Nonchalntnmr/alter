@@ -22,12 +22,12 @@ import numpy as np
 
 from .types import TASK_TYPES
 
-MODES = ("direct", "explain", "hint_first", "socratic", "verify_only", "clarify_first", "amplify")
+MODES = ("direct", "explain", "hint_first", "socratic", "verify_only", "clarify_first", "amplify", "challenge")
 GROWTH_MODES = frozenset({"hint_first", "socratic", "explain"})
 # Chosen by a rule or by the person, never by the bandit: clarify by Layer C's VOI rule,
 # amplify by the AMPLIFY intelligence mode (modes.py). Keeping amplify out of the bandit means
 # a request with no mode behaves exactly as it did before amplify existed.
-_NOT_SAMPLED = frozenset({"clarify_first", "amplify"})
+_NOT_SAMPLED = frozenset({"clarify_first", "amplify", "challenge"})
 
 DIRECTIVES = {
     "direct": "Give the answer or the finished work directly and concisely.",
@@ -41,6 +41,9 @@ DIRECTIVES = {
     "amplify": "Work as the person's thinking partner, briefly: give your recommendation, the strongest "
                "alternative and the main trade-off between them, and name any assumption in the request that "
                "the evidence does not support. Agree only where the evidence does; do not flatter.",
+    "challenge": "The person wants this idea stress-tested, not agreed with. Find the assumptions it depends on, "
+                 "construct concrete counterexamples, state how uncertain it is, and propose the cheapest experiment "
+                 "that could show it is wrong. If it is sound, say so, and still say what would change your mind.",
 }
 
 

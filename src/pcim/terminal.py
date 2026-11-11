@@ -5,6 +5,9 @@
     ci -a "should we move from SQLite to Postgres?"           amplify mode
     ci -e "rename usr to user in this line: usr = f()"        execute mode
     ci --model claude-cli:haiku "…"                           pin a model (no fallback)
+    ci challenge "we should rewrite the backend in Rust"      adversarial reasoning: assumptions,
+                                                              counterexamples, the falsifying experiment
+    ci challenge --resolve <id> held|failed|inconclusive      record what the experiment showed
     ci route "…"                                              the routing decision; calls nothing
     ci mode [execute|amplify|learn]                           show or set the default mode
     ci prefer [economy|balanced|quality]                      show or set the routing preference
@@ -40,7 +43,7 @@ from .types import approx_tokens
 from .workspace import Workspace
 
 SUBCOMMANDS = ("ask", "route", "mode", "prefer", "models", "outcome", "practice", "skills", "scorecard",
-               "weekly", "status", "help")
+               "weekly", "status", "challenge", "help")
 RIGHT = {"right", "correct", "yes", "y", "pass", "solved", "1", "true"}
 WRONG = {"wrong", "incorrect", "no", "n", "fail", "failed", "0", "false"}
 
@@ -299,6 +302,76 @@ def cmd_scorecard(argv: list[str]) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------- challenge
+def cmd_challenge(argv: list[str]) -> int:
+    from . import challenge as ch
+    ap = argparse.ArgumentParser(prog="ci challenge",
+                                 description="Stress-test an idea: assumptions, counterexamples, a falsifying experiment.")
+    ap.add_argument("--resolve", nargs=2, metavar=("ID", "OUTCOME"), help="held | failed | inconclusive")
+    ap.add_argument("--note")
+    ap.add_argument("--list", action="store_true", help="challenges whose experiment has not been recorded")
+    ap.add_argument("--all", action="store_true", help="with --list: include resolved ones")
+    ap.add_argument("--forget", action="store_true", help="delete the challenge log")
+    ap.add_argument("--model", help="pin provider:model (no fallback)")
+    ap.add_argument("--json", action="store_true")
+    ap.add_argument("claim", nargs="*")
+    a = ap.parse_args(argv)
+    ci, uid = _open()
+    if a.forget:
+        print(f"Deleted {ch.forget(ci, uid)} challenges.")
+        return 0
+    if a.resolve:
+        try:
+            rec = ch.resolve(ci, uid, a.resolve[0], a.resolve[1].lower(), a.note)
+        except KeyError:
+            print(f"no challenge {a.resolve[0]}", file=sys.stderr)
+            return 2
+        except ValueError as e:
+            print(e, file=sys.stderr)
+            return 2
+        print(f"Recorded: the experiment says the claim {rec['status']}"
+              + (f" ({rec['note']})" if rec["note"] else "") + ".")
+        return 0
+    if a.list or not a.claim:
+        recs = ch.records(ci, uid)
+        rows = recs if a.all else [r for r in recs if r["status"] == "open"]
+        if a.json:
+            _print_json({"records": rows, "metrics": ch.metrics(recs)})
+            return 0
+        for r in rows:
+            exp = (r["challenge"] or {}).get("falsification", {}).get("experiment") or "(unstructured reply)"
+            print(f"  {r['id']}  {r['status']:<12} {r['ts'][:10]}  {r['claim'][:60]}\n      test: {exp[:110]}")
+        if not rows:
+            print("No open challenges." if recs else "No challenges yet: ci challenge \"<an idea you believe>\"")
+        m = ch.metrics(recs)
+        if m["challenges"]:
+            print(f"Tested {m['experiments_resolved']} of {m['challenges']} · held {m['held']} · failed {m['failed']}"
+                  f" · inconclusive {m['inconclusive']}"
+                  + (f" · challenger Brier {m['challenger_brier']} (n={m['challenger_brier_n']})"
+                     if m["challenger_brier"] is not None else ""))
+        return 0
+    claim = " ".join(a.claim)
+    here = _here(ci, uid)
+    try:
+        rec = ch.challenge(ci, uid, claim, pinned=a.model, project_id=here.project_id if here else None,
+                           project_vendors=here.vendors if here else None)
+    except RoutingError as e:
+        print("\n".join(e.plan.explain()), file=sys.stderr)
+        for x in e.attempts:
+            print(f"  failed: {x['model']}: {x['error']}", file=sys.stderr)
+        return 3
+    if a.json:
+        _print_json({k: v for k, v in rec.items() if k != "receipt"} | {"route": rec["receipt"]["route"]})
+        return 0
+    print(ch.render(rec))
+    rt = rec["receipt"]["route"]
+    print(f"\n─ challenge · {rt['served_by']} · {rt['plan']['requirement']['tier']} · {_money(rec['receipt']['cost_usd'])}"
+          f" · {rec['id']}")
+    if rec["parsed"]:
+        print(f"  ran the experiment? ci challenge --resolve {rec['id']} held|failed|inconclusive --note \"…\"")
+    return 0
+
+
 # ---------------------------------------------------------------------- weekly
 def cmd_weekly(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(prog="ci weekly", description="The weekly review by your Cognitive Twin.")
@@ -409,7 +482,7 @@ def main(argv: list[str] | None = None) -> int:
     cmd = argv[0]
     table = {"ask": cmd_ask, "route": cmd_route, "mode": cmd_mode, "prefer": cmd_prefer, "models": cmd_models,
              "outcome": cmd_outcome, "practice": cmd_practice, "skills": cmd_skills, "scorecard": cmd_scorecard,
-             "weekly": cmd_weekly, "status": cmd_status}
+             "weekly": cmd_weekly, "status": cmd_status, "challenge": cmd_challenge}
     if cmd in table:
         return table[cmd](argv[1:])
     return cmd_ask(argv)

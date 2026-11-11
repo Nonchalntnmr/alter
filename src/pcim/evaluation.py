@@ -1,4 +1,5 @@
-"""Three scorecards, kept apart on purpose: productivity, cognitive development, orchestration.
+"""Scorecards, kept apart on purpose: productivity, cognitive development, orchestration, and
+decision quality (challenged ideas: tested, held, failed; challenge.py).
 
 They answer different questions and can move in opposite directions. CI doing more of the
 work raises productivity and can lower independent performance; reporting them separately is
@@ -131,9 +132,12 @@ def scorecard(ci, user_id: str, since: dt.datetime, until: dt.datetime, rows: li
     rows = window_interactions(ci, user_id, since, until) if rows is None else rows
     attempts = [a for a in ci.attempts(user_id) if since <= _when(a["ts"]) < until]
     audit = [a for a in ci.audit.entries(user_id) if since <= _when(a["ts"]) < until]
+    from . import challenge
+    recs = [r for r in challenge.records(ci, user_id) if since <= _when(r["ts"]) < until]
     return {
         "window": {"since": since.isoformat(), "until": until.isoformat()},
         "productivity": productivity(rows, window_tasks(ci, user_id, since, until)),
         "cognitive": cognitive(attempts, ci.skill_report(user_id, until), rows),
         "orchestration": orchestration(rows, audit),
+        "decision": challenge.metrics(recs),
     }
