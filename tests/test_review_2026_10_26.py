@@ -197,3 +197,41 @@ def test_mcp_notes_carry_the_lineage_of_what_the_server_served(tmp_path):
     fresh = build_server(ci, "u", provider="mock")  # it served nothing, so its notes restrict nothing
     mcp_call(fresh, "ci_add_project_note", {"project_id": p.id, "kind": "open_question", "text": "q"})
     assert "lineage" not in ws.get_project("u", p.id).notes[2]
+
+
+# 8 ---------------------------------------------------------------- model-written files
+def test_files_a_model_wrote_carry_its_lineage_to_reads_and_evidence(tmp_path, repo):
+    ci, ws, _, q, agent, gw = make(tmp_path)
+    p = ws.create_project("u", "Diet plan", providers=["mock", "anthropic"])
+    ws.authorize_workspace("u", p.id, str(repo), allow_write=True)
+    m1 = restricted(ci)
+    agent.set_adapter("mock", None, MockAgentAdapter(script=[
+        {"tool_uses": [{"id": "w", "name": "write_file", "input": {"path": "plan.md", "content": "Patient: type 2 diabetes",
+                                                                    "reason": "save plan"}}]},
+        {"text": "saved"}]))
+    agent.resolve("u", agent.send("u", p.id, "plan meals around my health", provider="mock").pending[0], True)
+
+    spy = MockAgentAdapter(script=[{"tool_uses": [{"id": "r", "name": "read_file", "input": {"path": "./plan.md"}}]},
+                                   {"text": "read it"}])
+    agent.set_adapter("anthropic", None, spy)
+    turn = agent.send("u", p.id, "summarize plan.md", provider="anthropic")
+    assert "diabetes" not in str(spy.requests[-1]["messages"])
+    refused = next(t for t in q.list("u", p.id) if t.tool == "read_file")
+    assert refused.status == "failed" and "which anthropic may not see" in refused.reason
+    s = q.propose("u", p.id, "search_code", {"pattern": "diabetes|alpha", "glob": "**/*"}, session_id=turn.session_id,
+                  tool_use_id="s")
+    assert s.result["matches"] == ["a.txt:1: alpha"]
+
+    # a session for the vendor that may see it reads the file; what it writes next carries the lineage on
+    ci.budget_tokens = 1
+    agent.set_adapter("mock", None, MockAgentAdapter(script=[
+        {"tool_uses": [{"id": "r2", "name": "read_file", "input": {"path": "plan.md"}}]},
+        {"tool_uses": [{"id": "n2", "name": "record_note", "input": {"kind": "decision", "text": "menu per plan.md"}}]},
+        {"text": "ok"}]))
+    agent.send("u", p.id, "read plan.md", provider="mock", new_session=True)
+    read = next(t for t in q.list("u", p.id) if t.tool == "read_file" and t.status == "succeeded")
+    assert "diabetes" in read.result["content"]
+    assert m1.id in ws.get_project("u", p.id).notes[0]["lineage"]
+    for task in (read, refused):  # neither read is evidence an anthropic verifier may be shown
+        text, why = gw._resolve_ref("u", ws.get_project("u", p.id), "anthropic", "anthropic:x", task.id, "x")
+        assert text is None and why

@@ -393,14 +393,18 @@ class Workspace:
                 return f"derived from {iid}, which {vendor} may not see ({why})"
         return None
 
-    @staticmethod
-    def session_exposure(st: dict) -> list[str]:
+    def session_exposure(self, user_id: str, project_id: str, sid: str, st: dict) -> list[str]:
         """Memory items a session's model had been shown (its system section, the personal
-        context of every message, and the lineage of what its briefing showed): what anything
-        the session writes may be derived from."""
+        context of every message, the lineage of what its briefing showed and of the
+        model-written files it read): what anything the session writes may be derived from."""
         ids = list(st.get("system_memory_items", []))
         for d in st.get("disclosures", []):
             ids += d.get("memory_items", []) + d.get("briefing_lineage", [])
+        key = self.project_key(user_id, project_id)
+        for r in self.store.query("SELECT id, result_ct FROM tasks WHERE session_id=? AND user_id=? AND status='succeeded' "
+                                  "AND tool IN ('read_file', 'search_code')", (sid, user_id)):
+            # sealed as TaskQueue seals results; a read records the lineage of what it returned
+            ids += (self.store.open_json(key, r["result_ct"], f"{r['id']}/result") or {}).get("lineage", [])
         return list(dict.fromkeys(ids))
 
     def provider_allowed(self, user_id: str, project_id: str, provider: str) -> bool:
@@ -444,7 +448,7 @@ class Workspace:
             st = self.store.open_json(key, last[0]["state_ct"], last[0]["id"])
             reflection = st.get("reflection")
             if reflection:
-                exposure = self.session_exposure(st)
+                exposure = self.session_exposure(user_id, project_id, last[0]["id"], st)
                 why = self.derived_blocked(user_id, exposure, vendor) if vendor is not None else None
                 if why:  # every line can repeat text the model chose: its last message, a path, a failure reason
                     withheld.append({"id": f"{last[0]['id']}#last_session", "reason": why})

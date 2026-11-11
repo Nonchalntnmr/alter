@@ -35,7 +35,7 @@ from .adapters.mock_agent import MockAgentAdapter
 from .adapters.render import _clean, _label
 from .engine import PersonalCI, in_scope
 from .registry import vendor_of
-from .tasks import TERMINAL, Task, TaskQueue
+from .tasks import MODEL_HIDDEN, TERMINAL, Task, TaskQueue
 from .tools import TOOL_SCHEMAS
 from .types import Trust, new_id, utcnow
 from .workspace import Workspace, briefing_lineage, render_briefing
@@ -302,7 +302,7 @@ class Agent:
     def _result_block(self, t: Task) -> dict:
         # The task id lets the model cite this result as evidence in record_claim.
         if t.status == "succeeded":
-            res = {k: v for k, v in (t.result or {}).items() if k != "backup"}
+            res = {k: v for k, v in (t.result or {}).items() if k not in MODEL_HIDDEN}
             body = json.dumps({"task_id": t.id, **res}, default=str)
             if t.reason:  # e.g. tests ran but failed
                 body = f"{t.reason}\n{body}"
