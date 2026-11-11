@@ -1,0 +1,112 @@
+# Lint and test on every push and pull request. scripts/check.sh runs the same two checks
+# locally with the project venv; keep the ruff and pytest flags here and there in step.
+name: tests
+
+# Pushes run only on main; branches with a pull request are covered by pull_request, so a
+# push to a PR branch does not run the matrix twice.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only token, no secrets: nothing here calls a model, a provider, or the network
+# beyond PyPI.
+permissions:
+  contents: read
+
+# A new push supersedes the run still going for the same branch or pull request. Pushes
+# to main are never cancelled, so every commit on main keeps a complete result.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  # Offline, deterministic lexical embedder: no test may download a model.
+  PCIM_EMBEDDER: hashing-512
+  HF_HUB_OFFLINE: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+defaults:
+  run:
+    shell: bash
+
+# Actions are pinned to major versions (checkout v5, setup-python v6). Pin full commit
+# SHAs to harden this against a moved tag.
+jobs:
+  lint:
+    name: ruff (syntax errors and undefined names)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - name: Install ruff
+        run: python -m pip install ruff==0.17.4
+      # The rule set is pinned on the command line (--isolated ignores any config file) so
+      # CI and scripts/check.sh agree. Ruff's own default rules report style findings this
+      # codebase has not adopted; widening the gate needs a [tool.ruff] section first.
+      - name: ruff check
+        run: >-
+          ruff check --isolated --no-cache --output-format=github
+          --select E9,F63,F7,F82 --target-version py311
+          src tests scripts
+
+  test:
+    name: pytest (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      # macOS minutes cost several times Linux minutes on a private repository: macOS runs the
+      # interpreter used for development only; Linux covers the supported range.
+      matrix:
+        include:
+          - {os: ubuntu-latest, python-version: "3.12"}
+          - {os: ubuntu-latest, python-version: "3.14"}
+          - {os: macos-latest, python-version: "3.14"}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements-lock.txt
+
+      # requirements-lock.txt is used as a constraints file: it pins the version of every
+      # package that does get installed, and installs nothing by itself, so its torch and
+      # torch-only entries (sympy, networkx, ...) stay out. The anthropic extra is included
+      # because its adapter tests run against a mocked transport and are skipped without it.
+      # Editable install: pcim.observatory finds experiments/ relative to the source tree.
+      - name: Install
+        run: python -m pip install -c requirements-lock.txt -e ".[test,api,mcp,anthropic]"
+
+      - name: Check the environment
+        run: |
+          python -m pip check
+          python - <<'EOF'
+          import importlib.util, sys
+          missing = [m for m in ("anthropic", "httpx2", "mcp", "fastapi", "uvicorn", "pytest")
+                     if importlib.util.find_spec(m) is None]
+          heavy = [m for m in ("torch", "sentence_transformers", "transformers")
+                   if importlib.util.find_spec(m) is not None]
+          print(sys.version)
+          if missing:
+              sys.exit(f"missing (their tests would be skipped): {missing}")
+          if heavy:
+              sys.exit(f"heavy packages installed; CI must not pull them in: {heavy}")
+          EOF
+
+      - name: pytest
+        run: python -m pytest -q -p no:cacheprovider -ra
+        env:
+          # Any test that forgot to set PCIM_HOME writes here, not into ~/.pcim.
+          PCIM_HOME: ${{ runner.temp }}/pcim-home
