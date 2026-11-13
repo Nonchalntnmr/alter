@@ -1,5 +1,4 @@
-# Contextual Intelligence: Personal CI and PCIM
-
+Alter
 A research prototype of a user-owned context layer that sits in front of any foundation
 model. It decides what each model should know about you for each request, learns from
 outcomes which context actually helps, and can prove what it sent and what it deleted.
