@@ -170,3 +170,14 @@ def test_terminal_plan_round_trip(env, tmp_path, monkeypatch, capsys):
     assert terminal.main(["plan", "approve", pid]) == 0
     assert terminal.main(["plan"]) == 0
     assert "approved" in capsys.readouterr().out
+
+
+def test_a_requested_external_action_the_plan_dropped_cannot_be_ready():
+    """Post hoc, from the 2026-11-13 development run: "tweet about the launch" was planned as
+    drafting only and gated ready. The request's own words now stop that."""
+    drafting = ic.validate(spec(steps=[{"id": "s1", "action": "draft a tweet", "kind": "think", "depends_on": []}]), [])
+    g = ic.gate(drafting, "tweet about the launch")
+    assert g.decision == "approval" and any('"tweet"' in y for y in g.yours_to_do)
+    assert ic.gate(drafting, "explain how FSRS spacing works").decision == "ready"
+    planned = ic.validate(spec(steps=[{"id": "s1", "action": "post the tweet", "kind": "external", "depends_on": []}]), [])
+    assert sum("no step that does it" in y for y in ic.gate(planned, "tweet about it").yours_to_do) == 0

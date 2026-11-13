@@ -40,6 +40,14 @@ ASSUMPTION_MIN_CONF = 0.8
 MAX_STEPS = 20
 LOG_MAX = 200
 _FENCE = re.compile(r"```(?:json)?\s*(\{.*\})\s*```", re.S)
+# Post hoc (added after the 2026-11-13 development run, where "tweet about the launch" was planned
+# as drafting only and gated ready): words in the *request* that ask for an action outside CI.
+# If the request has one and the plan has no external step, the plan cannot be ready.
+# Deliberately broad: a false hit ("explain the order book") costs one approval, a miss costs a
+# silently dropped action.
+EXTERNAL_VERBS = re.compile(
+    r"\b(send|e-?mail|mail|message|dm|post|tweet|publish|book|buy|purchase|order|pay|transfer|schedule|"
+    r"invite|submit|upload|deploy|share|text me|call)\b", re.I)
 
 
 class SpecError(ValueError):
@@ -179,8 +187,10 @@ class Gate:
         return dataclasses.asdict(self)
 
 
-def gate(spec: dict) -> Gate:
+def gate(spec: dict, request: str | None = None) -> Gate:
     reasons, questions = [], list(spec.get("questions") or [])
+    asked_external = EXTERNAL_VERBS.search(request or "")
+    unplanned = bool(asked_external) and not any(s["kind"] == "external" for s in spec.get("steps", []))
     interps = spec.get("interpretations") or []
     top = interps[0]["p"] if interps and interps[0]["p"] is not None else None
     second = interps[1]["p"] if len(interps) > 1 and interps[1]["p"] is not None else 0.0
@@ -205,6 +215,9 @@ def gate(spec: dict) -> Gate:
             questions.append("What should the result be?")
     auto = [a["text"] for a in spec.get("assumptions", []) if a not in risky]
     yours = [f"{s['id']}: {s['action']}" for s in spec.get("steps", []) if s["kind"] == "external"]
+    if unplanned:
+        yours.append(f"your request says \"{asked_external.group(0)}\" but the plan has no step that does it; "
+                     "CI cannot, so decide whether you will")
     approval = [f"{s['id']}: {s['action']}" for s in spec.get("steps", []) if s["kind"] in CONSEQUENTIAL_KINDS]
     if reasons:
         return Gate("clarify", reasons, questions[:6], auto, yours, approval)
@@ -269,7 +282,7 @@ def compile_intent(ci, uid: str, text: str, *, answers: str | None = None, paren
     else:
         try:
             rec["spec"] = validate(raw, sent_notes)
-            g = gate(rec["spec"])
+            g = gate(rec["spec"], text)
             rec["gate"] = g.as_dict()
             rec["status"] = {"clarify": "needs_answers", "approval": "awaiting_approval", "ready": "ready"}[g.decision]
         except SpecError as e:
