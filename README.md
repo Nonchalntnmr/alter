@@ -94,7 +94,18 @@ ci outcome <interaction> worked|failed                  # a verified outcome
 ci practice "bayes rule" right                          # an unassisted attempt
 ci skills                                               # alone vs with help, per skill
 ci weekly                                               # the Cognitive Twin's weekly review
+ci plan "clean up the repo"                             # intent compiler: goal, steps, assumptions,
+                                                        # the questions that matter; nothing runs
+ci plan approve <id>  ·  ci execute <id>                # run it step by step through the governed agent
+ci approve <task>  ·  ci deny <task> "why"              # an action a step is waiting on
+ci twin                                                 # the twin's picture, labelled by evidence
+ci mesh  ·  ci mesh bench  ·  ci mesh place generate --sensitivity sensitive
+                                                        # your compute, measured; where work may run
+ci audit                                                # verify the audit chain; what CI did
 ```
+
+`ci plan`, `ci execute` and `ci mesh` are described, with their measured results and limits, in
+[docs/CI_INTENT_MESH.md](docs/CI_INTENT_MESH.md).
 
 ## Docs
 

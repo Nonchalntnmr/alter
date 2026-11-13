@@ -239,6 +239,9 @@ def estimate(task: str, *, mode: str | None = None, preference: str = "balanced"
     if mode == "challenge" and tier < 3:
         tier = 3
         signals.append("challenge mode: a weak challenger produces false confidence")
+    if mode == "plan" and tier < 2:
+        tier = 2
+        signals.append("plan mode: a misread intent is planned and then executed")
     if mode in ("amplify", "learn") and tier < 2:
         tier = 2
         signals.append(f"{mode} mode: {'trade-offs need reasoning' if mode == 'amplify' else 'a wrong hint teaches the wrong thing'}")

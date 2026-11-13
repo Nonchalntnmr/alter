@@ -482,6 +482,8 @@ class PersonalCI:
 
     def set_intelligence_mode(self, user_id: str, mode: str) -> str:
         m = intelligence.normalize(mode)
+        if m in intelligence.INTERNAL_MODES:
+            raise ValueError(f"{m} is a command (`ci {m}`), not a default mode")
         self._set_setting(user_id, SETTING_MODE, m)
         self.audit.append(user_id, "mode.default", mode=m)
         return m
@@ -753,7 +755,8 @@ class PersonalCI:
             "interactions": self.store.list_interactions(user_id, with_payload=True),
             "dna": self.dna(user_id),
             "growth": {"attempts": self.attempts(user_id), "weekly_reviews": self.weekly_snapshots(user_id),
-                       "challenges": self._state_json(user_id, CHALLENGES_STATE, [])[1]},
+                       "challenges": self._state_json(user_id, CHALLENGES_STATE, [])[1],
+                       "plans": self._state_json(user_id, "pcim-plans", [])[1]},
             "audit": self.audit.entries(user_id),
             "audit_head": self.audit.head(),
         }
