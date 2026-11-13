@@ -26,6 +26,12 @@ Limits: the whole conversation is re-sent every step; the CLI adds a short pream
 own (it mentions its working directory, which is why the protocol says what that is);
 turns are delimited with a per-request nonce, which makes a forged turn inside a tool
 result unlikely to parse but is not a guarantee.
+
+Failures are ClaudeCLIError (a ProviderError) with `kind`, `retryable` and `status` (base.py),
+read from what the CLI prints ("API Error: 429 ...", "Not logged in", ...). Those phrases are
+not a stable interface, so the classification is best effort; unrecognised text is kind
+"unknown", not retryable. The excerpt of CLI output kept in a message has credentials masked
+and is withheld entirely if it quotes the request.
 """
 
 from __future__ import annotations
@@ -39,7 +45,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from .base import AgentStep, ModelResponse, ProviderError, RenderedPrompt, Usage
+from .base import AgentStep, ModelResponse, ProviderError, RenderedPrompt, Usage, classify_status
 
 PROTOCOL = """You are connected to CI through a text relay. You have no callable tools in this session. Your process's working directory is an empty sandbox, not the person's workspace.
 
@@ -63,6 +69,55 @@ _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$")
 
 class ClaudeCLIError(ProviderError):
     pass
+
+
+_API_STATUS = re.compile(r"API Error: (\d{3})\b")
+_QUOTA = re.compile(r"credit balance is too low|usage limit|limit reached|hit your limit|limit will reset", re.I)
+# (pattern, kind, retryable), first match wins, for CLI output with no "API Error: <status>"
+_CLI_PHRASES = (
+    (re.compile(r"invalid api key|invalid bearer token|oauth token (?:has )?expired|authentication_error"
+                r"|failed to authenticate", re.I), "auth", False),
+    (re.compile(r"not logged in|please run /login|missing api key|no api key", re.I), "no_credentials", False),
+    (_QUOTA, "quota", False),
+    (re.compile(r"rate.?limit", re.I), "rate_limit", True),
+    (re.compile(r"overloaded", re.I), "server", True),
+    (re.compile(r"timed? ?out|timeout", re.I), "timeout", True),
+    (re.compile(r"connection error|connection refused|econnrefused|econnreset|enotfound|etimedout|fetch failed"
+                r"|network error|socket hang up", re.I), "connection", True),
+)
+_KEYISH = re.compile(r"sk-ant-[A-Za-z0-9_-]{6,}|Bearer\s+[A-Za-z0-9._~+/=-]{8,}")
+_SECRET_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN")
+_QUOTE_RUN = 16  # a run this long copied from the request counts as quoting it
+
+
+def _classify(text: str, subtype: str | None = None) -> tuple[str, bool, int | None]:
+    """(kind, retryable, status) from what the CLI printed. Best effort."""
+    m = _API_STATUS.search(text)
+    if m:
+        status = int(m.group(1))
+        kind, retryable = classify_status(status)
+        if kind == "request" and _QUOTA.search(text):
+            kind = "quota"
+        return kind, retryable, status
+    for pattern, kind, retryable in _CLI_PHRASES:
+        if pattern.search(text):
+            return kind, retryable, None
+    if subtype == "error_max_budget_usd":  # CI's own per-call cap (--max-budget-usd)
+        return "request", False, None
+    return "unknown", False, None
+
+
+def _scrub(text: str, request: tuple[str, ...]) -> str:
+    """CLI output fit for an error message: credentials masked; withheld if it quotes the request."""
+    for name in _SECRET_ENV:
+        v = os.environ.get(name)
+        if v and len(v) >= 8:
+            text = text.replace(v, "[redacted]")
+    text = _KEYISH.sub("[redacted]", text)
+    n = _QUOTE_RUN
+    if len(text) >= n and any(text[i:i + n] in r for r in request if r for i in range(len(text) - n + 1)):
+        return "[output withheld: it quotes the request]"
+    return text
 
 
 def _render_turns(messages: list[dict], nonce: str) -> str:
@@ -139,20 +194,33 @@ class ClaudeCLIAdapter:
                 proc = self._run(self._argv(sys_path), input=prompt, capture_output=True, text=True,
                                  timeout=self.timeout, cwd=str(self.workdir), env=env)
             except subprocess.TimeoutExpired:
-                raise ClaudeCLIError(f"claude CLI timed out after {self.timeout:g}s") from None
+                raise ClaudeCLIError(f"claude CLI timed out after {self.timeout:g}s", retryable=True,
+                                     kind="timeout") from None
             except FileNotFoundError:
-                raise ClaudeCLIError(f"claude CLI not found ({self.binary})") from None
+                raise ClaudeCLIError(f"claude CLI not found ({self.binary})", kind="config") from None
+            except OSError as e:  # e.g. not executable
+                raise ClaudeCLIError(f"claude CLI could not be started ({self.binary}: {type(e).__name__})",
+                                     kind="config") from None
             latency = (time.perf_counter() - t0) * 1000
         finally:
             Path(sys_path).unlink(missing_ok=True)
         self.calls += 1
+        request = (system, prompt)
         try:
             d = json.loads(proc.stdout)
         except (json.JSONDecodeError, TypeError):
-            tail = (proc.stderr or proc.stdout or "").strip()[-500:]
-            raise ClaudeCLIError(f"claude CLI exited {proc.returncode} without JSON: {tail}") from None
+            d = None
+        if not isinstance(d, dict):
+            raw = (proc.stderr or proc.stdout or "").strip()
+            kind, retryable, status = _classify(raw)
+            tail = _scrub(raw[-500:], request)
+            raise ClaudeCLIError(f"claude CLI exited {proc.returncode} without JSON: {tail}",
+                                 kind="malformed" if kind == "unknown" else kind, retryable=retryable, status=status)
         if d.get("is_error") or d.get("subtype") != "success":
-            raise ClaudeCLIError(f"claude CLI error ({d.get('subtype')}): {str(d.get('result', ''))[:500]}")
+            result = str(d.get("result", ""))
+            kind, retryable, status = _classify(result, d.get("subtype"))
+            raise ClaudeCLIError(f"claude CLI error ({d.get('subtype')}): {_scrub(result[:500], request)}",
+                                 kind=kind, retryable=retryable, status=status)
         return d, latency
 
     @staticmethod
