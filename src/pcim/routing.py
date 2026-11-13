@@ -63,6 +63,7 @@ PROFILE_VENDOR = "anthropic"  # whose models PROFILES describes
 OUTPUT_TOKENS = {1: 500, 2: 1500, 3: 4000}  # budgeting guesses for the cost estimate only
 SYSTEM_OVERHEAD = 300  # preamble and directives, tokens
 MAX_FALLBACKS = 4
+SCAN_CHARS = 8000
 MIN_LATENCY_SAMPLES = 5
 
 
@@ -138,7 +139,7 @@ def _rx(*pats: str) -> tuple[re.Pattern, ...]:
     return tuple(re.compile(p, re.I) for p in pats)
 
 
-_DEEP = _rx(r"\bprove\b.*\b(general|for all|every)\b", r"\bderiv(e|ation)\b", r"\barchitect", r"\bdesign (a|an|the)\b",
+_DEEP = _rx(r"\bprove\b[^\n]{0,120}?\b(general|for all|every)\b", r"\bderiv(e|ation)\b", r"\barchitect", r"\bdesign (a|an|the)\b",
             r"\btrade-?offs?\b", r"\bthreat model", r"\bsecurity review\b", r"\brefactor\b", r"\bmigrat(e|ion)\b",
             r"\broot cause\b", r"\brace condition\b", r"\bconcurren", r"\bdistributed\b", r"\btheorem\b",
             r"\bstrategy\b", r"\bend-to-end\b", r"\bresearch design\b", r"\bcritique\b", r"\btrustworthy\b",
@@ -153,7 +154,7 @@ _MATH = _rx(r"\bintegral\b", r"\bderivative\b", r"\bprobabilit", r"\bexpected va
             r"\beigen", r"\bequation", r"\bsolve for\b", r"\bvariance\b", r"\bregression\b", r"\bstatistic",
             r"\bbayes", r"\bp-?value\b", r"\bconfidence interval\b")
 _CODE = _rx(r"```", r"\btraceback\b", r"\bstack trace\b", r"\b\w+\.(py|ts|tsx|js|go|rs|java|rb|sql|sh)\b",
-            r"\bdef \w+\(", r"\b(Type|Value|Key|Attribute|Index|Name)Error\b", r"\bexception\b", r"\bSELECT\b.*\bFROM\b",
+            r"\bdef \w+\(", r"\b(Type|Value|Key|Attribute|Index|Name)Error\b", r"\bexception\b", r"\bSELECT\b[^\n]{0,400}?\bFROM\b",
             r"\bfunction\b", r"\bmodule\b", r"\bquery\b")
 
 
@@ -179,13 +180,16 @@ def estimate(task: str, *, mode: str | None = None, preference: str = "balanced"
     `apply_floor=False` gives the raw lexical estimate (what the benchmark measures)."""
     if preference not in PREFERENCES:
         raise ValueError(f"preference must be one of {PREFERENCES}")
-    probs = classify_task(task)
+    # Markers are read from the first SCAN_CHARS characters: enough to judge a request, and a
+    # bound on the work a huge paste can cause. Length still counts from the whole text.
+    head = task[:SCAN_CHARS]
+    probs = classify_task(head)
     ttype = max(probs, key=probs.get)
     signals, domains = [], []
-    deep, std = _matches(_DEEP, task), _matches(_STANDARD, task)
-    if any(p.search(task) for p in _CODE) or (ttype == "code" and probs[ttype] > 0.5):
+    deep, std = _matches(_DEEP, head), _matches(_STANDARD, head)
+    if any(p.search(head) for p in _CODE) or (ttype == "code" and probs[ttype] > 0.5):
         domains.append("code")
-    if any(p.search(task) for p in _MATH):
+    if any(p.search(head) for p in _MATH):
         domains.append("math")
     if deep:
         tier = 3
@@ -196,7 +200,7 @@ def estimate(task: str, *, mode: str | None = None, preference: str = "balanced"
     else:
         tier = 1
         signals.append("no reasoning or construction markers")
-    n_parts = len(re.findall(r"(?m)^\s*(\d+[.)]|[-*•])\s+\S", task)) + max(0, task.count("?") - 1)
+    n_parts = len(re.findall(r"(?m)^[ \t]*(\d+[.)]|[-*•])[ \t]+\S", head)) + max(0, head.count("?") - 1)
     if n_parts >= 3 and tier < 3:
         tier += 1
         signals.append(f"{n_parts} parts")

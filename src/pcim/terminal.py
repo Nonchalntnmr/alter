@@ -50,6 +50,10 @@ RIGHT = {"right", "correct"}
 WRONG = {"wrong", "incorrect"}
 
 
+class AmbiguousWorkspace(Exception):
+    pass
+
+
 @dataclasses.dataclass
 class Here:
     project_id: str
@@ -77,13 +81,20 @@ def _here(ci: PersonalCI, uid: str, cwd: Path | None = None) -> Here | None:
     """The project whose authorized workspace contains the current directory (the deepest one)."""
     cwd = (cwd or Path.cwd()).resolve()
     ws = Workspace(ci)
-    best = None
+    hits = []
     for a in ws.active_auths(uid, None, "workspace"):
         root = Path(a["spec"]["root"]).resolve()
-        if (cwd == root or root in cwd.parents) and (best is None or len(root.parts) > len(Path(best[1]).parts)):
-            best = (a["project_id"], str(root))
-    if best is None:
+        if cwd == root or root in cwd.parents:
+            hits.append((len(root.parts), a["project_id"], str(root)))
+    if not hits:
         return None
+    depth = max(h[0] for h in hits)
+    tied = sorted({h[1] for h in hits if h[0] == depth})
+    if len(tied) > 1:  # which project's vendors apply is the person's call, not a guess
+        names = ", ".join(ws.get_project(uid, pid).name for pid in tied)
+        raise AmbiguousWorkspace(f"more than one project authorizes this directory ({names}); "
+                                 "revoke one of the workspace authorizations so CI knows which rules apply")
+    best = next((h[1], h[2]) for h in hits if h[0] == depth)
     p = ws.get_project(uid, best[0])
     return Here(p.id, p.name, set(ws.provider_vendors(uid, p.id)), best[1])
 
@@ -112,7 +123,11 @@ def cmd_ask(argv: list[str]) -> int:
     a = ap.parse_args(argv)
     task = " ".join(a.task)
     ci, uid = _open()
-    here = _here(ci, uid)
+    try:
+        here = _here(ci, uid)
+    except AmbiguousWorkspace as e:
+        print(f"Not sent: {e}", file=sys.stderr)
+        return 2
     try:
         r = ci.ask_routed(uid, task, mode=a.mode, pinned=a.model, project_id=here.project_id if here else None,
                           project_vendors=here.vendors if here else None, budget_tokens=a.budget)
@@ -161,7 +176,11 @@ def cmd_route(argv: list[str]) -> int:
     a = ap.parse_args(argv)
     task = " ".join(a.task)
     ci, uid = _open()
-    here = _here(ci, uid)
+    try:
+        here = _here(ci, uid)
+    except AmbiguousWorkspace as e:
+        print(e, file=sys.stderr)
+        return 2
     md = ci.resolve_mode(uid, task, a.mode)
     plan = ci.route(uid, task, mode=md.mode, pinned=a.model, project_vendors=here.vendors if here else None)
     if a.json:
@@ -374,7 +393,11 @@ def cmd_challenge(argv: list[str]) -> int:
                      if m["challenger_brier"] is not None else ""))
         return 0
     claim = " ".join(a.claim)
-    here = _here(ci, uid)
+    try:
+        here = _here(ci, uid)
+    except AmbiguousWorkspace as e:
+        print(f"Not sent: {e}", file=sys.stderr)
+        return 2
     try:
         rec = ch.challenge(ci, uid, claim, pinned=a.model, project_id=here.project_id if here else None,
                            project_vendors=here.vendors if here else None)
@@ -479,7 +502,11 @@ def _deep(twin: CognitiveTwin, uid: str, review, yes: bool) -> dict | None:
 
 def cmd_status(argv: list[str]) -> int:
     ci, uid = _open()
-    here = _here(ci, uid)
+    try:
+        here = _here(ci, uid)
+    except AmbiguousWorkspace as e:
+        here = None
+        print(f"Here: {e}")
     twin = CognitiveTwin(ci)
     print(f"{uid} · mode {ci.get_intelligence_mode(uid) or intelligence.DEFAULT_MODE} · routing "
           f"{ci.get_routing_preference(uid)} · vendors {', '.join(sorted(ci.authorized_vendors(uid))) or 'none'}")

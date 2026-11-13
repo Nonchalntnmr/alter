@@ -38,6 +38,16 @@ _PATTERNS: tuple[tuple[str, re.Pattern], ...] = (
 LOCAL_VENDORS = frozenset({"local", "mock"})
 
 
+def redact(text: str) -> tuple[str, list[str]]:
+    """`text` with every credential-shaped match replaced by [REDACTED:<kind>], and the kinds."""
+    out, kinds = text or "", []
+    for kind, pat in _PATTERNS:
+        out, n = pat.subn(f"[REDACTED:{kind}]", out)
+        if n:
+            kinds.append(kind)
+    return out, kinds
+
+
 def find_credentials(text: str) -> list[str]:
     """Kinds of credential-shaped strings in `text`, in pattern order, without the values."""
     return [kind for kind, pat in _PATTERNS if pat.search(text or "")]

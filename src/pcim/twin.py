@@ -31,6 +31,7 @@ from __future__ import annotations
 import dataclasses
 import datetime as dt
 import hashlib
+import json
 import re
 
 import numpy as np
@@ -39,12 +40,13 @@ from . import modes as intelligence
 from .engine import RoutingError, fallback_errors
 from .evaluation import ROUTED_TASK_TYPES, scorecard, window_interactions
 from .registry import vendor_of
-from .sovereignty.credentials import find_credentials
+from .sovereignty.credentials import find_credentials, redact
 from .sovereignty.injection import scan as scan_instructions
 from .textsafe import terminal_safe
 from .types import TASK_TYPES, Trust, utcnow
 from .workspace import Workspace
 
+TWIN_NAME_STATE = "pcim-twin-name"
 STALE_DAYS = 7
 MAX_PRIORITIES = 2
 MIN_REQUESTS_FOR_GOAL_CHECK = 5
@@ -146,9 +148,9 @@ class CognitiveTwin:
 
     # ------------------------------------------------------------------ identity
     def name(self, user_id: str) -> str:
-        set_name = self.ci._setting(user_id, "twin_name")
-        if set_name:
-            return set_name
+        _, stored = self.ci._state_json(user_id, TWIN_NAME_STATE, None)
+        if stored and stored.get("name"):
+            return stored["name"]
         u = self.ci.store.get_user(user_id) or {}
         return f"{(u.get('display_name') or user_id).strip()} 2.0"
 
@@ -156,7 +158,9 @@ class CognitiveTwin:
         name = " ".join(name.split())[:60]
         if not name:
             raise ValueError("empty name")
-        self.ci._set_setting(user_id, "twin_name", name)
+        # Sealed like the rest of the person's data; users.settings is plaintext.
+        self.ci.store.update_policy_state(user_id, TWIN_NAME_STATE, lambda _cur: json.dumps({"name": name}).encode(),
+                                          note="twin name")
         return name
 
     # ------------------------------------------------------------------ evidence
@@ -612,7 +616,7 @@ class CognitiveTwin:
                                          "served_tier": c.as_dict()["tier"], "served_est_cost_usd": c.est_cost_usd,
                                          "failed_before": list(attempts), "purpose": "weekly-deep"})
             except fallback_errors() as e:
-                attempts.append({"model": c.key, "error": f"{type(e).__name__}: {str(e)[:200]}"})
+                attempts.append({"model": c.key, "error": redact(f"{type(e).__name__}: {str(e)[:200]}")[0]})
                 continue
             return {"text": res.text, "interaction_id": res.interaction_id, "model": c.entry.label,
                     "withheld": withheld, "cost_usd": res.receipt["cost_usd"]}

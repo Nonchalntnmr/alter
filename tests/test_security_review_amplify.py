@@ -1,6 +1,6 @@
 """Independent security and privacy review of the amplification slice (81c7fd5).
 
-Fixed and unmarked (2026-11-12): H1-H5, M1-M9, L1, L7, L8. The rest stay xfail until their fixes land.
+Fixed and unmarked (2026-11-12): H1-H5, M1-M9, L1-L9. Open: M10. The rest stay xfail until their fixes land.
 
 Every test here demonstrates one finding and FAILS on the reviewed code. Each is marked
 `xfail(strict=True)` so the suite stays green and the test flips to a failure (XPASS) the
@@ -289,8 +289,6 @@ def test_l1_requests_that_start_with_a_subcommand_word_change_settings(env, monk
     assert ci.attempts(uid) == []
 
 
-@pytest.mark.xfail(strict=True, reason="L2: two projects authorizing one directory: `ci` silently uses the first, "
-                                       "ignoring the one that disallows the vendor")
 def test_l2_ambiguous_project_detection_is_resolved_silently(env, monkeypatch, tmp_path, capsys):
     ci, uid = _home(monkeypatch, tmp_path)
     ws = Workspace(ci)
@@ -306,7 +304,6 @@ def test_l2_ambiguous_project_detection_is_resolved_silently(env, monkeypatch, t
     assert _calls(env) == before
 
 
-@pytest.mark.xfail(strict=True, reason="L3: provider error text is stored in receipts and printed unredacted")
 def test_l3_a_key_in_a_provider_error_is_kept_in_the_receipt(env, tmp_path):
     ci, recs = make(tmp_path)
     key = "sk-ant-api03-" + "K" * 40
@@ -316,7 +313,6 @@ def test_l3_a_key_in_a_provider_error_is_kept_in_the_receipt(env, tmp_path):
     assert key not in json.dumps(ci.store.get_interaction(r.interaction_id)["receipt"])
 
 
-@pytest.mark.xfail(strict=True, reason="L4: the twin name (--name) is stored in plaintext users.settings")
 def test_l4_the_twin_name_is_stored_in_plaintext(tmp_path):
     ci = PersonalCI(tmp_path / "d", seed=0)
     ci.onboard("u", "Ada")
@@ -327,7 +323,6 @@ def test_l4_the_twin_name_is_stored_in_plaintext(tmp_path):
     assert "Lovelace" not in raw
 
 
-@pytest.mark.xfail(strict=True, reason="L5: attempt log read-modify-write without a lock loses concurrent attempts")
 def test_l5_concurrent_attempts_are_lost(tmp_path):
     d = tmp_path / "d"
     a = PersonalCI(d, seed=0)
@@ -361,8 +356,6 @@ def test_l5_concurrent_attempts_are_lost(tmp_path):
     assert len(PersonalCI(d, seed=0).attempts("u")) == 3
 
 
-@pytest.mark.xfail(strict=True, reason="L6: forget_skill/forget_weekly skip the WAL truncation other deletes do; "
-                                       "the old sealed log stays in pcim.db-wal under a live key")
 def test_l6_forget_leaves_the_old_attempt_log_in_the_wal(tmp_path):
     d = tmp_path / "d"
     ci = PersonalCI(d, seed=0)
@@ -391,8 +384,6 @@ def test_l8_terminal_input_crashes_instead_of_a_usage_error(env, monkeypatch, tm
     assert terminal.main(["scorecard", "--days", "seven"]) == 2
 
 
-@pytest.mark.xfail(strict=True, reason="L9: requirement regexes are quadratic: a 72 KB paste takes seconds "
-                                       "before routing")
 def test_l9_the_requirement_estimate_is_quadratic_on_large_input():
     t0 = time.perf_counter()
     routing.estimate("prove " * 12000)

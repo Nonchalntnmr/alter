@@ -31,7 +31,7 @@ import numpy as np
 
 from . import modes as intelligence
 from .adapters import ContextPacket, PacketItem, get_adapter, render
-from .adapters.base import ProviderError
+from .adapters.base import CREDENTIAL_KINDS, PROVIDER_WIDE_KINDS, ProviderError
 from .assist import DIRECTIVES, AssistPolicy
 from .embed import HASHING_NAME, Embedder, default_embedder_name, embedder_from_name
 from .feedback import reward_from_signals
@@ -48,7 +48,7 @@ from .registry import VENDORS, model_identity, vendor_of
 from .routing import PREFERENCES, RoutePlan
 from .routing import plan as route_plan
 from .sovereignty.audit import AuditLog
-from .sovereignty.credentials import LOCAL_VENDORS, find_credentials
+from .sovereignty.credentials import LOCAL_VENDORS, find_credentials, redact
 from .sovereignty.consent import ConsentLedger
 from .sovereignty.crypto import KeyRing
 from .sovereignty.egress import CONFIRMED_FLAG, INSTRUCTION_FLAG, EgressGuard
@@ -550,7 +550,11 @@ class PersonalCI:
         if plan.refused:
             raise RoutingError(plan.refused, plan)
         attempts: list[dict] = []
+        dead: dict[str, str] = {}  # provider -> why each of its models would fail the same way (key, login, setup)
         for c in plan.candidates:
+            if c.entry.provider in dead:
+                attempts.append({"model": c.key, "error": f"skipped: {dead[c.entry.provider]}", "kind": "skipped"})
+                continue
             info = {"plan": plan.as_dict(), "served_by": c.key, "served_meets": c.meets,
                     "served_tier": c.as_dict()["tier"], "served_est_cost_usd": c.est_cost_usd,
                     "failed_before": list(attempts)}
@@ -558,9 +562,20 @@ class PersonalCI:
                 return self.ask(user_id, task, c.entry.provider, c.entry.model or None, budget_tokens,
                                 _mode=md, project_id=project_id, route=info)
             except fallback_errors() as e:
-                attempts.append({"model": c.key, "error": f"{type(e).__name__}: {str(e)[:200]}"})
-                self.audit.append(user_id, "route.fallback", model=c.key, error=type(e).__name__)
-        raise RoutingError("every routed model failed", plan, attempts)
+                # Every failure still falls back: another vendor or model is a different request. A
+                # non-retryable failure is not retried in place (the SDKs already retry transient ones).
+                kind, status = getattr(e, "kind", "unknown"), getattr(e, "status", None)
+                cred = kind in CREDENTIAL_KINDS
+                attempts.append({"model": c.key, "error": redact(f"{type(e).__name__}: {str(e)[:200]}")[0], "kind": kind,
+                                 "status": status, "retryable": getattr(e, "retryable", None),
+                                 "credential_problem": cred})
+                self.audit.append(user_id, "route.fallback", model=c.key, error=type(e).__name__, kind=kind,
+                                  status=status, credential_problem=cred)
+                if kind in PROVIDER_WIDE_KINDS:  # same key / login / config: its other models cannot do better
+                    dead[c.entry.provider] = f"{c.entry.provider} has a {'credential problem' if cred else 'setup problem'}"
+        creds = sorted({a["model"].split(":")[0] for a in attempts if a.get("credential_problem")})
+        raise RoutingError("every routed model failed" + (f" (credential problem: {', '.join(creds)})" if creds else ""),
+                           plan, attempts)
 
     def record_outcome(self, user_id: str, interaction_id: str, worked: bool, corrected: bool = False,
                        skill: str | None = None) -> dict:
@@ -598,13 +613,10 @@ class PersonalCI:
         return (loaded[0], json.loads(loaded[1])) if loaded else (None, default)
 
     def _log_attempt(self, user_id: str, rec: dict) -> None:
-        version, log = self._state_json(user_id, ATTEMPTS_STATE, [])
-        log = (log + [rec])[-ATTEMPT_LOG_MAX:]
-        blob = json.dumps(log).encode()
-        if version is None:
-            self.store.save_policy_state(user_id, ATTEMPTS_STATE, blob, note="attempt log")
-        else:
-            self.store.overwrite_policy_state(user_id, ATTEMPTS_STATE, version, blob)
+        def append(cur: bytes | None) -> bytes:
+            log = json.loads(cur) if cur else []
+            return json.dumps((log + [rec])[-ATTEMPT_LOG_MAX:]).encode()
+        self.store.update_policy_state(user_id, ATTEMPTS_STATE, append, note="attempt log")
 
     def attempts(self, user_id: str) -> list[dict]:
         return self._state_json(user_id, ATTEMPTS_STATE, [])[1]
@@ -621,6 +633,7 @@ class PersonalCI:
             self.store.overwrite_policy_state(user_id, ATTEMPTS_STATE, version, json.dumps(kept).encode())
         had_state = self.store.delete_skill(user_id, skill)
         scrubbed = self._rewrite_weekly(user_id, lambda snap: _scrub(snap, skill))
+        self.store.flush_deleted()
         self.audit.append(user_id, "growth.forget", attempts=len(log) - len(kept), state=had_state,
                           snapshots=scrubbed)
         return {"skill": skill, "attempts_deleted": len(log) - len(kept), "state_deleted": had_state}
@@ -676,6 +689,7 @@ class PersonalCI:
                 if ((r.get("receipt") or {}).get("route") or {}).get("purpose") == "weekly-deep"]
         for iid in deep:
             self.store.delete_interaction(iid)
+        self.store.flush_deleted()
         self.audit.append(user_id, "twin.forget", versions=n, deep_requests=len(deep))
         return n
 

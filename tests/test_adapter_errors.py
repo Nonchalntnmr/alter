@@ -417,3 +417,26 @@ def test_a_gemini_failure_falls_back_to_another_vendor_and_the_record_carries_no
     with pytest.raises(RoutingError) as info:  # pinned: no fallback, but a clean refusal instead of a crash
         ci.ask_routed("u", "What does HTTP status 429 mean?", pinned="google:gemini-test")
     assert [a["model"] for a in info.value.attempts] == ["google:gemini-test"]
+def test_a_credential_failure_skips_that_providers_other_models_and_is_reported(monkeypatch, tmp_path):
+    for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY", "PCIM_OPENAI_MODEL", "GOOGLE_API_KEY",
+              "PCIM_LOCAL_MODEL", "PCIM_LOCAL_BASE_URL"):
+        monkeypatch.delenv(k, raising=False)
+    binary = tmp_path / "claude"
+    binary.write_text("#!/bin/sh\nexit 1\n")
+    binary.chmod(0o755)
+    monkeypatch.setenv("PCIM_CLAUDE_BIN", str(binary))
+    monkeypatch.setenv("GEMINI_API_KEY", KEY)
+    monkeypatch.setenv("PCIM_GEMINI_MODEL", "gemini-test")
+    ci = PersonalCI(tmp_path / "data", seed=0)
+    ci.onboard("u", "U", ("claude-cli", "google"))
+    recs = {m: Recorder(m, fail=ClaudeCLIError("Not logged in", kind="no_credentials")) for m in ("haiku", "sonnet", "opus")}
+    for m, r in recs.items():
+        ci.set_adapter("claude-cli", m, r)
+    ci.set_adapter("google", "gemini-test", gemini(http_case(httpx, "401")))
+    with pytest.raises(RoutingError, match=r"credential problem: claude-cli, google") as info:
+        ci.ask_routed("u", "What does HTTP status 429 mean?")
+    tried = [r for r in recs.values() if r.prompts]
+    assert len(tried) == 1  # the first claude-cli failure stands for its other models
+    skipped = [a for a in info.value.attempts if a["kind"] == "skipped"]
+    assert len(skipped) == 2 and all("claude-cli has a credential problem" in a["error"] for a in skipped)
+    assert any(a.get("status") == 401 and a.get("credential_problem") for a in info.value.attempts)
