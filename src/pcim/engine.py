@@ -521,7 +521,8 @@ class PersonalCI:
             allowed &= set(project_vendors)
         return route_plan(task, allowed_vendors=allowed, mode=mode, preference=self.get_routing_preference(user_id),
                           budget_tokens=budget_tokens or self.budget_tokens, pinned=pinned,
-                          include_test_doubles=include_test_doubles, latency=self._latency(user_id), min_tier=min_tier)
+                          include_test_doubles=include_test_doubles, latency=self._latency(user_id), min_tier=min_tier,
+                          embedder=self.embedder)
 
     def resolve_mode(self, user_id: str, task: str, mode: str | None = None) -> "intelligence.ModeDecision":
         probs = classify_task(task)

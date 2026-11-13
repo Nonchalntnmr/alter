@@ -187,32 +187,33 @@ def test_a_capability_file_rates_new_models_and_known_context_limits_bind(env, m
     monkeypatch.setenv("PCIM_OPENAI_MODEL", "gpt-test")
     allowed = {"anthropic", "openai"}
     task = "What is the expected value of rolling two dice and taking the maximum?"
-    p = routing.plan(task, allowed_vendors=allowed)
+    p = routing.plan(task, allowed_vendors=allowed, estimator="lexical")
     assert p.requirement.domains == ["math"] and p.chosen.key == "claude-cli:sonnet"  # unrated models go last
     caps = tmp_path / "caps.json"
     caps.write_text(json.dumps({"openai:gpt-test": {"tier": 2, "strengths": ["math"]},
                                 "claude-haiku-5-5": {"context_window": 1000}}))
     monkeypatch.setenv("PCIM_CAPABILITIES", str(caps))
-    p = routing.plan(task, allowed_vendors=allowed)
+    p = routing.plan(task, allowed_vendors=allowed, estimator="lexical")
     assert p.chosen.key == "openai:gpt-test" and "strong at math" in p.reason
-    light = routing.plan("Convert 72 Fahrenheit to Celsius.", allowed_vendors={"anthropic"})
+    light = routing.plan("Convert 72 Fahrenheit to Celsius.", allowed_vendors={"anthropic"}, estimator="lexical")
     assert light.chosen.key == "claude-cli:sonnet"
     assert any(c["model"] == "claude-cli:haiku" and c["outcome"].startswith("too small") for c in light.considered)
     caps.write_text(json.dumps({"x": {"tier": 9}}))
     with pytest.raises(routing.CapabilityFileError):
-        routing.plan("hi", allowed_vendors=allowed)
+        routing.plan("hi", allowed_vendors=allowed, estimator="lexical")
 
 
 def test_modes_and_preferences_move_the_requirement_and_say_why():
-    assert routing.estimate("Convert 72 Fahrenheit to Celsius.", apply_floor=False).tier == 1
-    assert routing.estimate("Convert 72 Fahrenheit to Celsius.").tier == 2  # balanced floor
-    assert routing.estimate("Convert 72 Fahrenheit to Celsius.", preference="economy").tier == 1
-    r = routing.estimate("Convert 72 Fahrenheit to Celsius.", mode="learn", apply_floor=False)
+    """Rules of the lexical estimator and of preference/floor/mode, which apply to both."""
+    assert routing.estimate("Convert 72 Fahrenheit to Celsius.", apply_floor=False, estimator="lexical").tier == 1
+    assert routing.estimate("Convert 72 Fahrenheit to Celsius.", estimator="lexical").tier == 2  # balanced floor
+    assert routing.estimate("Convert 72 Fahrenheit to Celsius.", preference="economy", estimator="lexical").tier == 1
+    r = routing.estimate("Convert 72 Fahrenheit to Celsius.", mode="learn", apply_floor=False, estimator="lexical")
     assert r.tier == 2 and any("learn mode" in s for s in r.signals)
-    assert routing.estimate("Write a threat model and weigh the trade-offs", preference="economy").tier == 2
-    assert routing.estimate("Convert 72 Fahrenheit to Celsius.", preference="quality").tier == 2
+    assert routing.estimate("Write a threat model and weigh the trade-offs", preference="economy", estimator="lexical").tier == 2
+    assert routing.estimate("Convert 72 Fahrenheit to Celsius.", preference="quality", estimator="lexical").tier == 2
     with pytest.raises(ValueError):
-        routing.estimate("x", preference="cheap")
+        routing.estimate("x", preference="cheap", estimator="lexical")
 
 
 # ---------------------------------------------------------------- modes

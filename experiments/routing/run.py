@@ -60,7 +60,7 @@ def main() -> dict:
         confusion = {a: {b: 0 for b in (1, 2, 3)} for a in (1, 2, 3)}
         misses = []
         for t in ts:
-            r = routing.estimate(t["text"], apply_floor=floor)
+            r = routing.estimate(t["text"], apply_floor=floor, estimator="lexical")
             confusion[t["tier"]][r.tier] += 1
             if r.tier != t["tier"]:
                 misses.append({"id": t["id"], "label": t["tier"], "estimate": r.tier, "signals": r.signals})

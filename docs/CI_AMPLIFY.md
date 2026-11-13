@@ -8,7 +8,7 @@ been made. Merge gates, as set by the project owner:
 |---|---|
 | All high-severity security findings resolved | This slice: H1–H5 fixed (23 of 24 review findings). Audit #36–#40: fixed as unpushed commits on `fix/review-2026-10-26` (138 tests pass, merges cleanly with this branch); needs its own PR first |
 | Passing CI | Green on each pushed head |
-| Fresh sealed routing benchmark | Set #2 registered by hash (`experiments/routing/SEALED.md`); learned estimator in progress |
+| Fresh sealed routing benchmark | **Met.** Learned estimator, one registered run on sealed set #2: under-routed 1/60, deep 15/16, exact 36/60, cost 0.837 of always-Opus; all four preregistered targets pass (lexical: deep 0/16). Now the default (`routing.ESTIMATORS`) |
 | Real-model evaluation vs fixed Sonnet and Opus | Harness in progress; will run on the Claude CLI with a cost estimate first |
 
 ## 1. What CI already was (from the code, not the docs)

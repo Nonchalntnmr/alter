@@ -1,0 +1,39 @@
+W1112 19:50:07.111000 48664 torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+Could not reach the Hub (Cannot reach https://huggingface.co/api/models/sentence-transformers/all-MiniLM-L6-v2: offline mode is enabled. To disable it, please unset the `HF_HUB_OFFLINE` environment variable.). Using cached commit hash for 'sentence-transformers/all-MiniLM-L6-v2'.
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]Loading weights: 100%|██████████| 103/103 [00:00<00:00, 19342.44it/s]
+/Users/nishnathrevuri/projects/ci-agents/estimator/src/pcim/embed.py:116: FutureWarning: The `get_sentence_embedding_dimension` method has been renamed to `get_embedding_dimension`.
+  self.dim = self._m.get_sentence_embedding_dimension()
+{
+ "argmax": {
+  "n": 40,
+  "exact": 0.625,
+  "under_routed": 0.075,
+  "over_routed": 0.3,
+  "deep_recall": 0.9
+ },
+ "escalated": {
+  "n": 40,
+  "exact": 0.65,
+  "under_routed": 0.0,
+  "over_routed": 0.35,
+  "deep_recall": 1.0
+ },
+ "escalated_balanced_floor": {
+  "n": 40,
+  "exact": 0.475,
+  "under_routed": 0.0,
+  "over_routed": 0.525,
+  "deep_recall": 1.0
+ },
+ "escalations": 7,
+ "low_confidence": 14,
+ "mean_confidence": 0.78,
+ "argmax_accuracy": 0.625,
+ "cost_vs_always_opus": 0.805,
+ "cost_vs_always_opus_with_balanced_floor": 0.837,
+ "cost_vs_always_opus_oracle_labels": 0.692
+}
+under_routed                               got 0.0    expected 0.032  target_at_most 0.1: PASS
+deep_recall                                got 1.0    expected 0.932  target_at_least 0.8: PASS
+exact                                      got 0.65   expected 0.689  target_at_least 0.55: PASS
+cost_vs_always_opus_with_balanced_floor    got 0.837  expected 0.823  target_at_most 0.9: PASS

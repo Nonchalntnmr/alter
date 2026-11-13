@@ -10,3 +10,4 @@ data/
 *.db-shm
 *.key
 experiments/*/runs/
+!src/pcim/data/
