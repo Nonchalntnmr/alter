@@ -91,7 +91,11 @@ Commits on `feat/intent-compiler`, oldest first:
      It refuses to start if `src/` or any frozen hash differs. Do not "fix" that by changing
      hashes.
    - **Expected remaining cost:** about $10–20 notional, about 40–60 min.
-2. **The writer agent for the V3 evaluation sets.** Its outputs are
+2. **The writer agent for the V3 evaluation sets. FINISHED** (14:40 UTC). Both sets exist and are
+   validated: 84 checks, 0 failures. Their hashes are in `experiments/eval_v3/SEALED.txt`.
+   **Do not recreate them, and do not read them** until V3 is frozen. The rest of this item was
+   the fallback.
+   - Former note: the writer agent for the V3 evaluation sets. Its outputs are
    `~/projects/ci-sealed/intent_heldout_v2.json` and `~/projects/ci-sealed/paired_v2/`, with
    `tasks.json`, `validation.json` and `reference/`.
    - **Check existence and size only.** Do not read them.
