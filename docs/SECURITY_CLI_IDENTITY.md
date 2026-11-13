@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Mitigated on branch `sec/cli-identity` for CLI 2.1.316. Measured on the request itself, and enforced for identity-sensitive calls. Open for any other CLI version until it is probed. |
+| **Status** | **Mitigation in progress, not ready to merge.** It was measured clean on CLI 2.1.316 (10/10 trials). But an independent review found 4 medium defects through which `verified` can be reported while the email still leaks: an incomplete profile, a second profile read that fails open, a stale version cache, and config-dir cleanup. See [SECURITY_CLI_IDENTITY_REVIEW.md](SECURITY_CLI_IDENTITY_REVIEW.md). Until those are fixed, do not rely on `verified`. |
 | **Affects** | `src/pcim/adapters/claude_cli.py` on `main` (1f9bd08) and every branch built on it |
 | **Found** | 2026-11-13, in the held-out intent evaluation |
 | **Kind** | Privacy: data reaches the model that CI's consent filter never approved and its receipts never listed |
