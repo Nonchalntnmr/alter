@@ -11,6 +11,7 @@
     },
     "argmax_accuracy": 0.722,
     "cost_vs_always_opus": 0.755,
+    "cost_vs_always_opus_oracle_labels": 0.668,
     "cost_vs_always_opus_with_balanced_floor": 0.776,
     "escalated": {
      "deep_recall": 0.875,
@@ -48,6 +49,7 @@
     },
     "argmax_accuracy": 0.833,
     "cost_vs_always_opus": 0.71,
+    "cost_vs_always_opus_oracle_labels": 0.668,
     "cost_vs_always_opus_with_balanced_floor": 0.781,
     "escalated": {
      "deep_recall": 1.0,
