@@ -22,6 +22,7 @@ from .base import Usage
 PRICES: dict[str, dict] = {
     # model: {input, output, cache_read, cache_write_mult, as_of, source}
     "claude-fable-5-1": {"input": 10.0, "output": 50.0, "cache_read": 0.25, "as_of": "2026-10-06", "source": "anthropic"},
+    "claude-fable-5-2": {"input": 8.0, "output": 40.0, "cache_read": 0.20, "as_of": "2026-11-03", "source": "anthropic"},
     "claude-opus-5-5": {"input": 4.0, "output": 20.0, "cache_read": 0.20, "as_of": "2026-10-06", "source": "anthropic"},
     "claude-sonnet-5-5": {"input": 2.0, "output": 10.0, "cache_read": 0.20, "as_of": "2026-10-06", "source": "anthropic"},
     "claude-haiku-5-5": {"input": 0.10, "output": 0.50, "cache_read": 0.01, "as_of": "2026-10-06", "source": "anthropic"},

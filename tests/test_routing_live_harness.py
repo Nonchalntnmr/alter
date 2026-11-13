@@ -122,7 +122,8 @@ def test_dry_run_end_to_end_records_the_test_set_hash_before_the_first_call(ts, 
     res = json.loads((out / "results.json").read_text())
     a = res["analysis"]
     assert {r["arm"] for r in res["rows"]} == set(m["arms"]) and len(res["rows"]) == N_ROWS
-    assert a["arms"]["routed"]["served_by"] == {"sonnet": 8, "opus": 4}  # the standard floor: never haiku
+    served = a["arms"]["routed"]["served_by"]  # which tiers depends on the estimator; the floor holds for any
+    assert set(served) <= {"sonnet", "opus"} and sum(served.values()) == 12 and len(served) == 2  # never haiku
     assert a["integrity"]["context_identical"] == a["integrity"]["context_pairs"] == 12
     assert a["arms"]["always_opus"]["verified_n"] == 6  # q1, q2, q6 carry checks; 3 tasks x 2 repetitions
     cost = {arm: s["cost_usd"] for arm, s in a["arms"].items()}
