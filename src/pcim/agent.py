@@ -231,7 +231,14 @@ class Agent:
         with self._lock(sid):
             st = self._load(user_id, project_id, sid)  # again under the lock: a concurrent turn may have advanced it
             if st["pending"]:
-                raise RuntimeError("this session is waiting on an approval; approve or deny it first")
+                p = st["pending"]
+                tasks = {tu: self.queue.get(user_id, tid) for tu, tid in p["tasks"].items()}
+                if any(x.status not in TERMINAL and x.status != "succeeded" for x in tasks.values()):
+                    raise RuntimeError("this session is waiting on an approval; approve or deny it first")
+                results = dict(p["results"])
+                results.update({tu: self._result_block(x) for tu, x in tasks.items()})
+                st["messages"].append({"role": "user", "content": [results[tu] for tu in p["order"]]})
+                st["pending"] = None
             ad = self.adapter(provider, model)
             parts = []
             disclosure = {"at": utcnow().isoformat(), "session": sid, "provider": provider, "vendor": vendor,

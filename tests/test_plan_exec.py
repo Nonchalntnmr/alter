@@ -261,8 +261,6 @@ def test_stop_all_while_a_step_waits_cancels_the_action_and_the_step_reads_halte
                for e in ci.audit.entries("u"))
 
 
-@pytest.mark.xfail(strict=True, reason="agent.py defect, reported not fixed here: Stop-all cancels a pending action "
-                                       "without resuming its session, which then refuses every new message")
 def test_the_workspace_agent_recovers_by_itself_after_stop_all(setup):
     ci, ws, agent, p, repo = setup
     rec, task, mock = waiting_on_a_write(ci, agent, p)
