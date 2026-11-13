@@ -212,3 +212,89 @@ def test_outside_an_authorized_folder_a_plan_that_reads_files_is_blocked_and_can
     assert rec["status"] == "blocked" and "no folder is authorized" in rec["gate"]["reasons"][0]
     with pytest.raises(ValueError, match="permissions"):
         ic.approve(ci, "u", rec["id"])
+
+
+def test_d1_after_one_answer_round_low_stakes_ambiguity_becomes_assumed():
+    s = ic.validate({
+        "goal": "Fix the parser",
+        "interpretations": [{"goal": "Fix A", "p": 0.5}, {"goal": "Fix B", "p": 0.5}],
+        "outcomes": [{"id": "o1", "text": "fixed parser", "kind": "deliverable"}],
+        "steps": [{"id": "s1", "action": "edit parser", "kind": "write", "serves": ["o1"]}],
+        "assumptions": [{"text": "target is v2", "confidence": 0.5, "consequential": True}],
+        "questions": ["Which parser?"],
+    }, [])
+    assert ic.gate(s, after_answer=False).decision == "clarify"
+    g2 = ic.gate(s, after_answer=True)
+    assert g2.decision == "approval" and "target is v2" in g2.auto_resolved
+
+
+def test_d1_consequential_external_ambiguity_still_asks_after_answer():
+    s = ic.validate({
+        "goal": "Send report",
+        "interpretations": [{"goal": "Email Alice", "p": 0.5}, {"goal": "Email Bob", "p": 0.5}],
+        "outcomes": [{"id": "o1", "text": "send report", "kind": "external_action"}],
+        "steps": [{"id": "s1", "action": "send", "kind": "external", "serves": ["o1"]}],
+        "assumptions": [{"text": "recipient is Alice", "confidence": 0.4, "consequential": True}],
+    }, [])
+    assert ic.gate(s, after_answer=True).decision == "clarify"
+
+
+@pytest.mark.parametrize("prose", [
+    "Calls that don't pass holidays raise ValueError",
+    "reserve raises KeyError when empty",
+    "release raises RuntimeError",
+    "remove doesn't mutate the list",
+    "`reserve` returns None on miss",
+    "reserve(x) should return False",
+    "Emails from unknown senders are ignored",
+    "Buying a house is expensive",
+])
+def test_d2_extractor_ignores_identifiers_subjects_and_inflections(prose):
+    assert ic.requested_actions(prose) == []
+
+
+@pytest.mark.parametrize("req,expected_lemma", [
+    ("please send it to priya", "send"),
+    ("delete old_logs.txt", "delete"),
+    ("call Alice and reserve a table", "contact"),
+    ("emial the team", "email"),
+])
+def test_d2_extractor_preserves_real_requested_actions(req, expected_lemma):
+    hits = ic.requested_actions(req)
+    assert any(h["lemma"] == expected_lemma for h in hits)
+
+
+def test_d5_answer_preserves_parent_external_outcome_unless_withdrawn(env, tmp_path):
+    ci, _ = make(tmp_path)
+    p1 = {
+        "goal": "Fix bug and create a Jira ticket",
+        "interpretations": [{"goal": "Fix bug and create Jira ticket", "p": 0.55},
+                            {"goal": "Fix bug only", "p": 0.45}],
+        "outcomes": [
+            {"id": "o1", "text": "bug fixed", "kind": "deliverable"},
+            {"id": "o2", "text": "create a Jira ticket", "kind": "external_action", "quote": "create a Jira ticket"},
+        ],
+        "steps": [
+            {"id": "s1", "action": "fix bug", "kind": "think", "serves": ["o1"]},
+            {"id": "s2", "action": "create Jira ticket", "kind": "external", "serves": ["o2"]},
+        ],
+        "questions": ["Which module?"],
+    }
+    p2 = {
+        "goal": "Fix bug in parser.py",
+        "interpretations": [{"goal": "Fix bug in parser.py", "p": 0.95}],
+        "outcomes": [{"id": "o1", "text": "bug fixed", "kind": "deliverable"}],
+        "steps": [{"id": "s1", "action": "fix parser.py", "kind": "think", "serves": ["o1"]}],
+    }
+    canned(ci, p1)
+    parent = ic.compile_intent(ci, "u", "fix the bug and create a Jira ticket")
+    assert parent["status"] == "needs_answers"
+
+    canned(ci, p2)
+    child1 = ic.answer(ci, "u", parent["id"], "in parser.py")
+    assert any(o["kind"] == "external_action" and "Jira" in o["text"] for o in child1["spec"]["outcomes"])
+    assert child1["gate"]["yours_to_do"]
+
+    canned(ci, p2)
+    child2 = ic.answer(ci, "u", parent["id"], "in parser.py, and don't create the Jira ticket")
+    assert not any(o["kind"] == "external_action" for o in child2["spec"]["outcomes"])

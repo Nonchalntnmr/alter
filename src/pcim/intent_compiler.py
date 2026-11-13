@@ -139,6 +139,13 @@ def _osa(a: str, b: str) -> int:
     return d[len(a)][len(b)]
 
 
+_SUBJECT_FOLLOW = re.compile(
+    r"^(?:raises|returns|is|are|was|were|has|have|had|does|doesn't|doesnt|do|don't|dont|can|can't|cant|could|"
+    r"should|must|will|won't|wont|would|may|might|that|which|who|whose|when|where|takes|accepts|needs|requires|"
+    r"fails|succeeds|throws|yields|gives|checks|validates|handles)\b", re.I)
+_NOUN_PREP_FOLLOW = re.compile(r"^(?:from|of|in|on|at|by|for|with|about|between|into|onto|without)\b", re.I)
+
+
 def _verb(word: str) -> tuple[str, str] | None:
     """(kind, lemma) for a clause-initial word, tolerating inflection and one-edit typos."""
     w = word.lower().strip("'\"`*_-")
@@ -170,6 +177,14 @@ def requested_actions(text: str) -> list[dict]:
         if not c or _INFORMATIONAL.match(c):
             continue
         first, _, rest = c.partition(" ")
+        r = rest.strip()
+        fl = first.lower().strip("'\"`*_-")
+        if "`" in first or "(" in first or r.startswith("(") or _SUBJECT_FOLLOW.match(r):
+            continue
+        if fl.endswith("ing") and len(fl) > 5:
+            continue
+        if fl.endswith(("s", "es")) and _NOUN_PREP_FOLLOW.match(r):
+            continue
         hit = _verb(first)
         other = _OTHER_SENSE.get(first.lower())
         if hit and other and other.search(rest):
@@ -264,6 +279,66 @@ def preserve(spec: dict, request: str | None) -> dict:
     _annotate_outcomes(spec)
     spec["_preserved_for"] = request
     return spec
+
+
+_WITHDRAW_PHRASE = re.compile(
+    r"\b(?:don't|do not|dont|skip|no need(?: to)?|cancel|drop|forget|never mind|nevermind|without|not the)\b", re.I)
+_STOP = frozenset({"the", "and", "for", "with", "that", "this", "from", "into", "about", "your", "some", "also"})
+
+
+def _content_words(text: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z0-9]{4,}", (text or "").lower()) if w not in _STOP}
+
+
+def _outcome_matches_parent(outcome: dict, parent_outcome: dict) -> bool:
+    if outcome.get("kind") != parent_outcome.get("kind"):
+        return False
+    pw = _content_words(parent_outcome.get("text", "") + " " + parent_outcome.get("quote", ""))
+    ow = _content_words(outcome.get("text", "") + " " + outcome.get("quote", ""))
+    if pw and ow and (pw & ow):
+        return True
+    verbs_p = {_verb(w) for w in re.findall(r"[a-z]{3,}", parent_outcome.get("text", "").lower())} - {None}
+    verbs_o = {_verb(w) for w in re.findall(r"[a-z]{3,}", outcome.get("text", "").lower())} - {None}
+    return bool(verbs_p & verbs_o)
+
+
+def _withdrawn(parent_outcome: dict, answers: str | None) -> bool:
+    if not answers:
+        return False
+    ans = answers.lower()
+    if not _WITHDRAW_PHRASE.search(ans):
+        return False
+    pw = _content_words(parent_outcome.get("text", "") + " " + parent_outcome.get("quote", ""))
+    aw = _content_words(ans)
+    if pw & aw:
+        return True
+    # Also match verb lemma withdrawal (e.g. "don't send it", "skip creating it")
+    p_lemmas = {(_verb(w) or (None, None))[1] for w in re.findall(r"[a-z]{3,}", parent_outcome.get("text", "").lower())} - {None}
+    a_lemmas = {(_verb(w) or (None, None))[1] for w in re.findall(r"[a-z]{3,}", ans)} - {None}
+    return bool(p_lemmas & a_lemmas)
+
+
+def _preserve_parent(spec: dict, parent_spec: dict | None, answers: str | None) -> None:
+    """Carry over external_action and destructive_change outcomes from the parent plan unless
+    explicitly withdrawn in `answers`."""
+    if not parent_spec:
+        return
+    restored = False
+    for po in parent_spec.get("outcomes") or []:
+        if po.get("kind") not in ("external_action", "destructive_change"):
+            continue
+        if any(_outcome_matches_parent(o, po) for o in spec["outcomes"]):
+            continue
+        if _withdrawn(po, answers):
+            continue
+        oid = f"oR{sum(1 for o in spec['outcomes'] if o.get('restored')) + 1}"
+        spec["outcomes"].append({"id": oid, "text": po["text"], "kind": po["kind"],
+                                 "quote": po.get("quote", ""), "done_when": po.get("done_when", ""),
+                                 "restored": True, "from_parent": True})
+        spec["flags"].append(f"intent preserved from parent plan: \"{po['text'][:80]}\" ({oid})")
+        restored = True
+    if restored:
+        _annotate_outcomes(spec)
 
 
 def _annotate_outcomes(spec: dict) -> None:
@@ -411,7 +486,7 @@ class Gate:
         return dataclasses.asdict(self)
 
 
-def gate(spec: dict, request: str | None = None) -> Gate:
+def gate(spec: dict, request: str | None = None, *, after_answer: bool = False) -> Gate:
     spec.setdefault("outcomes", [])
     spec.setdefault("flags", [])
     spec.setdefault("conflicts", [])
@@ -419,19 +494,25 @@ def gate(spec: dict, request: str | None = None) -> Gate:
     if request:
         preserve(spec, request)
     reasons, questions = [], list(spec.get("questions") or [])
+    has_consequential_outcome = any(o["kind"] in ("external_action", "destructive_change") for o in spec["outcomes"])
+    defer_to_assumed = after_answer and not has_consequential_outcome and not spec["conflicts"] and bool(
+        spec.get("steps") or spec["outcomes"])
     interps = spec.get("interpretations") or []
     top = interps[0]["p"] if interps and interps[0]["p"] is not None else None
     second = interps[1]["p"] if len(interps) > 1 and interps[1]["p"] is not None else 0.0
-    if top is None and len(interps) > 1:
-        reasons.append("several readings of the request, none with a probability")
-    elif top is not None and top < GOAL_MIN_P:
-        reasons.append(f"the most likely reading has p={top:.2f} (< {GOAL_MIN_P})")
-    elif top is not None and len(interps) > 1 and top - second < GOAL_MIN_MARGIN:
-        reasons.append(f"two readings are close (p={top:.2f} vs {second:.2f})")
-    if reasons and not questions and len(interps) > 1:
-        questions.append("Did you mean: " + " — or — ".join(i["goal"] for i in interps[:3]) + "?")
+    if not defer_to_assumed:
+        if top is None and len(interps) > 1:
+            reasons.append("several readings of the request, none with a probability")
+        elif top is not None and top < GOAL_MIN_P:
+            reasons.append(f"the most likely reading has p={top:.2f} (< {GOAL_MIN_P})")
+        elif top is not None and len(interps) > 1 and top - second < GOAL_MIN_MARGIN:
+            reasons.append(f"two readings are close (p={top:.2f} vs {second:.2f})")
+        if reasons and not questions and len(interps) > 1:
+            questions.append("Did you mean: " + " — or — ".join(i["goal"] for i in interps[:3]) + "?")
     risky = [a for a in spec.get("assumptions", []) if a["consequential"]
              and (a["confidence"] is None or a["confidence"] < ASSUMPTION_MIN_CONF)]
+    if defer_to_assumed:
+        risky = []
     for a in risky:
         reasons.append(f"consequential assumption at confidence "
                        f"{'unknown' if a['confidence'] is None else format(a['confidence'], '.2f')}: {a['text']}")
@@ -510,19 +591,24 @@ def compile_intent(ci, uid: str, text: str, *, answers: str | None = None, paren
     raw = parse(r.text)
     rec = {"id": new_id("plan"), "ts": utcnow().isoformat(), "text": text, "answers": answers, "parent": parent,
            "interaction": r.interaction_id, "served_by": r.receipt.get("route", {}).get("served_by"),
-           "project_id": project_id, "context_items": sent_notes, "spec": None, "gate": None, "error": None,
-           "status": "invalid", "steps_state": {}, "outcomes_state": {}}
+           "project_id": project_id, "context_items": sent_notes, "execution_mode": "contract",
+           "spec": None, "gate": None, "error": None, "status": "invalid", "steps_state": {}, "outcomes_state": {}}
     if raw is None:
         rec["error"] = "the model did not return a JSON plan"
     else:
         try:
             rec["spec"] = validate(raw, sent_notes, request=text)  # preservation reads the person's words only
+            if parent:
+                try:
+                    _preserve_parent(rec["spec"], get(ci, uid, parent).get("spec"), answers)
+                except KeyError:
+                    pass
             ws = None
             if project_id is not None:
                 from .workspace import Workspace
                 ws = Workspace(ci).briefing(uid, project_id).get("workspace")
             rec["spec"]["missing_permissions"] = missing_permissions(rec["spec"], ws)
-            g = gate(rec["spec"], text)
+            g = gate(rec["spec"], text, after_answer=bool(answers))
             rec["gate"] = g.as_dict()
             rec["status"] = {"clarify": "needs_answers", "approval": "awaiting_approval", "ready": "ready",
                              "blocked": "blocked"}[g.decision]

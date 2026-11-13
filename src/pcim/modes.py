@@ -72,11 +72,14 @@ PLAN_FORMAT = (
     "statements], \"dependencies\": [what must exist or be true first], \"steps\": [{\"id\": \"s1\", "
     "\"action\": string, \"kind\": \"think\"|\"read\"|\"run\"|\"write\"|\"external\", \"serves\": "
     "[outcome ids], \"role\": \"preparatory\"|\"fulfilling\", \"depends_on\": [step ids]}], \"assumptions\": "
-    "[{\"text\", \"confidence\": 0 to 1, \"consequential\": true if acting on it wrongly would waste real "
-    "effort, spend money, change or delete something, or contact anyone}], \"questions\": [the fewest questions "
-    "that would settle the consequential assumptions and conflicts]}. Kinds: think = reasoning or writing an "
+    "[{\"text\", \"confidence\": 0 to 1, \"consequential\": true if acting on it wrongly would cause an "
+    "irreversible/destructive change, spend money, or contact/act externally (never mark routine code, "
+    "file-location, or implementation-detail questions as consequential inside a project: plan a read step to "
+    "inspect the code instead)}], \"questions\": [only the fewest questions that settle truly consequential "
+    "ambiguity; omit questions when reading the code can answer them]}. Kinds: think = reasoning or writing an "
     "answer; read = reading the person's files; run = running code or tests; write = creating or changing files; "
-    "external = doing an external_action. Drafting something is preparatory, never a replacement for sending or "
+    "external = doing an external_action. Keep steps minimal and direct: do not invent backup-copy steps outside the "
+    "project or temporary scratch scripts. Drafting something is preparatory, never a replacement for sending or "
     "posting it. Never invent facts about the person; cite a note only if it says what you claim.")
 
 

@@ -307,3 +307,72 @@ def test_terminal_has_stop_all_and_approve_takes_the_plan_lock(setup, monkeypatc
     assert terminal.main(["halt"]) == 0 and ws.is_halted("u")
     assert agent.queue.get("u", task).status == "cancelled"
     assert terminal.main(["resume"]) == 0 and not ws.is_halted("u")
+
+
+def test_d3_disabled_tools_not_offered_and_bookkeeping_or_scratch_denial_does_not_erase_verified(setup):
+    ci, ws, agent, p, repo = setup
+    assert "record_claim" not in {t["name"] for t in agent._tools("u", p.id)}
+
+    ws.grant_autonomy("u", p.id, ["write_file", "run_tests"])
+    rec = approved_plan(ci, [
+        {"id": "s1", "action": "update calc.py", "kind": "write", "depends_on": [], "serves": ["o1"]},
+        {"id": "s2", "action": "run tests", "kind": "run", "depends_on": ["s1"], "serves": ["o1"]},
+    ], p.id, outcomes=[{"id": "o1", "text": "calc.py updated", "kind": "deliverable"}])
+    rec["execution_mode"] = "contract"
+    ic._save(ci, "u", rec)
+
+    class CountingMock(MockAgentAdapter):
+        def __init__(self, script):
+            super().__init__(script=script)
+            self.calls = 0
+
+        def agent_step(self, system, messages, tools, max_tokens=None):
+            self.calls += 1
+            return super().agent_step(system, messages, tools, max_tokens=max_tokens)
+
+    mock = CountingMock([
+        {"text": "Writing.", "tool_uses": [
+            {"id": "t1", "name": "write_file", "input": {"path": "calc.py", "content": "x = 2\n", "reason": "fix"}},
+            {"id": "t2", "name": "write_file", "input": {"path": "../outside.py", "content": "pass\n", "reason": "tmp"}},
+            {"id": "t3", "name": "record_claim", "input": {"claim": "fixed", "evidence": []}},
+        ]},
+        {"text": "Testing.", "tool_uses": [{"id": "t4", "name": "run_tests", "input": {"reason": "verify"}}]},
+        {"text": "Verified."},
+    ])
+    agent.set_adapter("mock", None, mock)
+    r = px.execute(ci, "u", rec["id"], p.id, {"mock"}, provider="mock", agent=agent)
+    while r["outcome"] == "waiting":
+        for tid in r["plan"]["contract_state"]["pending"]:
+            agent.resolve("u", tid, approve=True)
+        r = px.execute(ci, "u", rec["id"], p.id, {"mock"}, provider="mock", agent=agent)
+    assert r["outcome"] == "done"
+    assert r["outcome_success"]["status"] == "met"
+    assert r["authorization_compliance"]["clean"] is False
+    assert any(d["tool"] == "write_file" for d in r["authorization_compliance"]["denials"])
+    assert r["authorization_compliance"]["bookkeeping_failures"]
+    assert mock.calls == 3  # single session (write + test + final), not separate per-step sessions
+
+
+def test_d4_contract_mode_requires_passing_tests_after_write(setup):
+    ci, ws, agent, p, repo = setup
+    ws.grant_autonomy("u", p.id, ["write_file", "run_tests"])
+    rec = approved_plan(ci, [
+        {"id": "s1", "action": "update calc.py", "kind": "write", "depends_on": [], "serves": ["o1"]},
+        {"id": "s2", "action": "run tests", "kind": "run", "depends_on": ["s1"], "serves": ["o1"]},
+    ], p.id, outcomes=[{"id": "o1", "text": "calc.py updated", "kind": "deliverable"}])
+    rec["execution_mode"] = "contract"
+    ic._save(ci, "u", rec)
+
+    agent.set_adapter("mock", None, MockAgentAdapter(script=[
+        {"text": "Wrote.", "tool_uses": [
+            {"id": "t1", "name": "write_file", "input": {"path": "calc.py", "content": "x = 3\n", "reason": "fix"}},
+        ]},
+        {"text": "All done!"},
+    ]))
+    r = px.execute(ci, "u", rec["id"], p.id, {"mock"}, provider="mock", agent=agent)
+    assert r["outcome"] == "waiting"
+    for tid in r["plan"]["contract_state"]["pending"]:
+        agent.resolve("u", tid, approve=True)
+    r = px.execute(ci, "u", rec["id"], p.id, {"mock"}, provider="mock", agent=agent)
+    assert r["outcome"] == "incomplete"
+    assert r["outcome_success"]["status"] == "unmet"
