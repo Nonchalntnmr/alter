@@ -1,0 +1,4 @@
+frozen_at_utc=2026-11-13T13:18:16Z
+set_sha256=b077f8bfa834d5b1546d8b6ad6f5e736cbd53782c820b7ad5dffefc1627d5998  (~/projects/ci-sealed/intent_heldout_v1.json, outside git, unread by the implementer)
+prereg_sha256=becd313d4a7a8ca728590326a4e4a65139522dfae21da122b2ff349115682d05
+V0=cc21ffa V1=ff74305 V2=<recorded at the V2 commit, before the run>

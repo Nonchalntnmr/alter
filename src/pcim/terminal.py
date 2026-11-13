@@ -21,9 +21,10 @@
     ci plan "rough idea"                                      intent compiler: goal, steps, assumptions, the
                                                               questions that matter; nothing runs
     ci plan [list] | show <id> | answer <id> "…" | approve <id>
-    ci execute <plan> [--done STEP]                           run an approved plan, step by step, through the
+    ci execute <plan> [--done ID] [--retry STEP] [--cancel]   run an approved plan, step by step, through the
                                                               governed workspace agent (inside its project folder)
     ci approve <task> · ci deny <task> ["why"]                resolve an action a plan step is waiting on
+    ci halt · ci resume                                       Stop-all: cancel every pending or running action
     ci learn "…"                                              same as ci -l
     ci twin                                                   the Cognitive Twin's picture, labelled by evidence
     ci mesh [bench [--live] | place embed|generate|verify --sensitivity S]
@@ -39,6 +40,7 @@ subcommand name needs quotes, or `ci ask …`.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import dataclasses
 import json
 import sys
@@ -55,7 +57,8 @@ from .types import approx_tokens
 from .workspace import Workspace
 
 SUBCOMMANDS = ("ask", "route", "mode", "prefer", "models", "outcome", "practice", "skills", "scorecard",
-               "weekly", "status", "challenge", "plan", "mesh", "twin", "audit", "learn", "execute", "approve", "deny", "help")
+               "weekly", "status", "challenge", "plan", "mesh", "twin", "audit", "learn", "execute", "approve", "deny", "halt",
+               "resume", "help")
 # Explicit words only: "…should I say yes" is a question, not a recorded correct attempt.
 RIGHT = {"right", "correct"}
 WRONG = {"wrong", "incorrect"}
@@ -752,7 +755,10 @@ def cmd_execute(argv: list[str]) -> int:
     from . import plan_exec as px
     ap = argparse.ArgumentParser(prog="ci execute", description="Run an approved plan through the governed workspace agent.")
     ap.add_argument("plan")
-    ap.add_argument("--done", action="append", default=[], metavar="STEP", help="mark an external step you did")
+    ap.add_argument("--done", action="append", default=[], metavar="ID", help="mark an external step or outcome you did")
+    ap.add_argument("--retry", action="append", default=[], metavar="STEP",
+                    help="re-run a failed, interrupted, incomplete or halted step")
+    ap.add_argument("--cancel", action="store_true", help="cancel the plan and any action it is waiting on")
     ap.add_argument("--model", help="pin provider:model for the agent")
     a = ap.parse_args(argv)
     ci, uid = _open()
@@ -767,7 +773,7 @@ def cmd_execute(argv: list[str]) -> int:
     prov, _, mdl = (a.model or "").partition(":")
     try:
         res = px.execute(ci, uid, a.plan, here.project_id, here.vendors, provider=prov or None, model=mdl or None,
-                         agent=_workspace_agent(ci), done=a.done)
+                         agent=_workspace_agent(ci), done=a.done, retry=a.retry, cancel=a.cancel)
     except KeyError:
         print(f"no plan {a.plan}", file=sys.stderr)
         return 2
@@ -775,16 +781,22 @@ def cmd_execute(argv: list[str]) -> int:
         print(e, file=sys.stderr)
         return 2
     print(terminal_safe(px.render(res)))
-    return {"done": 0, "waiting": 6, "blocked": 6}.get(res["outcome"], 4)
+    # 0 finished (done, or cancelled as asked) · 6 needs you · 4 not achieved (incomplete, failed, interrupted, halted)
+    return {"done": 0, "cancelled": 0, "waiting": 6, "awaiting_you": 6}.get(res["outcome"], 4)
 
 
 def cmd_approve(argv: list[str], approve: bool = True) -> int:
     if not argv:
         print(f"usage: ci {'approve' if approve else 'deny'} <task id>" + ("" if approve else ' ["reason"]'), file=sys.stderr)
         return 2
+    from . import plan_exec as px
     ci, uid = _open()
+    pid = px.plan_for_task(ci, uid, argv[0])
     try:
-        out = _workspace_agent(ci).resolve(uid, argv[0], approve, " ".join(argv[1:]))
+        # a plan's action is resolved under the plan's lock, so `ci execute` never judges a step
+        # while the turn this resumes is still running
+        with px.plan_lock(ci, pid) if pid else contextlib.nullcontext():
+            out = _workspace_agent(ci).resolve(uid, argv[0], approve, " ".join(argv[1:]))
     except KeyError:
         print(f"no task {argv[0]}", file=sys.stderr)
         return 2
@@ -796,6 +808,26 @@ def cmd_approve(argv: list[str], approve: bool = True) -> int:
         print(terminal_safe(f"{'Approved' if approve else 'Denied'}. Session {d['status']}" + (f": {d['text'][:300]}" if d.get("text") else "")))
     else:
         print(f"{'Approved' if approve else 'Denied'}: task {d['task']['status']}")
+    if pid:
+        print(f"Plan {pid}: run `ci execute {pid}` to record the step and continue.")
+    return 0
+
+
+def cmd_halt(argv: list[str]) -> int:
+    """Stop-all: block new execution and model calls, cancel queued and running actions."""
+    from .governor import Governor
+    from .tasks import TaskQueue
+    ci, uid = _open()
+    ws = Workspace(ci)
+    r = TaskQueue(ws, Governor(ws)).halt(uid)
+    print(f"Halted. {r['cancelled']} pending or running action(s) cancelled. Nothing runs until `ci resume`.")
+    return 0
+
+
+def cmd_resume(argv: list[str]) -> int:
+    ci, uid = _open()
+    Workspace(ci).set_halted(uid, False)
+    print("Resumed. Halted plan steps stay halted until you retry them (ci execute <plan> --retry <step>).")
     return 0
 
 
@@ -813,7 +845,8 @@ def main(argv: list[str] | None = None) -> int:
              "outcome": cmd_outcome, "practice": cmd_practice, "skills": cmd_skills, "scorecard": cmd_scorecard,
              "weekly": cmd_weekly, "status": cmd_status, "challenge": cmd_challenge, "plan": cmd_plan,
              "mesh": cmd_mesh, "twin": cmd_twin, "audit": cmd_audit, "learn": cmd_learn,
-             "execute": cmd_execute, "approve": cmd_approve, "deny": cmd_deny}
+             "execute": cmd_execute, "approve": cmd_approve, "deny": cmd_deny, "halt": cmd_halt,
+             "resume": cmd_resume}
     if cmd in table:
         return table[cmd](argv[1:])
     return cmd_ask(argv)

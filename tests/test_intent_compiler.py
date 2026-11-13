@@ -2,6 +2,7 @@
 without a model; the end-to-end path uses canned replies through the real routing and engine."""
 
 import json
+import sys
 
 import pytest
 from test_amplify import Recorder, env, make  # noqa: F401  (env is a fixture)
@@ -10,6 +11,7 @@ from pcim import intent_compiler as ic
 from pcim import modes, terminal
 from pcim.adapters.base import ModelResponse, Usage
 from pcim.assist import DIRECTIVES
+from pcim.workspace import Workspace
 
 
 def spec(**kw):
@@ -50,7 +52,8 @@ def test_running_or_writing_needs_approval_and_external_actions_are_never_ready(
                                          "depends_on": ["s1"]}]), []))
     assert g.decision == "approval"
     assert g.needs_approval == ["s1: run the test suite"]
-    assert g.yours_to_do == ["s2: email the results to Raj"]
+    # the external step serves no outcome the model named, so one is made for it, and it is yours
+    assert g.yours_to_do == ["oSs2: email the results to Raj"]
 
 
 def test_a_confident_consequential_assumption_does_not_block():
@@ -73,7 +76,7 @@ def test_a_note_citation_must_point_at_a_note_that_was_sent():
 def test_unknown_step_kinds_are_treated_as_the_most_restricted():
     v = ic.validate(spec(steps=[{"id": "s1", "action": "push to production", "kind": "deploy", "depends_on": []}]), [])
     assert v["steps"][0]["kind"] == "external"
-    assert ic.gate(v).yours_to_do == ["s1: push to production"]
+    assert ic.gate(v).yours_to_do == ["oSs1: push to production"]
 
 
 def test_levels_cycles_and_unknown_dependencies():
@@ -114,11 +117,23 @@ def canned(ci, obj):
     return reps
 
 
+def authorized(ci, tmp_path, write=False):
+    """A project whose folder CI may read (and run tests in, and write to if `write`)."""
+    repo = tmp_path / "repo"
+    repo.mkdir(exist_ok=True)
+    ws = Workspace(ci)
+    p = ws.create_project("u", "Backtests", objective="weekly summaries")
+    ws.authorize_workspace("u", p.id, str(repo), run_argv=[sys.executable, "-c", "print('1 passed')"],
+                           allow_write=write)
+    return p, set(ws.provider_vendors("u", p.id)), repo
+
+
 def test_compile_routes_in_plan_mode_checks_provenance_and_stores_a_sealed_record(env, tmp_path):
     ci, _ = make(tmp_path)
     ci.remember("u", "Backtests use 25bps round-trip costs", "constraint")
     reps = canned(ci, spec(constraints=[{"text": "25bps costs", "source": "notes", "notes": [1]}]))
-    rec = ic.compile_intent(ci, "u", "backtest summary")
+    p, vendors, _ = authorized(ci, tmp_path)
+    rec = ic.compile_intent(ci, "u", "backtest summary", project_id=p.id, project_vendors=vendors)
     served = rec["served_by"].split(":")[1]
     system = reps[served].prompts[0].system
     assert modes.PLAN_FORMAT in system and DIRECTIVES["plan"] in system
@@ -134,13 +149,14 @@ def test_compile_routes_in_plan_mode_checks_provenance_and_stores_a_sealed_recor
 
 def test_answers_recompile_with_a_parent_and_approval_respects_the_gate(env, tmp_path):
     ci, _ = make(tmp_path)
+    p, vendors, _ = authorized(ci, tmp_path, write=True)
     canned(ci, spec(assumptions=[{"text": "overwrite results.csv", "confidence": 0.5, "consequential": True}]))
-    first = ic.compile_intent(ci, "u", "redo the results")
+    first = ic.compile_intent(ci, "u", "redo the results", project_id=p.id, project_vendors=vendors)
     assert first["status"] == "needs_answers"
     with pytest.raises(ValueError, match="open questions"):
         ic.approve(ci, "u", first["id"])
     canned(ci, spec(steps=[{"id": "s1", "action": "write results_v2.csv", "kind": "write", "depends_on": []}]))
-    second = ic.answer(ci, "u", first["id"], "no, write a new file")
+    second = ic.answer(ci, "u", first["id"], "no, write a new file", project_vendors=vendors)
     assert second["parent"] == first["id"] and second["status"] == "awaiting_approval"
     assert "Answers to your earlier questions: no, write a new file" in ci.receipt("u", second["interaction"])["task"]
     assert ic.approve(ci, "u", second["id"])["status"] == "approved"
@@ -162,6 +178,8 @@ def test_plan_is_a_command_not_a_default_mode(env, tmp_path):
 def test_terminal_plan_round_trip(env, tmp_path, monkeypatch, capsys):
     ci, _ = make(tmp_path)
     canned(ci, spec())
+    _, _, repo = authorized(ci, tmp_path)
+    monkeypatch.chdir(repo)  # `ci plan` plans for the project whose folder you are in
     monkeypatch.setattr(terminal, "_open", lambda: (ci, "u"))
     assert terminal.main(["plan", "summarise", "the", "backtests"]) == 0
     out = capsys.readouterr().out
@@ -177,7 +195,20 @@ def test_a_requested_external_action_the_plan_dropped_cannot_be_ready():
     drafting only and gated ready. The request's own words now stop that."""
     drafting = ic.validate(spec(steps=[{"id": "s1", "action": "draft a tweet", "kind": "think", "depends_on": []}]), [])
     g = ic.gate(drafting, "tweet about the launch")
-    assert g.decision == "approval" and any('"tweet"' in y for y in g.yours_to_do)
-    assert ic.gate(drafting, "explain how FSRS spacing works").decision == "ready"
+    assert g.decision == "approval"
+    assert g.yours_to_do == ["oR1: tweet about the launch (restored from your request)"]
+    assert any("intent preserved" in f for f in drafting["flags"])
+    assert ic.gate(ic.validate(spec(steps=[{"id": "s1", "action": "draft a tweet", "kind": "think", "depends_on": []}]), []),
+                   "explain how FSRS spacing works").decision == "ready"
     planned = ic.validate(spec(steps=[{"id": "s1", "action": "post the tweet", "kind": "external", "depends_on": []}]), [])
-    assert sum("no step that does it" in y for y in ic.gate(planned, "tweet about it").yours_to_do) == 0
+    ic.gate(planned, "tweet about it")
+    assert not any(o.get("restored") for o in planned["outcomes"])  # the plan already has it: nothing to restore
+
+
+def test_outside_an_authorized_folder_a_plan_that_reads_files_is_blocked_and_cannot_be_approved(env, tmp_path):
+    ci, _ = make(tmp_path)
+    canned(ci, spec())  # s1 reads the run logs
+    rec = ic.compile_intent(ci, "u", "summarise the backtests")
+    assert rec["status"] == "blocked" and "no folder is authorized" in rec["gate"]["reasons"][0]
+    with pytest.raises(ValueError, match="permissions"):
+        ic.approve(ci, "u", rec["id"])
