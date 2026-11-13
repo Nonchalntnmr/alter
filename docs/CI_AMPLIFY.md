@@ -1,8 +1,15 @@
 # CI amplification slice: routing, modes, skill evidence, the Cognitive Twin
 
-Status: implemented on branch `feat/modes-routing-twin` (2026-11-11), 154 tests passing
-(132 existing, 22 new). Nothing in this slice has been run against a live model; see
-"What is not shown".
+Status (2026-11-12): PR #4, **not ready to merge**. 314 tests pass (1 expected failure: open
+finding M10); GitHub Actions green on Linux 3.12/3.14 and macOS 3.14. No live model call has
+been made. Merge gates, as set by the project owner:
+
+| Gate | State |
+|---|---|
+| All high-severity security findings resolved | This slice: H1–H5 fixed (23 of 24 review findings). Audit #36–#40: fixed as unpushed commits on `fix/review-2026-10-26` (138 tests pass, merges cleanly with this branch); needs its own PR first |
+| Passing CI | Green on each pushed head |
+| Fresh sealed routing benchmark | Set #2 registered by hash (`experiments/routing/SEALED.md`); learned estimator in progress |
+| Real-model evaluation vs fixed Sonnet and Opus | Harness in progress; will run on the Claude CLI with a cost estimate first |
 
 ## 1. What CI already was (from the code, not the docs)
 
@@ -145,28 +152,38 @@ reason, notes sent and withheld, cost (CLI cost marked notional), interaction id
 `ci outcome` command. Inside an authorized workspace it scopes memory and vendors to that
 project. Exit codes: 0 ok, 2 usage or no identity, 3 routing refused or every model failed.
 
-## 4. Security implications
-- **Narrowed:** a credential in a request no longer reaches an external vendor by default.
-  Routing cannot select a vendor without a grant. A fallback cannot widen disclosure.
-- **New data at rest:** the attempt log and weekly snapshots (derived counts, skill names,
-  short quotes of notes and goals), sealed under the user's key like skills; covered by
-  export, erase and explicit delete commands.
-- **New egress path:** `ci weekly --deep`, gated as above. Task text in the routing plan is
-  stored only inside the sealed interaction payload; the audit gets counts and model keys.
-- **Unchanged:** the open high findings #36–#40 (jail escape via temp file, case-insensitive
-  `.git`, MCP briefing filter, reflection lines, transitive lineage). The roadmap's rule that
-  they close before features still holds; this slice avoided their files so the fixes merge
-  cleanly, but it does not reduce that risk.
+## 4. Security implications and the independent review
+An independent reviewer (an agent that did not write this code) filed 24 findings against
+81c7fd5, each as a strict-xfail test in `tests/test_security_review_amplify.py`; a fix counts
+only when its test flips. **23 are fixed**:
+- **High (all fixed):** H1 `.env`/JSON/URL secrets missed by the tripwire; H2 the `--deep`
+  digest never passed the tripwire; H3 `--deep` re-sent requests from projects that later
+  revoked the vendor; H4 skill names crossed vendor boundaries in the digest; H5 stored text
+  could close the `<facts>` block of the `--deep` prompt.
+- **Medium:** M1 instruction-shaped lines withheld from the digest; M2 `--deep` never falls back
+  to a vendor the person did not confirm; M3 project memory fails closed without explicit
+  vendors; M4 credential-shaped memory never leaves the machine; M5 snapshots name goals and
+  notes by id; M6 forgetting a skill scrubs every snapshot; M7 the audit records a keyed tag,
+  not skill names; M8 `--deep` prompts are excluded from reviews and deleted by `--forget`;
+  M9 terminal control sequences are stripped from stored and model text.
+- **Low:** L1 settings words no longer change settings from a request; L2 ambiguous project
+  detection refuses; L3 provider errors redacted; L4 twin name sealed; L5 attempt log appended
+  under a DB write lock; L6 WAL truncated on forget; L7 malformed capability files reported;
+  L8 usage errors not tracebacks; L9 bounded estimation on huge input.
+- **Open:** M10, deleting a project keeps the `ci` requests made inside it; the fix belongs in
+  `workspace.delete_project` (the other session's file).
+- Also fixed: a local server naming its model `claude-opus-5-5` no longer inherits Opus's tier;
+  the local adapter ignores proxy variables (they could route "local" traffic off the machine);
+  provider errors never carry keys, auth headers or request bodies.
 - **Tripwire limits:** pattern-based; a key with no recognisable shape passes.
 
-## 5. Tests executed (2026-11-11, `PYTHONPATH=<worktree>/src .venv/bin/python -m pytest -q`)
-- Baseline before changes: 132 passed.
-- After: **154 passed** (132 + 22 in `tests/test_amplify.py`), 10.5 s.
-- Mutation checks: removing both credential filters fails the credential test; letting
-  assisted attempts move mastery fails two tests; swallowing every exception as a fallback
-  fails the fallback test. Removing either credential filter alone is caught by the other.
-- End-to-end smoke of the real `ci` command through the real Claude CLI adapter against a
-  stand-in `claude` binary (no network) in a scratch `$PCIM_HOME`.
+## 5. Tests executed
+- 2026-11-11 baseline before changes: 132 passed; after the first slice: 154.
+- 2026-11-12: **314 passed, 1 xfailed** (M10), locally and on GitHub Actions. Includes the
+  challenge mode (6), spaced review (16), adapter errors (114) and the security review (24).
+- Mutation checks: credential filters, the unassisted-only rule and the fallback error filter
+  each fail a test when broken; agents reported the same for their modules.
+- End-to-end smoke of `ci` through the real Claude CLI adapter against a stand-in binary.
 
 ## 6. Routing benchmark (`experiments/routing/`)
 - **Held-out (the measurement):** 40 requests written by a separate agent from the rubric alone,
