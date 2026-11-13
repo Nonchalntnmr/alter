@@ -33,12 +33,13 @@ import http.client
 import http.server
 import json
 import os
+import socket
 import subprocess
 import sys
 import threading
 from pathlib import Path
 
-from .claude_cli import PROBE_RECORD, ClaudeCLIAdapter, cli_version
+from .claude_cli import PROBE_RECORD, ClaudeCLIAdapter, cli_version, profile_keys, sanitized_profile
 
 UPSTREAM = "api.anthropic.com"
 _HOP = {"connection", "keep-alive", "transfer-encoding", "te", "trailer", "upgrade", "proxy-connection", "host",
@@ -120,6 +121,12 @@ def markers() -> dict[str, str]:
     if len(user) >= 3:
         out["username ($USER)"] = user
     out["home path"] = str(Path.home())
+    try:
+        host = socket.gethostname().strip()
+    except OSError:
+        host = ""
+    if len(host) >= 4 and host.lower() not in ("localhost", "localhost.localdomain"):
+        out["hostname"] = host
     for key, label in (("user.name", "git user.name"), ("user.email", "git user.email")):
         try:
             v = subprocess.run(["git", "config", "--global", key], capture_output=True, text=True, timeout=10).stdout.strip()
@@ -131,8 +138,8 @@ def markers() -> dict[str, str]:
 
 
 def scan(bodies: list[dict], marks: dict[str, str]) -> dict:
-    model_input = json.dumps([[b.get("system"), b.get("messages")] for b in bodies]).lower()
-    meta = json.dumps([b.get("metadata") for b in bodies]).lower()
+    model_input = json.dumps([[b.get("system"), b.get("messages")] for b in bodies], ensure_ascii=False).lower()
+    meta = json.dumps([b.get("metadata") for b in bodies], ensure_ascii=False).lower()
     return {"model_input": {k: v.lower() in model_input for k, v in marks.items()},
             "api_metadata": {k: v.lower() in meta for k, v in marks.items()}}
 
@@ -149,7 +156,7 @@ def trial(relay: Relay, marks: dict[str, str], isolate: bool, agent: bool = Fals
     relay.paths.clear()
     a = ClaudeCLIAdapter(model="haiku", runner=runner, max_budget_usd=0.05, isolate_identity=isolate,
                          require_isolation=False)
-    err, cost = None, None
+    err, cost, refetched = None, None, None
     try:
         if agent:  # the agent path: CI's protocol, a tool catalogue and a longer prompt
             tools = [{"name": "read_file", "description": "Read a file in the project.",
@@ -160,11 +167,12 @@ def trial(relay: Relay, marks: dict[str, str], isolate: bool, agent: bool = Fals
         else:
             r = a.generate(RenderedPrompt(system="You are a probe. Reply with the single word OK.", user="Say OK."))
         cost = r.cost_usd
+        refetched = (r.provider_context or {}).get("profile_refetched_during_call")
     except Exception as e:  # noqa: BLE001 - reported, not hidden
         err = f"{type(e).__name__}: {str(e)[:200]}"
     s = scan(relay.bodies, marks)
     return {"isolate": isolate, "agent_path": agent, "error": err, "cost_usd": cost, "requests": len(relay.bodies),
-            "paths": sorted(set(relay.paths)), "refetched": (a.last_isolation or {}).get("profile_refetched_during_call"),
+            "paths": sorted(set(relay.paths)), "refetched": refetched,
             "found_in_model_input": sorted(k for k, v in s["model_input"].items() if v),
             "found_in_api_metadata": sorted(k for k, v in s["api_metadata"].items() if v)}
 
@@ -182,7 +190,8 @@ def run(trials: int = 3, baseline: bool = False) -> dict:
     found = sorted({f for t in iso for f in t["found_in_model_input"]})
     return {"cli_version": cli_version(os.environ.get("PCIM_CLAUDE_BIN", "claude")),
             "probed_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "markers_checked": sorted(marks), "trials": iso, "baseline": base,
+            "markers_checked": sorted(marks), "profile_keys": profile_keys(sanitized_profile()),
+            "trials": iso, "baseline": base,
             "clean": bool(ok) and len(ok) == len(iso) and not found, "found": found}
 
 
@@ -194,8 +203,11 @@ def record(result: dict) -> Path:
         d = json.loads(p.read_text())
     except (OSError, ValueError):
         d = {}
-    d[result["cli_version"] or "unknown"] = {k: result[k] for k in ("probed_at", "clean", "found", "markers_checked")} | {
-        "trials": len(result["trials"])}
+    if not isinstance(d, dict):
+        d = {}
+    d[result["cli_version"] or "unknown"] = {
+        k: result[k] for k in ("probed_at", "clean", "found", "markers_checked", "profile_keys")
+    } | {"trials": len(result["trials"])}
     fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as fh:
         json.dump(d, fh, indent=1)
@@ -208,9 +220,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--baseline", action="store_true", help="also one call with isolation off, for comparison")
     ap.add_argument("--record", action="store_true", help="write the result for this CLI version to $PCIM_HOME")
     a = ap.parse_args(argv)
-    res = run(a.trials, a.baseline)
+    res = run(a.trials, a.baseline or a.record)
     print(json.dumps(res, indent=1))
-    if a.record and res["cli_version"]:
+    if a.record:
+        has_positive_control = any("account email" in b.get("found_in_model_input", ()) for b in res["baseline"])
+        if not res["clean"] or not res["cli_version"] or not has_positive_control:
+            print("not recorded: probe must be clean with a baseline showing the account email", file=sys.stderr)
+            return 1
         print(f"recorded: {record(res)}", file=sys.stderr)
     return 0 if res["clean"] else 1
 

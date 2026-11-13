@@ -67,7 +67,7 @@ def test_the_cli_runs_outside_home_with_a_sanitized_profile_and_no_identity_in_i
     assert profile["billingType"] == "stripe_subscription"  # enough for the CLI to treat the login as set up
     assert time.time() * 1000 - profile["profileFetchedAt"] < 60_000  # marked fresh, so not refetched first
     env = seen["env"]
-    assert env["CLAUDE_SECURESTORAGE_CONFIG_DIR"] == ""  # the login itself stays where it was
+    assert "CLAUDE_SECURESTORAGE_CONFIG_DIR" not in env  # the login itself stays where it was
     assert env["GIT_CONFIG_GLOBAL"] == os.devnull and env["GIT_CONFIG_NOSYSTEM"] == "1"
     assert not set(IDENTITY_ENV) & set(env)
     assert seen["cfg_mode"] == 0o700 and seen["file_mode"] == 0o600
@@ -88,10 +88,11 @@ def test_a_parent_config_dir_keeps_its_own_login(person, tmp_path, monkeypatch):
     assert json.loads(seen["files"][".claude.json"])["oauthAccount"]["emailAddress"] == ""
 
 
-def record(home: Path, version: str, clean: bool):
+def record(home: Path, version: str, clean: bool, profile_keys: list[str] | None = None):
     home.mkdir(parents=True, exist_ok=True)
-    (home / claude_cli.PROBE_RECORD).write_text(json.dumps({version: {"clean": clean, "probed_at": "t",
-                                                                      "found": [] if clean else ["account email"]}}))
+    keys = sorted(claude_cli.PROFILE_REQUIRED) if profile_keys is None else profile_keys
+    (home / claude_cli.PROBE_RECORD).write_text(json.dumps({version: {
+        "clean": clean, "probed_at": "t", "found": [] if clean else ["account email"], "profile_keys": keys}}))
 
 
 def test_an_identity_sensitive_call_is_refused_unless_this_cli_version_was_measured_clean(person, tmp_path):
@@ -171,3 +172,129 @@ def test_live_probe_finds_no_identity_in_the_model_input():
     assert res["clean"], res["found"]
     assert all(t["requests"] >= 1 for t in res["trials"])
     assert res["baseline"][0]["found_in_model_input"], "the baseline should show the exposure the isolation removes"
+
+
+def test_incomplete_profile_or_mismatched_profile_keys_is_unverified(person, tmp_path):
+    record(tmp_path / "pcim", "9.9.9", clean=True)
+    ad = ClaudeCLIAdapter(require_isolation=True)
+    assert ad.identity_isolation()["status"] == "verified"
+
+    # M1a: probe record missing or mismatched profile_keys
+    record(tmp_path / "pcim", "9.9.9", clean=True, profile_keys=["accountUuid"])
+    assert ad.identity_isolation()["status"] == "unverified"
+    with pytest.raises(ClaudeCLIError):
+        ad.generate(RenderedPrompt(system="s", user="u"))
+
+    # M1b: incomplete oauthAccount (email-only) is rejected as unverified
+    record(tmp_path / "pcim", "9.9.9", clean=True)
+    (person / ".claude.json").write_text(json.dumps({"oauthAccount": {"emailAddress": EMAIL}}))
+    assert claude_cli.sanitized_profile() is None
+    assert ad.identity_isolation()["status"] == "unverified"
+
+
+def test_profile_is_read_once_and_missing_profile_fails_closed(person, tmp_path, monkeypatch):
+    record(tmp_path / "pcim", "9.9.9", clean=True)
+    reads = 0
+    real_sanitized = claude_cli.sanitized_profile
+
+    def counting_sanitized(parent_env=None):
+        nonlocal reads
+        reads += 1
+        val = real_sanitized(parent_env)
+        # Simulate concurrent deletion after the single read
+        (person / ".claude.json").unlink(missing_ok=True)
+        return val
+
+    monkeypatch.setattr(claude_cli, "sanitized_profile", counting_sanitized)
+    run, seen = capturing()
+    r = ClaudeCLIAdapter(runner=run, require_isolation=True).generate(RenderedPrompt(system="s", user="u"))
+    assert reads == 1
+    assert json.loads(seen["files"][".claude.json"])["oauthAccount"]["accountUuid"] == "acct-1"
+    assert r.provider_context["status"] == "verified"
+
+    # _isolated_env itself fails closed when require_isolation is True and profile is None
+    with pytest.raises(ClaudeCLIError) as e:
+        ClaudeCLIAdapter(require_isolation=True)._isolated_env({}, profile=None)
+    assert e.value.kind == "config"
+
+
+def test_cli_version_cache_invalidates_when_binary_changes_and_runs_resolved_path(tmp_path, monkeypatch):
+    monkeypatch.setattr(claude_cli, "_VERSIONS", {})
+    v1 = tmp_path / "claude-v1"
+    v2 = tmp_path / "claude-v2"
+    v1.write_text("#!/bin/sh\necho '2.1.316 (Claude Code)'\n")
+    v2.write_text("#!/bin/sh\necho '2.1.317 (Claude Code)'\n")
+    v1.chmod(0o755)
+    v2.chmod(0o755)
+    link = tmp_path / "claude"
+    link.symlink_to(v1)
+    assert claude_cli.cli_version(str(link)) == "2.1.316"
+    link.unlink()
+    link.symlink_to(v2)
+    assert claude_cli.cli_version(str(link)) == "2.1.317"
+
+    seen = {}
+
+    def run(argv, **kw):
+        seen["argv"] = argv
+        return subprocess.CompletedProcess(argv, 0, stdout=OK, stderr="")
+
+    ClaudeCLIAdapter(binary=str(link), runner=run).generate(RenderedPrompt(system="s", user="u"))
+    assert seen["argv"][0] == str(v2.resolve())
+
+
+def test_per_call_config_dir_is_cleaned_up_if_mkstemp_fails(person, tmp_path, monkeypatch):
+    ro_dir = tmp_path / "ro-workdir"
+    ro_dir.mkdir(mode=0o500)
+    monkeypatch.setattr(claude_cli, "neutral_base", lambda: tmp_path)
+    before = set(tmp_path.glob("pcim-cli-cfg-*"))
+    try:
+        with pytest.raises(PermissionError):
+            ClaudeCLIAdapter(workdir=ro_dir).generate(RenderedPrompt(system="s", user="u"))
+    finally:
+        ro_dir.chmod(0o700)
+    after = set(tmp_path.glob("pcim-cli-cfg-*"))
+    assert after == before
+
+
+def test_probe_scan_handles_non_ascii_and_record_requires_positive_control(tmp_path, monkeypatch):
+    from pcim.adapters import cli_probe
+    s = cli_probe.scan([{"system": "Hello José Núñez", "messages": [], "metadata": {}}], {"full name": "José Núñez"})
+    assert s["model_input"]["full name"] is True
+
+    monkeypatch.setenv("PCIM_HOME", str(tmp_path / "pcim"))
+    monkeypatch.setattr(cli_probe, "run", lambda trials, baseline: {
+        "cli_version": "9.9.9", "probed_at": "t", "markers_checked": ["account email"],
+        "profile_keys": sorted(claude_cli.PROFILE_REQUIRED), "trials": [{}],
+        "baseline": [{"found_in_model_input": []}],  # positive control failed: email not seen
+        "clean": True, "found": [],
+    })
+    assert cli_probe.main(["--record"]) == 1
+    assert not (tmp_path / "pcim" / claude_cli.PROBE_RECORD).exists()
+
+
+def test_malformed_probe_record_entry_does_not_crash(person, tmp_path):
+    (tmp_path / "pcim").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "pcim" / claude_cli.PROBE_RECORD).write_text(json.dumps({"9.9.9": "clean"}))
+    st = ClaudeCLIAdapter(require_isolation=True).identity_isolation()
+    assert st["status"] == "unverified"
+
+
+def test_agent_step_retry_preserves_refetch_flag_without_shared_state(person):
+    replies = ["not json", json.dumps({"text": "ok", "tool_calls": []})]
+    idx = 0
+
+    def run(argv, **kw):
+        nonlocal idx
+        cfg = Path(kw["env"]["CLAUDE_CONFIG_DIR"])
+        if idx == 0:
+            (cfg / ".claude.json").write_text(json.dumps({"oauthAccount": {"emailAddress": EMAIL}}))
+        res = json.dumps({"type": "result", "subtype": "success", "is_error": False,
+                          "result": replies[idx], "total_cost_usd": 0.01})
+        idx += 1
+        return subprocess.CompletedProcess(argv, 0, stdout=res, stderr="")
+
+    ad = ClaudeCLIAdapter(runner=run)
+    assert not hasattr(ad, "last_isolation")
+    step = ad.agent_step("s", [{"role": "user", "content": "x"}], [])
+    assert step.provider_context["profile_refetched_during_call"] is True
