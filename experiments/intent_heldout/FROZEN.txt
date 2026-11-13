@@ -1,4 +1,8 @@
 frozen_at_utc=2026-11-13T13:18:16Z
-set_sha256=b077f8bfa834d5b1546d8b6ad6f5e736cbd53782c820b7ad5dffefc1627d5998  (~/projects/ci-sealed/intent_heldout_v1.json, outside git, unread by the implementer)
+set_sha256=b077f8bfa834d5b1546d8b6ad6f5e736cbd53782c820b7ad5dffefc1627d5998  (~/projects/ci-sealed/intent_heldout_v1.json, outside git, unread by the implementer until the run)
 prereg_sha256=becd313d4a7a8ca728590326a4e4a65139522dfae21da122b2ff349115682d05
-V0=cc21ffa V1=ff74305 V2=<recorded at the V2 commit, before the run>
+V0=cc21ffa  (scored from the old-format replies with ff74305's gate, without the request)
+V1=ff74305
+V2=58348cc  (committed before the run; frozen 2026-11-13T13:33:59Z)
+protocol_sha256=4f78f5e208053092adc7d2a00f1f049dc669a6f93ebdf575f21730e0cfb67f40
+runner_sha256=b69d8c6c5467ec6be28b14742f846447fcf78aefa90f78cb05e46f00a63908d9
