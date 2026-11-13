@@ -24,6 +24,15 @@ _PATTERNS: tuple[tuple[str, re.Pattern], ...] = (
     ("Stripe secret key", re.compile(r"\b[rs]k_live_[0-9A-Za-z]{20,}")),
     ("JSON web token", re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}")),
     ("password assignment", re.compile(r"(?i)\b(?:password|passwd|api[_-]?key|secret)\s*[:=]\s*['\"]?[^\s'\"]{8,}")),
+    # .env / shell style: a name containing PASSWORD, SECRET, TOKEN, API_KEY, ACCESS_KEY or PRIVATE_KEY
+    # (DB_PASSWORD=..., export GITHUB_TOKEN=...), with a value that has a letter (MAX_TOKENS=128000 is not one).
+    ("secret in an assignment", re.compile(
+        r"(?im)^[ \t]*(?:export[ \t]+)?[A-Za-z0-9_]*?(?:PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY|ACCESS_?KEY|PRIVATE_?KEY)"
+        r"(?:_[A-Za-z0-9]+)*[ \t]*[=:][ \t]*['\"]?(?=[^\s'\"]*[A-Za-z])[^\s'\"]{6,}")),
+    ("secret in JSON or YAML", re.compile(
+        r"(?i)[\"']?\b(?:password|passwd|secret|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|"
+        r"private[_-]?key)[\"']?[ \t]*:[ \t]*[\"'][^\"'\s]{6,}[\"']")),
+    ("password in a URL", re.compile(r"\b[a-zA-Z][a-zA-Z0-9+.-]{1,20}://[^\s/:@]{1,64}:[^\s/@]{3,128}@[^\s/]{2,}")),
 )
 
 LOCAL_VENDORS = frozenset({"local", "mock"})

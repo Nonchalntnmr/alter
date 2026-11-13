@@ -38,6 +38,8 @@ from . import modes as intelligence
 from .engine import RoutingError, fallback_errors
 from .evaluation import ROUTED_TASK_TYPES, scorecard, window_interactions
 from .registry import vendor_of
+from .sovereignty.credentials import find_credentials
+from .sovereignty.injection import scan as scan_instructions
 from .types import TASK_TYPES, Trust, utcnow
 from .workspace import Workspace
 
@@ -60,6 +62,12 @@ def iso_week(t: dt.datetime) -> str:
 def _snip(text: str, n: int = SNIPPET) -> str:
     t = " ".join((text or "").split())
     return t if len(t) <= n else t[: n - 1] + "…"
+
+
+def _q(text: str, n: int = SNIPPET) -> str:
+    """Stored text quoted into a prompt: one line, capped, angle brackets neutralised so it can
+    never open or close a block of the prompt it is placed in."""
+    return _snip(text, n).replace("<", "‹").replace(">", "›")
 
 
 def _when(s: str) -> dt.datetime:
@@ -457,47 +465,90 @@ class CognitiveTwin:
         return done
 
     # ------------------------------------------------------------------ --deep
+    def _may_quote(self, user_id: str, row: dict, vendor: str) -> str | None:
+        """Why a past request may not be quoted to `vendor` (a withheld-count key), or None.
+        Quotable only if this vendor answered it and, when it was made inside a project, that
+        project (still) allows the vendor."""
+        try:
+            if vendor_of(row["provider"]) != vendor:
+                return "requests_answered_by_other_vendors"
+        except ValueError:
+            return "requests_answered_by_other_vendors"
+        pid = (row.get("receipt") or {}).get("project_id")
+        if pid:
+            try:
+                if vendor not in self.ws.provider_vendors(user_id, pid):
+                    return "requests_from_projects_not_allowing_this_vendor"
+            except KeyError:  # the project was deleted: its content goes nowhere
+                return "requests_from_projects_not_allowing_this_vendor"
+        return None
+
+    def _skill_quotable(self, user_id: str, skill: str, vendor: str, attempts: list[dict]) -> bool:
+        """A skill name is the person's words when they logged it themselves; when it was logged on
+        an answer (`ci outcome --skill`), it may go only where that answer may be quoted."""
+        for a in attempts:
+            if a["skill"] != skill or not a.get("interaction"):
+                continue
+            row = self.ci.store.get_interaction(a["interaction"])
+            if row is None or self._may_quote(user_id, row, vendor):
+                return False
+        return True
+
     def digest(self, user_id: str, review: Review, vendor: str) -> tuple[str, dict]:
-        """The facts `vendor` may receive, as text, and what was withheld. Quotes only requests this
-        vendor answered itself and notes from projects that allow it (lineage-checked)."""
+        """The facts `vendor` may receive, as text, and what was withheld and why.
+
+        Quoted text is only: requests this vendor answered itself (and whose project still allows
+        it), notes from projects that allow it (model-written ones lineage-checked), and skill
+        names the person logged or that came from answers this vendor may see. Every quoted line
+        then passes the credential tripwire and the instruction tripwire, and angle brackets in
+        it are neutralised, so stored text cannot close or forge the prompt's <facts> block."""
         f = review.facts
+        withheld = {"requests_answered_by_other_vendors": 0, "requests_from_projects_not_allowing_this_vendor": 0,
+                    "projects_not_allowing_this_vendor": 0, "notes_blocked_by_lineage": 0,
+                    "skill_names_from_other_vendors": 0, "lines_with_credentials": 0,
+                    "lines_flagged_as_instructions": 0}
         lines = [f"Week {review.week} ({review.since.date()} to {review.until.date()}). Counts are CI's records."]
-        withheld = {"requests_answered_by_other_vendors": 0, "projects_not_allowing_this_vendor": 0,
-                    "notes_blocked_by_lineage": 0}
+
+        def quote(line: str) -> None:
+            if find_credentials(line):
+                withheld["lines_with_credentials"] += 1
+            elif scan_instructions(line):
+                withheld["lines_flagged_as_instructions"] += 1
+            else:
+                lines.append(line)
+
         own = []
         for r in f["rows"]:
-            try:
-                same = vendor_of(r["provider"]) == vendor
-            except ValueError:
-                same = False
-            if same:
-                own.append(r)
+            why = self._may_quote(user_id, r, vendor)
+            if why:
+                withheld[why] += 1
             else:
-                withheld["requests_answered_by_other_vendors"] += 1
+                own.append(r)
         lines.append(f"Requests: {len(f['rows'])} total; by type: "
                      + ", ".join(f"{t} {sum(1 for r in f['rows'] if r['task_type'] == t)}" for t in TASK_TYPES
                                  if any(r["task_type"] == t for r in f["rows"])))
         for r in own[:12]:
             fb = r.get("feedback") or {}
             outcome = ("worked" if fb.get("task_success") else "failed" if fb.get("task_success") is False else "no outcome")
-            lines.append(f"- [{r['task_type']}, {outcome}{', corrected' if fb.get('corrected') else ''}] {_snip(r['task'], 140)}")
+            quote(f"- [{r['task_type']}, {outcome}{', corrected' if fb.get('corrected') else ''}] {_q(r['task'], 140)}")
         for p in f["projects"]:
             if vendor not in self.ws.provider_vendors(user_id, p.id):
                 withheld["projects_not_allowing_this_vendor"] += 1
                 continue
+            quote(f"Project {_q(p.name, 60)}, objective: {_q(p.objective, 120)}")
             notes = [n for n in p.notes if not n.get("resolved_at") or _when(n["resolved_at"]) >= review.since]
-            shown = []
             for n in notes[-20:]:
                 if n.get("source") == "model" and self.ws.derived_blocked(user_id, n.get("lineage"), vendor):
                     withheld["notes_blocked_by_lineage"] += 1
                     continue
-                shown.append(f"  - {n['kind']}{' (closed)' if n.get('resolved_at') else ''}: {_snip(n['text'], 120)}")
-            lines.append(f"Project “{_snip(p.name, 60)}”, objective: {_snip(p.objective, 120)}")
-            lines += shown
-        for s, d in review.skills.items():
+                quote(f"  - {n['kind']}{' (closed)' if n.get('resolved_at') else ''}: {_q(n['text'], 120)}")
+        for i, (s, d) in enumerate(review.skills.items(), 1):
             w = d["week"]
-            lines.append(f"Skill {s}: this week {w['unassisted']} alone ({w['unassisted_correct']} right), "
-                         f"{w['assisted']} with help; flags: {', '.join(d['flags']) or 'none'}")
+            name = _q(s, 60) if self._skill_quotable(user_id, s, vendor, f["attempts_all"]) else None
+            if name is None:
+                withheld["skill_names_from_other_vendors"] += 1
+            quote(f"Skill {name or f'#{i} (name withheld)'}: this week {w['unassisted']} alone "
+                  f"({w['unassisted_correct']} right), {w['assisted']} with help; flags: {', '.join(d['flags']) or 'none'}")
         lines.append("CI's own findings (counts only): " + " | ".join(c.redacted for c in review.challenges))
         return "\n".join(lines), withheld
 
@@ -506,15 +557,22 @@ class CognitiveTwin:
                              min_tier=3)
 
     def deep(self, user_id: str, review: Review, plan=None) -> dict:
-        """One model-written challenge over the filtered digest, with fallback. Labelled, never evidence."""
+        """One model-written challenge over the filtered digest. Labelled, never evidence.
+
+        Fallback stays within the vendor the person was asked about (the plan's chosen vendor):
+        their confirmation names one recipient, so a failure there never sends the digest to a
+        different vendor. The finished prompt passes the credential tripwire once more."""
         plan = plan or self.deep_plan(user_id)
         if plan.refused:
             raise RoutingError(plan.refused, plan)
+        confirmed = plan.chosen.entry.vendor
         md = intelligence.resolve("amplify", None, "planning", set())
         attempts = []
-        for c in plan.candidates:
+        for c in [c for c in plan.candidates if c.entry.vendor == confirmed]:
             text, withheld = self.digest(user_id, review, c.entry.vendor)
-            prompt = DEEP_PROMPT.format(name=review.name, facts=text)
+            prompt = DEEP_PROMPT.format(name=_q(review.name, 60), facts=text)
+            if find_credentials(prompt):
+                raise RoutingError("the weekly digest still contains something credential-shaped; not sent", plan)
             try:
                 res = self.ci.ask(user_id, prompt, c.entry.provider, c.entry.model or None, _mode=md,
                                   route={"plan": plan.as_dict(), "served_by": c.key, "served_meets": c.meets,
@@ -525,7 +583,7 @@ class CognitiveTwin:
                 continue
             return {"text": res.text, "interaction_id": res.interaction_id, "model": c.entry.label,
                     "withheld": withheld, "cost_usd": res.receipt["cost_usd"]}
-        raise RoutingError("every routed model failed", plan, attempts)
+        raise RoutingError(f"every {confirmed} model failed; nothing was sent to another vendor", plan, attempts)
 
 
 def _practice(skill: str, attempts: int = 3, correct: int = 2) -> dict:

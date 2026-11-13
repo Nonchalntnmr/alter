@@ -59,6 +59,7 @@ PREFERENCES = ("economy", "balanced", "quality")
 # person's explicit choice, routes to the light tier. Decided after seeing that set, so it can
 # no longer measure this floor cleanly.
 FLOORS = {"economy": 1, "balanced": 2, "quality": 2}
+PROFILE_VENDOR = "anthropic"  # whose models PROFILES describes
 OUTPUT_TOKENS = {1: 500, 2: 1500, 3: 4000}  # budgeting guesses for the cost estimate only
 SYSTEM_OVERHEAD = 300  # preamble and directives, tokens
 MAX_FALLBACKS = 4
@@ -90,16 +91,19 @@ def load_overrides(path: str | None = None) -> dict[str, dict]:
     path = path or os.environ.get("PCIM_CAPABILITIES")
     if not path or not os.path.exists(path):
         return {}
-    raw = json.load(open(path))
+    try:
+        raw = json.load(open(path))
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        raise CapabilityFileError(f"{path} is not valid JSON: {e}") from None
     if not isinstance(raw, dict):
         raise CapabilityFileError("the capabilities file must be a JSON object")
     for k, d in raw.items():
         if not isinstance(d, dict):
             raise CapabilityFileError(f"{k}: expected an object")
-        if "tier" in d and d["tier"] not in (1, 2, 3, None):
+        if "tier" in d and (isinstance(d["tier"], bool) or d["tier"] not in (1, 2, 3, None)):
             raise CapabilityFileError(f"{k}: tier must be 1, 2, 3 or null")
         for f in ("context_window", "max_output"):
-            if f in d and d[f] is not None and (not isinstance(d[f], int) or d[f] <= 0):
+            if f in d and d[f] is not None and (isinstance(d[f], bool) or not isinstance(d[f], int) or d[f] <= 0):
                 raise CapabilityFileError(f"{k}: {f} must be a positive integer")
         if "strengths" in d and not (isinstance(d["strengths"], list) and all(isinstance(s, str) for s in d["strengths"])):
             raise CapabilityFileError(f"{k}: strengths must be a list of strings")
@@ -114,7 +118,9 @@ def canonical(e: ModelEntry) -> str:
 def capability(e: ModelEntry, overrides: dict | None = None) -> Capability:
     ov = load_overrides() if overrides is None else overrides
     canon = canonical(e)
-    base = PROFILES.get(canon, Capability(None))
+    # Built-in profiles describe Anthropic's own models. A local or third-party server that names
+    # its model "claude-opus-5-5" is not Opus: only the vendor's own entries inherit the profile.
+    base = PROFILES.get(canon, Capability(None)) if e.vendor == PROFILE_VENDOR else Capability(None)
     if e.test_double:
         base = Capability(None, source="test double: its answers are not a model's")
     for k in (e.key, canon):

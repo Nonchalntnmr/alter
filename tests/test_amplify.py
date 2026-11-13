@@ -119,7 +119,7 @@ def test_a_request_containing_a_credential_never_reaches_an_external_vendor(env,
     ci, recs = make(tmp_path)
     task = "deploys fail with key AKIAABCDEFGHIJKLMNOP, why?"
     assert find_credentials(task) == ["AWS access key id"]
-    assert find_credentials("password: hunter2hunter2") == ["password assignment"]
+    assert "password assignment" in find_credentials("password: hunter2hunter2")
     assert find_credentials("the password rotates on Fridays") == []
     with pytest.raises(RoutingError) as e:
         ci.ask_routed("u", task)
@@ -493,3 +493,12 @@ def test_ci_inside_an_authorized_workspace_uses_that_project_and_only_its_vendor
     capsys.readouterr()
     assert terminal.main(["route", LIGHT]) == 3
     assert "not authorized" in capsys.readouterr().out
+
+
+def test_a_server_that_names_its_model_after_a_claude_model_does_not_inherit_its_tier(env, monkeypatch):
+    monkeypatch.setenv("PCIM_LOCAL_MODEL", "claude-opus-5-5")
+    monkeypatch.setenv("PCIM_LOCAL_BASE_URL", "http://127.0.0.1:11434/v1")
+    local = next(e for e in routing.entries() if e.provider == "local")
+    assert routing.capability(local).tier is None  # unrated until the person rates it
+    cli_opus = next(e for e in routing.entries() if e.key == "claude-cli:opus")
+    assert routing.capability(cli_opus).tier == 3

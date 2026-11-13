@@ -47,6 +47,7 @@ from .registry import VENDORS, model_identity, vendor_of
 from .routing import PREFERENCES, RoutePlan
 from .routing import plan as route_plan
 from .sovereignty.audit import AuditLog
+from .sovereignty.credentials import LOCAL_VENDORS, find_credentials
 from .sovereignty.consent import ConsentLedger
 from .sovereignty.crypto import KeyRing
 from .sovereignty.egress import CONFIRMED_FLAG, INSTRUCTION_FLAG, EgressGuard
@@ -352,6 +353,17 @@ class PersonalCI:
         probs, task_type, chosen, sel, pol, decision = cx.probs, cx.task_type, cx.chosen, cx.sel, cx.policy, cx.decision
         profile, memories = cx.profile, cx.memories
         cs_len = cx.n_candidates
+        # Memory that looks like it holds a credential never leaves the machine, whatever its
+        # consent says: the credential tripwire applies to context as well as to the request.
+        cred_withheld: list[str] = []
+        if vendor_of(provider) not in LOCAL_VENDORS:
+            cred_withheld = [i.id for i in chosen if find_credentials(i.content)]
+            if cred_withheld:
+                bad = set(cred_withheld)
+                chosen = [i for i in chosen if i.id not in bad]
+                profile = [x for x in profile if x.id not in bad]
+                memories = [x for x in memories if x.id not in bad]
+                self.audit.append(user_id, "egress.credential_withheld", interaction=interaction_id, items=len(bad))
 
         ap = self._assist(user_id)
         md = _mode
@@ -378,7 +390,8 @@ class PersonalCI:
             "sent": [{"id": i.id, "kind": i.kind, "source": i.source, "trust": i.trust.value,
                       "where": "profile" if i.pinned and i.trust.rank >= Trust.USER_STATED.rank else "notes"}
                      for i in chosen],
-            "withheld_by_egress": [{"id": i, "reason": r} for i, r in decision.blocked],
+            "withheld_by_egress": [{"id": i, "reason": r} for i, r in decision.blocked]
+                                  + [{"id": i, "reason": "credential-shaped content"} for i in cred_withheld],
             "candidates_considered": cs_len,
             "retrieval_plan": queries,
             "plan_usage": dataclasses.asdict(plan.usage) if plan is not None else None,
@@ -503,6 +516,10 @@ class PersonalCI:
         may not see. Raises RoutingError when routing refuses or every candidate fails."""
         if self.store.get_user(user_id) is None:
             raise KeyError(f"unknown user {user_id}")
+        if project_id is not None and project_vendors is None:
+            # Fail closed: project memory may only reach vendors the project allows.
+            from .workspace import Workspace
+            project_vendors = set(Workspace(self).provider_vendors(user_id, project_id))
         md = self.resolve_mode(user_id, task, mode)
         plan = self.route(user_id, task, mode=md.mode, pinned=pinned, project_vendors=project_vendors,
                           budget_tokens=budget_tokens, include_test_doubles=include_test_doubles, min_tier=min_tier)

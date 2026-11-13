@@ -44,8 +44,9 @@ from .workspace import Workspace
 
 SUBCOMMANDS = ("ask", "route", "mode", "prefer", "models", "outcome", "practice", "skills", "scorecard",
                "weekly", "status", "challenge", "help")
-RIGHT = {"right", "correct", "yes", "y", "pass", "solved", "1", "true"}
-WRONG = {"wrong", "incorrect", "no", "n", "fail", "failed", "0", "false"}
+# Explicit words only: "…should I say yes" is a question, not a recorded correct attempt.
+RIGHT = {"right", "correct"}
+WRONG = {"wrong", "incorrect"}
 
 
 @dataclasses.dataclass
@@ -172,7 +173,17 @@ def cmd_route(argv: list[str]) -> int:
 
 
 # ---------------------------------------------------------------------- settings
+def _one_word(cmd: str, argv: list[str]) -> bool:
+    if len(argv) > 1:
+        print(f"ci {cmd} takes one word. To ask something, quote it or use `ci ask …`; nothing was changed.",
+              file=sys.stderr)
+        return False
+    return True
+
+
 def cmd_mode(argv: list[str]) -> int:
+    if not _one_word("mode", argv):
+        return 2
     ci, uid = _open()
     if argv:
         try:
@@ -192,6 +203,8 @@ def cmd_mode(argv: list[str]) -> int:
 
 
 def cmd_prefer(argv: list[str]) -> int:
+    if not _one_word("prefer", argv):
+        return 2
     ci, uid = _open()
     if argv:
         try:
@@ -253,7 +266,10 @@ def cmd_practice(argv: list[str]) -> int:
     if len(args) < 2 or args[-1].lower() not in RIGHT | WRONG:
         print("usage: ci practice <skill> right|wrong [--assisted]", file=sys.stderr)
         return 2
-    skill, correct = " ".join(args[:-1]), args[-1].lower() in RIGHT
+    skill, correct = " ".join(args[:-1]).strip(), args[-1].lower() in RIGHT
+    if not skill:
+        print("usage: ci practice <skill> right|wrong [--assisted]", file=sys.stderr)
+        return 2
     ci, uid = _open()
     r = ci.probe(uid, skill, correct, assisted=assisted, source="practice")
     if r["counted"]:
@@ -295,7 +311,13 @@ def cmd_scorecard(argv: list[str]) -> int:
     from .evaluation import scorecard
     from .types import utcnow
     import datetime as dt
-    days = int(argv[argv.index("--days") + 1]) if "--days" in argv else 7
+    try:
+        days = int(argv[argv.index("--days") + 1]) if "--days" in argv else 7
+        if not 1 <= days <= 365:
+            raise ValueError
+    except (ValueError, IndexError):
+        print("usage: ci scorecard [--days N]  (N from 1 to 365)", file=sys.stderr)
+        return 2
     ci, uid = _open()
     now = utcnow()
     _print_json(scorecard(ci, uid, now - dt.timedelta(days=days), now))
