@@ -104,7 +104,13 @@ Commits on `feat/intent-compiler`, oldest first:
      `81a8d4ce…`). It must validate the paired tasks: the hidden test fails on the original code,
      passes on the reference, and fails on the other reading for vague tasks.
    - Record each set's sha256 without reading the contents.
-3. **A review agent for `c9edc64`** (the security branch). Its result is lost if the session
+3. **The review of `c9edc64` is FINISHED.** It found 4 medium and 4 low defects, none high:
+   `~/projects/ci-sec-cli/docs/SECURITY_CLI_IDENTITY_REVIEW.md`. **Fix M1–M4 and L1–L4 on
+   `sec/cli-identity` first.**
+   - Add a test for each, re-run the probe with `--record`, and have the fix reviewed
+     independently again.
+   - Only then merge the branch into V3 or the integration branch.
+   - Former note: a review agent for `c9edc64` (the security branch). Its result is lost if the session
    died. Re-run an independent review of `git -C ~/projects/ci-sec-cli show c9edc64`. It should
    look for fail-open paths, identity leaks, cleanup, and the probe relay's token handling.
 
