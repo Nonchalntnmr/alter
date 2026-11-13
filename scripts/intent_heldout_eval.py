@@ -53,12 +53,12 @@ def check(pass_: str) -> None:
     if f.get("runner_sha256") != sha(Path(__file__)):
         sys.exit("this runner changed since it was frozen")
     commit, tree = PASSES[pass_]
-    head = subprocess.run(["git", "-C", str(tree), "rev-parse", "--short=7", "HEAD"], capture_output=True,
-                          text=True).stdout.strip()
-    dirty = subprocess.run(["git", "-C", str(tree), "status", "--porcelain", "--", "src"], capture_output=True,
-                           text=True).stdout.strip()
-    if head != commit or dirty:
-        sys.exit(f"{tree} is at {head} (dirty: {bool(dirty)}); the {pass_} pass needs a clean {commit}")
+    # src/ must be byte-identical to the frozen commit (HEAD may have moved on with non-code commits)
+    differs = subprocess.run(["git", "-C", str(tree), "diff", "--quiet", commit, "--", "src"]).returncode != 0
+    untracked = subprocess.run(["git", "-C", str(tree), "status", "--porcelain", "--", "src"], capture_output=True,
+                               text=True).stdout.strip()
+    if differs or untracked:
+        sys.exit(f"{tree}/src differs from {commit}; the {pass_} pass needs exactly that code")
     import pcim
     if Path(pcim.__file__).resolve().parents[1] != (tree / "src").resolve():
         sys.exit(f"pcim imports from {pcim.__file__}, not {tree / 'src'}; set PYTHONPATH")

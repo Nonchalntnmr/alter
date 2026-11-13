@@ -5,4 +5,4 @@ V0=cc21ffa  (scored from the old-format replies with ff74305's gate, without the
 V1=ff74305
 V2=58348cc  (committed before the run; frozen 2026-11-13T13:33:59Z)
 protocol_sha256=4f78f5e208053092adc7d2a00f1f049dc669a6f93ebdf575f21730e0cfb67f40
-runner_sha256=b69d8c6c5467ec6be28b14742f846447fcf78aefa90f78cb05e46f00a63908d9
+runner_sha256=41bb8a0cf5777585b3b99a67a48b6c2814881265739e40efc000135aabe44f03
