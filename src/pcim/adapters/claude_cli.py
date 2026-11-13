@@ -331,13 +331,16 @@ class ClaudeCLIAdapter:
             return {"status": "unverified", "cli_version": v, "why": "; ".join(missing)}
         if rec.get("clean") is True:
             rec_keys = rec.get("profile_keys")
-            if not isinstance(rec_keys, list) or sorted(rec_keys) != profile_keys(prof):
+            if (not isinstance(rec_keys, list) or not all(isinstance(k, str) for k in rec_keys)
+                    or sorted(rec_keys) != profile_keys(prof)):
                 return {"status": "unverified", "cli_version": v,
                         "why": "stored account profile keys do not match the probed profile"}
             return {"status": "verified", "cli_version": v, "why": f"request recorded clean on {rec.get('probed_at')}"}
         if rec.get("clean") is False:
+            found = rec.get("found")
+            found_str = ", ".join(str(x) for x in found) if isinstance(found, list) else ""
             return {"status": "exposed", "cli_version": v,
-                    "why": f"request recorded carrying {', '.join(rec.get('found', [])) or 'identity'}"}
+                    "why": f"request recorded carrying {found_str or 'identity'}"}
         return {"status": "unverified", "cli_version": v,
                 "why": f"claude CLI {v or '(version unknown)'} has not been probed (python -m pcim.adapters.cli_probe)"}
 
