@@ -424,6 +424,7 @@ class PersonalCI:
             "usage": dataclasses.asdict(resp.usage), "cost_usd": cost,
             "latency_ms": round(resp.latency_ms + (plan.latency_ms if plan is not None else 0.0), 1),
             "stop_reason": resp.stop_reason, "refusal": resp.refusal, "prompt_sha256": prompt.digest(),
+            "provider_context": getattr(resp, "provider_context", None),
             "egress_audit_hash": decision.audit_hash,
             "intelligence_mode": md.as_dict() if md else None, "project_id": project_id, "route": route,
         }
