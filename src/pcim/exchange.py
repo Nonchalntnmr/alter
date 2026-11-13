@@ -35,6 +35,7 @@ from pydantic.alias_generators import to_camel
 
 from .adapters.render import _clean
 from .registry import model_identity, vendor_of
+from .tasks import MODEL_HIDDEN
 from .types import new_id, utcnow
 from .workspace import ProviderAccessDenied
 
@@ -274,11 +275,13 @@ class Gateway:
                 return None, "belongs to another project"
             if t.status != "succeeded":
                 return None, f"task {t.status}"
+            lineage = list((t.result or {}).get("lineage", []))  # e.g. a read of a file a model wrote
             if t.requested_by == "model" and t.tool in ("write_file", "record_note", "record_claim"):
-                why = self.ws.derived_blocked(user_id, self.queue.exposure(user_id, t), vendor)
-                if why:  # model-written content may carry memory the recipient may not see
-                    return None, why
-            res = {k: v for k, v in (t.result or {}).items() if k != "backup"}
+                lineage += self.queue.exposure(user_id, t)
+            why = self.ws.derived_blocked(user_id, lineage, vendor) if lineage else None
+            if why:  # model-written content, or a read of it, may carry memory the recipient may not see
+                return None, why
+            res = {k: v for k, v in (t.result or {}).items() if k not in MODEL_HIDDEN}
             return f"{t.tool} {json.dumps(t.args)} -> {json.dumps(res, default=str)}"[:6000], None
         if ref.startswith("note_"):
             n = next((n for n in project.notes if n["id"] == ref), None)

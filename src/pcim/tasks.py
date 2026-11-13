@@ -19,7 +19,8 @@ import datetime as dt
 import logging
 import time
 
-from .governor import RISK, Governor
+from .governor import RISK, Governor, jail
+from .registry import vendor_of
 from .tools import Cancelled, Executor, ToolError, validate_args
 from .types import new_id, utcnow
 from .workspace import Workspace
@@ -28,6 +29,7 @@ log = logging.getLogger(__name__)
 
 LIVE = ("awaiting_approval", "approved", "running")
 TERMINAL = ("succeeded", "failed", "cancelled", "denied", "interrupted", "expired")
+MODEL_HIDDEN = ("backup", "lineage", "abs_path")  # CI's bookkeeping in a task result, never sent to a model
 
 
 class TaskStateError(RuntimeError):
@@ -221,9 +223,13 @@ class TaskQueue:
                                     t.args["uncertainty"], author={"kind": "model", **self._author(t)},
                                     lineage=self.exposure(user_id, t))
                 result = {"claim_id": c["id"], "status": c["status"], "evidence_refs": c["evidence_refs"]}
+            elif t.tool in ("read_file", "search_code"):
+                result = self._read(user_id, t, self.ws.workspace_auth(user_id, t.project_id)["spec"])
             else:
                 spec = self.ws.workspace_auth(user_id, t.project_id)["spec"]
                 result = self.executor.run(task_id, t.tool, t.args, spec)
+                if t.tool == "write_file" and (lineage := self.exposure(user_id, t)):
+                    result["lineage"] = lineage  # the file now carries what its writer was shown (file_lineage)
             status, reason = "succeeded", None
             if t.tool == "run_tests" and (result.get("exit_code") != 0 or result.get("timed_out")):
                 reason = "tests timed out" if result.get("timed_out") else f"tests exited {result.get('exit_code')}"
@@ -255,10 +261,44 @@ class TaskQueue:
         if not rows:
             return []
         st = self.store.open_json(self._key(user_id, t.project_id), rows[0]["state_ct"], t.session_id)
-        ids = list(st.get("system_memory_items", []))
-        for d in st.get("disclosures", []):
-            ids += d.get("memory_items", [])
-        return list(dict.fromkeys(ids))
+        return self.ws.session_exposure(user_id, t.project_id, t.session_id, st)
+
+    def file_lineage(self, user_id: str, project_id: str) -> dict[str, list[str]]:
+        """Per file (absolute path), the memory items the models that wrote it had been shown.
+        A write that was undone no longer counts."""
+        out: dict[str, list[str]] = {}
+        for r in self.store.query("SELECT id FROM tasks WHERE user_id=? AND project_id=? AND tool='write_file' "
+                                  "AND status='succeeded'", (user_id, project_id)):
+            res = self.get(user_id, r["id"]).result or {}
+            if res.get("lineage") and not res.get("undone"):
+                out.setdefault(res["abs_path"], []).extend(res["lineage"])
+        return out
+
+    def _read(self, user_id: str, t: Task, spec: dict) -> dict:
+        """read_file or search_code, where a file a model wrote carries that model's lineage
+        (file_lineage). A session whose vendor may not see it is refused the file (search_code
+        skips it); a read that returned it records the lineage on its result, where the
+        session's exposure and the evidence check (exchange.Gateway) find it."""
+        written = self.file_lineage(user_id, t.project_id)
+        provider = self._author(t).get("provider")
+        blocked = {}  # path -> why, for this session's vendor; a task outside a session goes to no model
+        if provider:
+            for path, lineage in written.items():
+                why = self.ws.derived_blocked(user_id, lineage, vendor_of(provider))
+                if why:
+                    blocked[path] = why
+        if t.tool == "read_file":
+            path = str(jail(spec["root"], t.args["path"]))
+            if path in blocked:
+                raise ToolError(f"{t.args['path']} was written by a model and is {blocked[path]}")
+            result, read = self.executor.run(t.id, t.tool, t.args, spec), [path]
+        else:
+            result = self.executor.run(t.id, t.tool, t.args, spec, exclude=blocked)
+            read = result.pop("files", [])
+        lineage = list(dict.fromkeys(i for f in read for i in written.get(f, [])))
+        if lineage:
+            result["lineage"] = lineage
+        return result
 
     def undo(self, user_id: str, task_id: str) -> dict:
         """Restore the file a write_file task replaced (or remove the one it created)."""

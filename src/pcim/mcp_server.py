@@ -30,7 +30,7 @@ from .engine import SCOPE_PREFIX, PersonalCI
 from .memory import ConsentRequired
 from .registry import vendor_of
 from .types import KINDS, Trust, new_id, utcnow
-from .workspace import NOTE_KINDS, ProviderAccessDenied, Workspace, render_briefing
+from .workspace import NOTE_KINDS, ProviderAccessDenied, Workspace, briefing_lineage, render_briefing
 
 MAX_TEXT = 50_000  # the same ceiling the HTTP API puts on a task
 
@@ -48,6 +48,9 @@ def build_server(ci: PersonalCI, user_id: str, provider: str = "anthropic") -> M
     server = MCPServer("personal-ci", instructions=INSTRUCTIONS, version="0.1.0")
 
     vendor = vendor_of(provider)
+    # Memory items this server has given its client, directly or behind a briefing: what the
+    # client writes may be derived from them, so its notes carry them as lineage.
+    served: dict[str, None] = {}
 
     @server.tool()
     def ci_list_projects() -> list[dict]:
@@ -63,7 +66,9 @@ def build_server(ci: PersonalCI, user_id: str, provider: str = "anthropic") -> M
         except ProviderAccessDenied as e:
             return f"error: {e}. The person can allow it in the project's model access settings."
         nonce = secrets.token_hex(6)
-        body = render_briefing(ws.briefing(user_id, project_id, vendor=vendor))
+        b = ws.briefing(user_id, project_id, vendor=vendor)
+        served.update(dict.fromkeys(briefing_lineage(b)))
+        body = render_briefing(b)
         ci.audit.append(user_id, "mcp.briefing", project=project_id, provider=provider)
         return f'<project_briefing nonce="{nonce}">\n{body}\n</project_briefing nonce="{nonce}">'
 
@@ -86,6 +91,7 @@ def build_server(ci: PersonalCI, user_id: str, provider: str = "anthropic") -> M
         cx = ci.select_context(user_id, task, provider, "mcp-client", max(100, min(budget_tokens, 8000)), ref=iid,
                                project_id=project_id)
         items = cx.profile + cx.memories
+        served.update(dict.fromkeys(i.id for i in items))
         ci.store.insert_interaction(
             {"id": iid, "user_id": user_id, "ts": utcnow().isoformat(), "task_type": cx.task_type,
              "provider": provider, "model": "mcp-client", "policy": cx.policy.name,
@@ -135,7 +141,8 @@ def build_server(ci: PersonalCI, user_id: str, provider: str = "anthropic") -> M
         except ProviderAccessDenied as e:
             return f"error: {e}"
         return "recorded " + ws.add_note(user_id, project_id, kind, text, source="model",
-                                         by={"provider": f"mcp:{provider}", "model": "an MCP client"})["id"]
+                                         by={"provider": f"mcp:{provider}", "model": "an MCP client"},
+                                         lineage=list(served))["id"]
 
     @server.tool()
     def ci_report_outcome(interaction_id: str, task_success: bool | None = None, rating: int | None = None) -> str:

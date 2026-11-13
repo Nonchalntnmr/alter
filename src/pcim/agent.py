@@ -35,10 +35,10 @@ from .adapters.mock_agent import MockAgentAdapter
 from .adapters.render import _clean, _label
 from .engine import PersonalCI, in_scope
 from .registry import vendor_of
-from .tasks import TERMINAL, Task, TaskQueue
+from .tasks import MODEL_HIDDEN, TERMINAL, Task, TaskQueue
 from .tools import TOOL_SCHEMAS
 from .types import Trust, new_id, utcnow
-from .workspace import Workspace, render_briefing
+from .workspace import Workspace, briefing_lineage, render_briefing
 
 SYSTEM = """You are CI, a collaborator working with one person on one of their projects, inside a workspace they authorized.
 
@@ -237,7 +237,7 @@ class Agent:
             disclosure = {"at": utcnow().isoformat(), "session": sid, "provider": provider, "vendor": vendor,
                           "model": model or ad.model, "briefing_sha256": None, "briefing_text": None,
                           "briefing_notes": [], "briefing_claims": [], "briefing_withheld": [],
-                          "system_memory_items": []}
+                          "briefing_lineage": [], "system_memory_items": []}
             if not st["briefing_sent"]:
                 b = self.briefing(user_id, project_id, vendor=vendor)
                 rendered = render_briefing(b)
@@ -247,7 +247,7 @@ class Agent:
                                   briefing_notes=[n["id"] for k in ("open_questions", "decisions", "next_steps")
                                                   for n in b[k]],
                                   briefing_claims=[c["id"] for c in b.get("claims", [])],
-                                  briefing_withheld=b.get("withheld", []),
+                                  briefing_withheld=b.get("withheld", []), briefing_lineage=briefing_lineage(b),
                                   system_memory_items=st.get("system_memory_items", []))
             cx = self.ci.select_context(user_id, text, provider, ad.model, self.ci.budget_tokens, ref=sid,
                                         project_id=project_id)
@@ -278,21 +278,13 @@ class Agent:
             return self._run(user_id, project_id, sid, st)
 
     def briefing(self, user_id: str, project_id: str, vendor: str | None = None) -> dict:
-        """The project briefing; with `vendor`, as that vendor may see it (Workspace.briefing)."""
+        """The project briefing; with `vendor`, as that vendor may see it (Workspace.briefing,
+        which also decides whether the last session is shown at all)."""
         b = self.ws.briefing(user_id, project_id, vendor=vendor)
         if b.get("last_session"):  # statuses change after a session closes (a late denial, an approval)
             sid = b["last_session"]["session"]
-            last = self._load(user_id, project_id, sid)
-            lines = self._reflection_lines(user_id, project_id, sid, last)
-            if vendor is not None:  # the last model message may quote memory this vendor may not see
-                exposure = list(last.get("system_memory_items", []))
-                for d in last.get("disclosures", []):
-                    exposure += d.get("memory_items", [])
-                why = self.ws.derived_blocked(user_id, exposure, vendor)
-                if why:
-                    lines = [x for x in lines if not x.startswith("CI's last message")]
-                    b["withheld"].append({"id": f"{sid}#last_message", "reason": why})
-            b["last_session"]["lines"] = lines
+            b["last_session"]["lines"] = self._reflection_lines(user_id, project_id, sid,
+                                                                self._load(user_id, project_id, sid))
         if self.ledger is not None:
             claims = self.ledger.summary(user_id, project_id)
             if vendor is not None:
@@ -310,7 +302,7 @@ class Agent:
     def _result_block(self, t: Task) -> dict:
         # The task id lets the model cite this result as evidence in record_claim.
         if t.status == "succeeded":
-            res = {k: v for k, v in (t.result or {}).items() if k != "backup"}
+            res = {k: v for k, v in (t.result or {}).items() if k not in MODEL_HIDDEN}
             body = json.dumps({"task_id": t.id, **res}, default=str)
             if t.reason:  # e.g. tests ran but failed
                 body = f"{t.reason}\n{body}"

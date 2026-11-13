@@ -15,7 +15,9 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import signal
+import stat
 import subprocess
 import sys
 import threading
@@ -115,11 +117,14 @@ def _sha(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
-def _search(root: Path, pattern: str, glob: str) -> dict:
+def _search(root: Path, pattern: str, glob: str, exclude=()) -> dict:
+    """`exclude`: resolved paths to skip. "files" lists the resolved paths that matched, so the
+    caller knows whose content the matches carry (tasks.TaskQueue._read)."""
     rx = re.compile(pattern)
-    matches = []
+    matches, files, exclude = [], {}, set(exclude)
     for p, rel in _iter_files(root, glob):
-        if p.stat().st_size > 1_000_000:
+        real = str(p.resolve())
+        if real in exclude or p.stat().st_size > 1_000_000:
             continue
         try:
             text = p.read_text(errors="strict")
@@ -128,18 +133,40 @@ def _search(root: Path, pattern: str, glob: str) -> dict:
         for n, line in enumerate(text.splitlines(), 1):
             if rx.search(line[:2000]):
                 matches.append(f"{rel}:{n}: {line.strip()[:300]}")
+                files[real] = None
                 if len(matches) >= MAX_MATCHES:
-                    return {"matches": matches, "truncated": True}
-    return {"matches": matches, "truncated": False}
+                    return {"matches": matches, "truncated": True, "files": list(files)}
+    return {"matches": matches, "truncated": False, "files": list(files)}
 
 
-def _search_in_child(root: Path, pattern: str, glob: str, timeout_s: float) -> dict:
+def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
+    """git with nothing from the repository's config that runs a command. The repository may
+    have arrived with its .git (an archive, a shared folder) or a model may have written to
+    it, and git status would otherwise start core.fsmonitor, the post-index-change hook, and
+    the clean filter of every file whose stat data changed. Filter drivers have names of the
+    repository's choosing, so each one configured is disabled by name; reading config runs
+    nothing."""
+    env = scrubbed_env()
+    keys = subprocess.run(["git", "-C", str(root), "config", "--null", "--name-only", "--get-regexp", r"^filter\."],
+                          capture_output=True, text=True, timeout=15, env=env).stdout.split("\0")
+    drivers = dict.fromkeys(k[len("filter."):k.rindex(".")] for k in keys if k.count(".") >= 2)
+    over = [("core.fsmonitor", "false"), ("core.hooksPath", "/dev/null")]
+    for d in drivers:
+        over += [(f"filter.{d}.clean", ""), (f"filter.{d}.smudge", ""), (f"filter.{d}.process", ""),
+                 (f"filter.{d}.required", "false")]
+    env["GIT_CONFIG_COUNT"] = str(len(over))  # unlike -c, a key here cannot be split by an "=" in a driver name
+    for n, (k, v) in enumerate(over):
+        env[f"GIT_CONFIG_KEY_{n}"], env[f"GIT_CONFIG_VALUE_{n}"] = k, v
+    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=15, env=env)
+
+
+def _search_in_child(root: Path, pattern: str, glob: str, timeout_s: float, exclude=()) -> dict:
     """The model writes the regex, and Python's re has no timeout: a pattern like (a+)+$ can
     backtrack for hours. The search runs in a child process that is killed at the deadline."""
     try:
         r = subprocess.run([sys.executable, "-m", "pcim.tools"], input=json.dumps(
-            {"root": str(root), "pattern": pattern, "glob": glob}), capture_output=True, text=True,
-            timeout=timeout_s, env=scrubbed_env())
+            {"root": str(root), "pattern": pattern, "glob": glob, "exclude": sorted(exclude)}), capture_output=True,
+            text=True, timeout=timeout_s, env=scrubbed_env())
     except subprocess.TimeoutExpired:
         raise ToolError(f"search took longer than {timeout_s:g}s and was stopped; simplify the pattern")
     if r.returncode != 0:
@@ -169,7 +196,8 @@ class Executor:
             return True
         return False
 
-    def run(self, task_id: str, tool: str, args: dict, spec: dict) -> dict:
+    def run(self, task_id: str, tool: str, args: dict, spec: dict, exclude=()) -> dict:
+        """`exclude`: resolved paths search_code must skip (files this caller may not read)."""
         root = Path(spec["root"]).resolve()
         if tool == "read_file":
             p = jail(root, args["path"])
@@ -194,20 +222,19 @@ class Executor:
                 re.compile(args["pattern"])
             except re.error as e:
                 raise ToolError(f"bad regex: {e}")
-            return _search_in_child(root, args["pattern"], args.get("glob") or "**/*", self.search_timeout_s)
+            return _search_in_child(root, args["pattern"], args.get("glob") or "**/*", self.search_timeout_s, exclude)
         if tool == "git_status":
             # A folder with no repository of its own makes git walk up to an enclosing one. On a
             # machine where $HOME is itself a repository that would mean listing (and leaking)
             # the whole home directory, so the real top level is checked first.
-            top = subprocess.run(["git", "-C", str(root), "rev-parse", "--show-toplevel"], capture_output=True,
-                                 text=True, timeout=15, env=scrubbed_env())
+            top = _git(root, "rev-parse", "--show-toplevel")
             if top.returncode != 0:
                 raise ToolError("not a git repository")
             toplevel = Path(top.stdout.strip()).resolve()
             if toplevel == Path.home().resolve() or toplevel in Path.home().resolve().parents:
                 raise ToolError("refusing git in the home-directory repository")
-            r = subprocess.run(["git", "-C", str(root), "status", "--porcelain=v1", "-b"], capture_output=True,
-                               text=True, timeout=15, env=scrubbed_env())
+            # dirty: otherwise git runs inside each submodule, under that submodule's own config
+            r = _git(root, "status", "--porcelain=v1", "-b", "--ignore-submodules=dirty")
             if r.returncode != 0:
                 raise ToolError(r.stderr.strip()[:500] or "not a git repository")
             return {"status": r.stdout[:20_000]}
@@ -218,10 +245,20 @@ class Executor:
             p = jail(root, args["path"], for_write=True)
             before = p.read_bytes() if p.exists() else None
             p.parent.mkdir(parents=True, exist_ok=True)
-            tmp = p.with_name(f".{p.name}.ci-tmp")
-            tmp.write_text(content)
-            os.replace(tmp, p)
-            return {"path": args["path"], "created": before is None, "bytes": len(content.encode()),
+            # A new temp file, never an existing name: a fixed name could already be in the
+            # workspace as a symlink (a cloned repo can carry one) and take the write outside it.
+            tmp = p.with_name(f".{p.name}.{secrets.token_hex(6)}.ci-tmp")
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o666)
+            try:
+                with os.fdopen(fd, "wb") as f:
+                    f.write(content.encode())
+                if before is not None:  # an overwritten file keeps its permissions (a script stays executable)
+                    os.chmod(tmp, stat.S_IMODE(p.stat().st_mode) & 0o777)
+                os.replace(tmp, p)
+            except BaseException:
+                tmp.unlink(missing_ok=True)
+                raise
+            return {"path": args["path"], "abs_path": str(p), "created": before is None, "bytes": len(content.encode()),
                     "sha256_before": _sha(before) if before is not None else None,
                     "sha256_after": _sha(content.encode()),
                     "backup": before.decode("utf-8", errors="replace") if before is not None else None}
@@ -254,4 +291,4 @@ class Executor:
 
 if __name__ == "__main__":  # the search child (see _search_in_child)
     req = json.load(sys.stdin)
-    json.dump(_search(Path(req["root"]), req["pattern"], req["glob"]), sys.stdout)
+    json.dump(_search(Path(req["root"]), req["pattern"], req["glob"], req.get("exclude", ())), sys.stdout)

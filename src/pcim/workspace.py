@@ -393,6 +393,20 @@ class Workspace:
                 return f"derived from {iid}, which {vendor} may not see ({why})"
         return None
 
+    def session_exposure(self, user_id: str, project_id: str, sid: str, st: dict) -> list[str]:
+        """Memory items a session's model had been shown (its system section, the personal
+        context of every message, the lineage of what its briefing showed and of the
+        model-written files it read): what anything the session writes may be derived from."""
+        ids = list(st.get("system_memory_items", []))
+        for d in st.get("disclosures", []):
+            ids += d.get("memory_items", []) + d.get("briefing_lineage", [])
+        key = self.project_key(user_id, project_id)
+        for r in self.store.query("SELECT id, result_ct FROM tasks WHERE session_id=? AND user_id=? AND status='succeeded' "
+                                  "AND tool IN ('read_file', 'search_code')", (sid, user_id)):
+            # sealed as TaskQueue seals results; a read records the lineage of what it returned
+            ids += (self.store.open_json(key, r["result_ct"], f"{r['id']}/result") or {}).get("lineage", [])
+        return list(dict.fromkeys(ids))
+
     def provider_allowed(self, user_id: str, project_id: str, provider: str) -> bool:
         return vendor_of(provider) in self.provider_vendors(user_id, project_id)
 
@@ -410,7 +424,9 @@ class Workspace:
         """Everything a new session needs to resume, compiled from stored state only.
 
         With `vendor`, model-written notes derived from memory that vendor may not see are
-        left out and listed under "withheld"; without it (the person's own view) nothing is."""
+        left out and listed under "withheld", and so is the last session if that vendor may
+        not see what the session was shown; without it (the person's own view) nothing is.
+        Every caller (the agent, the MCP server, the API preview) gets the same filtering."""
         p = self.get_project(user_id, project_id)
         withheld = []
         if vendor is not None:
@@ -431,6 +447,14 @@ class Workspace:
         if last:
             st = self.store.open_json(key, last[0]["state_ct"], last[0]["id"])
             reflection = st.get("reflection")
+            if reflection:
+                exposure = self.session_exposure(user_id, project_id, last[0]["id"], st)
+                why = self.derived_blocked(user_id, exposure, vendor) if vendor is not None else None
+                if why:  # every line can repeat text the model chose: its last message, a path, a failure reason
+                    withheld.append({"id": f"{last[0]['id']}#last_session", "reason": why})
+                    reflection = None
+                else:  # a model shown these lines may pass on what they came from (briefing_lineage)
+                    reflection = dict(reflection, exposure=exposure)
         pending = self.store.query(
             "SELECT id, tool, created_at FROM tasks WHERE project_id=? AND status='awaiting_approval' ORDER BY created_at",
             (project_id,))
@@ -448,6 +472,18 @@ class Workspace:
             "mode": self.get_mode(user_id),
             "withheld": withheld,
         }
+
+
+def briefing_lineage(b: dict) -> list[str]:
+    """Memory items behind what a briefing shows: the lineage of its model-written notes and
+    claims (none once the person released them) and what its last session had been shown. A
+    model given the briefing may pass any of it on, so lineage is carried through: whoever
+    receives the briefing is exposed to these too."""
+    ids = [i for k in ("open_questions", "decisions", "next_steps") for n in b[k] if not n.get("released_at")
+           for i in n.get("lineage", [])]
+    ids += [i for c in b.get("claims", []) for i in c.get("lineage", [])]
+    ids += (b.get("last_session") or {}).get("exposure", [])
+    return list(dict.fromkeys(ids))
 
 
 def _one_line(text) -> str:
