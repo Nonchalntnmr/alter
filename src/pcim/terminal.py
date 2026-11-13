@@ -39,6 +39,7 @@ from .engine import PersonalCI, RoutingError
 from .registry import availability, entries
 from .routing import PREFERENCES, TIERS, capability
 from .twin import CognitiveTwin, render
+from .textsafe import terminal_safe
 from .types import approx_tokens
 from .workspace import Workspace
 
@@ -131,9 +132,9 @@ def cmd_ask(argv: list[str]) -> int:
     chosen = route["plan"]["chosen"]
     served = route["served_by"]
     label = chosen["label"] if chosen and chosen["model"] == served else served
-    print(r.text.rstrip())
+    print(terminal_safe(r.text.rstrip()))
     print()
-    where = f" · {here.name}" if here else ""
+    where = f" · {terminal_safe(here.name)}" if here else ""
     print(f"─ {md['mode']} ({md['why']}) · {label} · {route['plan']['requirement']['tier']} task: "
           f"{route['plan']['reason']}{where}")
     cost = _money(rec["cost_usd"]) + (" notional" if served.startswith("claude-cli") and rec["cost_usd"] else "")
@@ -362,7 +363,7 @@ def cmd_challenge(argv: list[str]) -> int:
             return 0
         for r in rows:
             exp = (r["challenge"] or {}).get("falsification", {}).get("experiment") or "(unstructured reply)"
-            print(f"  {r['id']}  {r['status']:<12} {r['ts'][:10]}  {r['claim'][:60]}\n      test: {exp[:110]}")
+            print(terminal_safe(f"  {r['id']}  {r['status']:<12} {r['ts'][:10]}  {r['claim'][:60]}\n      test: {exp[:110]}"))
         if not rows:
             print("No open challenges." if recs else "No challenges yet: ci challenge \"<an idea you believe>\"")
         m = ch.metrics(recs)
@@ -385,7 +386,7 @@ def cmd_challenge(argv: list[str]) -> int:
     if a.json:
         _print_json({k: v for k, v in rec.items() if k != "receipt"} | {"route": rec["receipt"]["route"]})
         return 0
-    print(ch.render(rec))
+    print(terminal_safe(ch.render(rec)))
     rt = rec["receipt"]["route"]
     print(f"\n─ challenge · {rt['served_by']} · {rt['plan']['requirement']['tier']} · {_money(rec['receipt']['cost_usd'])}"
           f" · {rec['id']}")
@@ -488,9 +489,11 @@ def cmd_status(argv: list[str]) -> int:
     if snap and snap.get("priorities"):
         review = twin.review(uid, days=7)
         print(f"This week's priorities ({twin.name(uid)}, v{version}, {snap['week']}):")
+        from .twin import resolve
+        labels = twin.labels_now(uid)
         for p in snap["priorities"]:
             status, ev = twin.check(p["check"], review.facts, review.since, review.until)
-            print(f"  [{status}] {p['action']} ({ev})")
+            print(terminal_safe(f"  [{status}] {resolve(p['action'], labels)} ({ev})"))
     else:
         print("No weekly priorities yet: `ci weekly`.")
     return 0

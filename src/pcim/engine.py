@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import hmac
 import json
 import secrets
 from pathlib import Path
@@ -72,6 +73,26 @@ class RoutingError(RuntimeError):
 
 
 _FALLBACK_ERRORS: tuple | None = None
+
+
+def _scrub(obj, needle: str, label: str = "(a forgotten skill)"):
+    """Remove a forgotten skill from a weekly snapshot: its key under "skills", and its name
+    anywhere in text; checks that pointed at it become inert."""
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            if k == "skills" and isinstance(v, dict):
+                out[k] = {sk: _scrub(sv, needle, label) for sk, sv in v.items() if sk != needle}
+            elif k == "check" and isinstance(v, dict) and v.get("skill") == needle:
+                out[k] = {"type": "forgotten"}
+            else:
+                out[k] = _scrub(v, needle, label)
+        return out
+    if isinstance(obj, list):
+        return [_scrub(x, needle, label) for x in obj]
+    if isinstance(obj, str) and needle in obj:
+        return obj.replace(needle, label)
+    return obj
 
 
 def fallback_errors() -> tuple:
@@ -566,7 +587,10 @@ class PersonalCI:
             self.store.put_skill(user_id, skill, state.to_dict())
         self._log_attempt(user_id, {"ts": utcnow().isoformat(), "skill": skill, "correct": bool(correct),
                                     "assisted": bool(assisted), "source": source[:20], "interaction": interaction_id})
-        self.audit.append(user_id, "growth.probe", skill=skill[:80], correct=bool(correct), assisted=assisted)
+        # The audit is plaintext and outlives erasure: it records a tag keyed by the person's own key
+        # (destroyed on erase), never the skill's name, which can say more than intended.
+        self.audit.append(user_id, "growth.probe", skill_tag=self._tag(user_id, skill), correct=bool(correct),
+                          assisted=assisted)
         return {"skill": skill, "p_mastery": state.p_mastery, "counted": not assisted}
 
     def _state_json(self, user_id: str, name: str, default):
@@ -585,15 +609,32 @@ class PersonalCI:
     def attempts(self, user_id: str) -> list[dict]:
         return self._state_json(user_id, ATTEMPTS_STATE, [])[1]
 
+    def _tag(self, user_id: str, text: str) -> str:
+        return hmac.new(self.store._user_dek(user_id), text.encode(), "sha256").hexdigest()[:16]
+
     def forget_skill(self, user_id: str, skill: str) -> dict:
-        """Delete a skill's mastery state and every logged attempt at it."""
+        """Delete a skill's mastery state, every logged attempt at it, and its name and evidence in
+        every weekly snapshot."""
         version, log = self._state_json(user_id, ATTEMPTS_STATE, [])
         kept = [a for a in log if a["skill"] != skill]
         if version is not None:
             self.store.overwrite_policy_state(user_id, ATTEMPTS_STATE, version, json.dumps(kept).encode())
         had_state = self.store.delete_skill(user_id, skill)
-        self.audit.append(user_id, "growth.forget", attempts=len(log) - len(kept), state=had_state)
+        scrubbed = self._rewrite_weekly(user_id, lambda snap: _scrub(snap, skill))
+        self.audit.append(user_id, "growth.forget", attempts=len(log) - len(kept), state=had_state,
+                          snapshots=scrubbed)
         return {"skill": skill, "attempts_deleted": len(log) - len(kept), "state_deleted": had_state}
+
+    def _rewrite_weekly(self, user_id: str, fn) -> int:
+        n = 0
+        for v in self.store.list_policy_versions(user_id, TWIN_STATE):
+            loaded = self.store.load_policy_state(user_id, TWIN_STATE, v["version"])
+            snap = json.loads(loaded[1])
+            new = fn(snap)
+            if new != snap:
+                self.store.overwrite_policy_state(user_id, TWIN_STATE, v["version"], json.dumps(new, default=str).encode())
+                n += 1
+        return n
 
     def skill_report(self, user_id: str, now=None) -> dict:
         return independence_report(self.store.list_skills(user_id), self.attempts(user_id), now or utcnow())
@@ -629,8 +670,13 @@ class PersonalCI:
         self.audit.append(user_id, "twin.rollback", version=version)
 
     def forget_weekly(self, user_id: str) -> int:
+        """Delete every weekly snapshot and every --deep request (the digests CI sent)."""
         n = self.store.delete_policy_states(user_id, TWIN_STATE)
-        self.audit.append(user_id, "twin.forget", versions=n)
+        deep = [r["id"] for r in self.store.list_interactions(user_id, with_payload=True)
+                if ((r.get("receipt") or {}).get("route") or {}).get("purpose") == "weekly-deep"]
+        for iid in deep:
+            self.store.delete_interaction(iid)
+        self.audit.append(user_id, "twin.forget", versions=n, deep_requests=len(deep))
         return n
 
     def next_challenge(self, user_id: str) -> str | None:

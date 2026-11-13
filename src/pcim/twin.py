@@ -31,6 +31,7 @@ from __future__ import annotations
 import dataclasses
 import datetime as dt
 import hashlib
+import re
 
 import numpy as np
 
@@ -40,6 +41,7 @@ from .evaluation import ROUTED_TASK_TYPES, scorecard, window_interactions
 from .registry import vendor_of
 from .sovereignty.credentials import find_credentials
 from .sovereignty.injection import scan as scan_instructions
+from .textsafe import terminal_safe
 from .types import TASK_TYPES, Trust, utcnow
 from .workspace import Workspace
 
@@ -68,6 +70,14 @@ def _q(text: str, n: int = SNIPPET) -> str:
     """Stored text quoted into a prompt: one line, capped, angle brackets neutralised so it can
     never open or close a block of the prompt it is placed in."""
     return _snip(text, n).replace("<", "‹").replace(">", "›")
+
+
+_TOKEN = re.compile(r"«(goal|note):([^»]+)»")
+
+
+def resolve(text: str, labels: dict) -> str:
+    """Replace «goal:id» / «note:project/id» with the current text, or "(deleted)"."""
+    return _TOKEN.sub(lambda m: f"“{labels[m.group(0)]}”" if m.group(0) in labels else "(deleted)", text or "")
 
 
 def _when(s: str) -> dt.datetime:
@@ -112,6 +122,7 @@ class Review:
     previous_version: int | None
     thin: bool
     facts: dict = dataclasses.field(default_factory=dict, repr=False)
+    labels: dict = dataclasses.field(default_factory=dict, repr=False)  # «goal:…»/«note:…» → current text
 
     def snapshot(self) -> dict:
         """What is saved as this week's version: derived evidence and decisions, no transcripts."""
@@ -119,7 +130,9 @@ class Review:
                 "window": {"since": self.since.isoformat(), "until": self.until.isoformat()},
                 "generated_at": utcnow().isoformat(), "previous_version": self.previous_version,
                 "skills": self.skills, "priorities": self.priorities, "accountability": self.accountability,
-                "challenges": [{"kind": c.kind, "rule": c.rule, "statement": c.statement} for c in self.challenges],
+                # Counts-only statements: a snapshot outlives the notes, goals and requests a full
+                # statement would quote. Priorities name goals and notes by id («goal:…», «note:…»).
+                "challenges": [{"kind": c.kind, "rule": c.rule, "statement": c.redacted} for c in self.challenges],
                 "adjustments": self.adjustments, "scorecard": self.scorecard}
 
     def as_dict(self) -> dict:
@@ -149,7 +162,9 @@ class CognitiveTwin:
     # ------------------------------------------------------------------ evidence
     def _facts(self, user_id: str, since: dt.datetime, until: dt.datetime) -> dict:
         ci = self.ci
-        rows = window_interactions(ci, user_id, since, until)
+        # The --deep prompt is CI's own traffic, not a request of the person's: never counted or quoted.
+        rows = [r for r in window_interactions(ci, user_id, since, until)
+                if ((r.get("receipt") or {}).get("route") or {}).get("purpose") != "weekly-deep"]
         attempts_all = ci.attempts(user_id)
         attempts = [a for a in attempts_all if since <= _when(a["ts"]) < until]
         projects = self.ws.list_projects(user_id)
@@ -218,9 +233,15 @@ class CognitiveTwin:
                         return ("kept", "closed") if n.get("resolved_at") else ("missed", "still open")
             return "n/a", "the note no longer exists"
         if t == "goal_activity":
+            goal = check.get("text")
+            if check.get("goal_id"):
+                item = self.ci.store.get_item(check["goal_id"])
+                if item is None or item.status != "active":
+                    return "n/a", "the goal was deleted or retracted"
+                goal = item.content
             texts = [r["task"] for r in f["rows"]] + [n["text"] for p in f["projects"] for n in p.notes
                                                        if since <= _when(n["created_at"]) < until]
-            k = int((self._relevance([check["text"]], texts) >= 0.5).sum()) if texts else 0
+            k = int((self._relevance([goal], texts) >= 0.5).sum()) if texts and goal else 0
             return ("kept" if k >= check["min"] else "partly" if k else "missed"), f"{k} related requests or notes"
         if t == "claims_settled":
             k = sum(1 for c in f["claims"] if c["project_id"] == check["project_id"]
@@ -378,8 +399,8 @@ class CognitiveTwin:
                             f"(0 of {len(rows)} requests, 0 project notes).")
                     cands.append(Finding("missed_opportunity", "goal_neglected", stmt,
                                          f"A stated goal had no related activity in {len(rows)} requests.", 0.55,
-                                         priority={"action": f"Spend at least two working sessions on “{_snip(g.content, 50)}”",
-                                                   "check": {"type": "goal_activity", "text": g.content, "min": 2}}))
+                                         priority={"action": f"Spend at least two working sessions on «goal:{g.id}»",
+                                                   "check": {"type": "goal_activity", "goal_id": g.id, "min": 2}}))
         stale = [(p, n) for p, n in open_steps if (now_ - _when(n["created_at"])).days >= STALE_DAYS]
         if stale:
             p, n = stale[0]
@@ -389,7 +410,7 @@ class CognitiveTwin:
             cands.append(Finding("missed_opportunity", "stale_next_steps", stmt,
                                  f"{len(stale)} next steps open more than a week (oldest {age} days).",
                                  min(0.7, 0.5 + 0.05 * len(stale)),
-                                 priority={"action": f"Close or drop: “{_snip(n['text'], 50)}” ({p.name})",
+                                 priority={"action": f"Close or drop: «note:{p.id}/{n['id']}»",
                                            "check": {"type": "note_resolved", "project_id": p.id, "note_id": n["id"]}}))
         for p in projects:
             d_here = [n for q, n in decisions if q.id == p.id]
@@ -429,7 +450,7 @@ class CognitiveTwin:
                     continue
                 seen.add(key)
                 priorities.append(c.priority | {"id": _pid(c.priority["action"]), "from": c.rule,
-                                                 "evidence": c.statement})
+                                                 "evidence": c.redacted})
         adjustments = [c.adjustment | {"id": _pid(c.adjustment["kind"] + c.adjustment.get("task_type", ""))}
                        for c in cands if c.adjustment]
 
@@ -442,8 +463,20 @@ class CognitiveTwin:
             skills[s] = {"mastery": d["mastery"], "flags": d["flags"], "evidence": d["evidence"], "trend": d["trend"],
                          "week": {"unassisted": len(un_), "unassisted_correct": sum(a["correct"] for a in un_),
                                   "assisted": len(wk) - len(un_)}}
+        labels = {f"«goal:{g.id}»": _snip(g.content, 60) for g in f["goals"]}
+        labels.update({f"«note:{p.id}/{n['id']}»": f"{_snip(n['text'], 60)} ({_snip(p.name, 30)})"
+                       for p in projects for n in p.notes})
         return Review(self.name(user_id), user_id, since, until, week, did, stuck, nxt, accountability, cands,
-                      priorities, adjustments, skills, sc, prev["version"] if prev else None, thin, facts=f)
+                      priorities, adjustments, skills, sc, prev["version"] if prev else None, thin, facts=f,
+                      labels=labels)
+
+    def labels_now(self, user_id: str) -> dict:
+        """Token labels from current records, for showing a stored snapshot's priorities."""
+        goals = [i for i in self.ci.memory.current(user_id) if i.kind == "goal"]
+        labels = {f"«goal:{g.id}»": _snip(g.content, 60) for g in goals}
+        labels.update({f"«note:{p.id}/{n['id']}»": f"{_snip(n['text'], 60)} ({_snip(p.name, 30)})"
+                       for p in self.ws.list_projects(user_id) for n in p.notes})
+        return labels
 
     # ------------------------------------------------------------------ the profile update
     def save(self, user_id: str, review: Review) -> int:
@@ -607,6 +640,11 @@ If the facts are too thin to support a point, say so instead of guessing. Do not
 
 def render(review: Review, saved_version: int | None = None, deep: dict | None = None,
            applied: list[dict] | None = None) -> str:
+    return terminal_safe(resolve(_render(review, saved_version, deep, applied), review.labels))
+
+
+def _render(review: Review, saved_version: int | None = None, deep: dict | None = None,
+            applied: list[dict] | None = None) -> str:
     w = []
     w.append(f"{review.name} · week {review.week} · {review.since.date()} → {review.until.date()}")
     w.append(FRAMING)

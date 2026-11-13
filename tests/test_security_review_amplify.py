@@ -1,6 +1,6 @@
 """Independent security and privacy review of the amplification slice (81c7fd5).
 
-Fixed and unmarked (2026-11-12): H1-H5, M1-M4, L1, L7, L8. The rest stay xfail until their fixes land.
+Fixed and unmarked (2026-11-12): H1-H5, M1-M9, L1, L7, L8. The rest stay xfail until their fixes land.
 
 Every test here demonstrates one finding and FAILS on the reviewed code. Each is marked
 `xfail(strict=True)` so the suite stays green and the test flips to a failure (XPASS) the
@@ -205,8 +205,6 @@ def test_m4_a_key_in_memory_reaches_the_vendor(env, tmp_path):
     assert key not in _sent(recs)
 
 
-@pytest.mark.xfail(strict=True, reason="M5: weekly snapshots keep the full text of a goal after the memory item "
-                                       "is crypto-shredded")
 def test_m5_a_deleted_goal_survives_in_the_weekly_snapshot(env, tmp_path):
     ci, _ = make(tmp_path)
     goal = ci.remember("u", "Apply to the Zurich fellowship before December", "goal")
@@ -223,8 +221,6 @@ def test_m5_a_deleted_goal_survives_in_the_weekly_snapshot(env, tmp_path):
     assert "Zurich" not in json.dumps(ci.weekly_snapshots("u"))
 
 
-@pytest.mark.xfail(strict=True, reason="M6: `ci skills --forget` leaves the skill and its evidence in every "
-                                       "weekly snapshot")
 def test_m6_forget_skill_leaves_it_in_weekly_snapshots(tmp_path):
     ci = PersonalCI(tmp_path, seed=0)
     ci.onboard("u")
@@ -236,8 +232,6 @@ def test_m6_forget_skill_leaves_it_in_weekly_snapshots(tmp_path):
     assert "couples therapy" not in json.dumps(ci.weekly_snapshots("u"))
 
 
-@pytest.mark.xfail(strict=True, reason="M7: skill names go into the plaintext audit (growth.probe) and survive "
-                                       "forget_skill and erase")
 def test_m7_skill_names_survive_forget_and_erase_in_the_plaintext_audit(tmp_path):
     ci = PersonalCI(tmp_path / "d", seed=0)
     ci.onboard("u")
@@ -250,8 +244,6 @@ def test_m7_skill_names_survive_forget_and_erase_in_the_plaintext_audit(tmp_path
     assert "panic attacks" not in raw
 
 
-@pytest.mark.xfail(strict=True, reason="M8: the --deep prompt (whole digest) is stored as an ordinary request; "
-                                       "`ci weekly --forget` keeps it and later reviews count and re-quote it")
 def test_m8_the_deep_digest_outlives_weekly_forget(env, tmp_path):
     ci, recs = make(tmp_path)
     ci.ask_routed("u", LIGHT)
@@ -263,8 +255,6 @@ def test_m8_the_deep_digest_outlives_weekly_forget(env, tmp_path):
     assert not any("<facts>" in t for t in tasks)
 
 
-@pytest.mark.xfail(strict=True, reason="M9: stored and model-written text is printed raw: terminal escape "
-                                       "sequences (OSC 52 clipboard, screen clear) reach the terminal")
 def test_m9_terminal_control_sequences_from_stored_and_model_text_are_printed_raw(env, tmp_path):
     ci, _ = make(tmp_path)
     ws = Workspace(ci)
