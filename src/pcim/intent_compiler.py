@@ -27,7 +27,8 @@ Typed intent. A specification separates:
 Intent preservation, the rule the 2026-11-13 development run motivated: "tweet about the
 launch" was planned as drafting a tweet and marked ready, so the posting half disappeared. Now
 the request is read deterministically for clauses that ask for an action (polite prefixes,
-shorthand and one-letter typos tolerated; questions *about* actions are not requests). Any
+shorthand and one-letter typos tolerated, unless the "typo" is itself a common word; questions
+*about* actions are not requests). Any
 requested action missing from the model's outcomes is restored as an outcome, flagged, and
 leaves the plan not ready. A request to post never silently becomes a request to draft.
 
@@ -93,6 +94,24 @@ _OTHER_SENSE = {
     "clear": re.compile(r"^(up\b|my head|the air)", re.I),
     "post": re.compile(r"^-"),
 }
+# A word one edit from an action verb is a typo only if it is not itself a common word: "look at
+# the data" is not "book", "test it" is not "text", "clean the csv" is not "clear". The list is the
+# whole-word vocabulary of the cached embedding model within one edit of a lexicon verb, minus the
+# verbs' own inflections. It was added after the 2026-11-13 held-out run, where "look into the
+# reimbursement thing" was restored as a booking. Regenerate with scripts/gen_real_word_neighbours.py
+# when the lexicon changes. The cost: a typo that is itself a real word ("eras the logs") is no
+# longer caught here, and only the model's own outcomes can catch it.
+_REAL_WORDS = frozenset("""
+announcer apple bail ball bend bing boom boon boot border brook bush cale calf calm cancer carl cell
+chancel chip clean cmll cook cost crash crop dail deserve ding drip duke ease ebook emil eras fail
+fall gail gall hail hall hare hook host hush jail jing king lear lend ling look lost luke lush maia
+maid main mali mall massage ming most nail next nike nude oder older pang past peng pest pine pink
+pins pipe plush poet pont port pose pots preserve prop pure purse qing rail rash rely remote repay
+replay rest ring ripe rook rush sail sand scare seed sent shade shake shale shame shane shape shark
+sharp sharpe shave shia shin shire shit shop shore sigh sing sinn skip slip spare spend stare summit
+surge sweet tail tall tend tent test thrash ting took tweed urge venom wall whip wide wife wine wing
+wire wise ying
+""".split())
 _POLITE = re.compile(
     r"^(?:(?:pls|plz|please|kindly|hey|hi|ok|okay|yo|so|also|now|then|next|finally|after that|afterwards|and then|"
     r"and|ci|can you|can u|could you|could u|would you|will you|i need you to|i want you to|i'd like you to|"
@@ -131,7 +150,7 @@ def _verb(word: str) -> tuple[str, str] | None:
         return "destructive_change", DESTRUCTIVE_VERBS[w]
     if w in ACTION_VERBS:
         return "external_action", ACTION_VERBS[w]
-    if len(w) >= 4:
+    if len(w) >= 4 and w not in _REAL_WORDS:
         for table, kind in ((DESTRUCTIVE_VERBS, "destructive_change"), (ACTION_VERBS, "external_action")):
             for v, lemma in table.items():
                 if len(v) >= 4 and _osa(w, v) == 1:

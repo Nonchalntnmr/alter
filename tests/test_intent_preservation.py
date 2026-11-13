@@ -59,6 +59,31 @@ def test_questions_other_senses_and_negations_are_not_requested_actions(request_
     assert ic.requested_actions(request_) == []
 
 
+@pytest.mark.parametrize("request_", [
+    "can you look at the data and tell me if its good enough",  # held-out h40: restored as a booking in V2
+    "can u look into the reimbursement thing, its been like 3 weeks",  # held-out h49, the same
+    "test the parser and fix whatever fails",                   # "test" is not "text"
+    "clean up the csv headers",                                 # "clean" is not "clear"
+    "port the script to python 3",                              # "port" is not "post"
+    "skip the slow tests",                                      # "skip" is not "ship"
+    "wire up the logger",                                       # "wire" is not "wipe"
+    "preserve the row order",                                   # "preserve" is not "reserve"
+    "luke wants the summary by friday",                         # a name is not "nuke"
+])
+def test_a_common_word_one_letter_from_an_action_verb_is_not_read_as_a_typo(request_):
+    assert ic.requested_actions(request_) == []
+
+
+@pytest.mark.parametrize("request_,lemma", [
+    ("tweat about the launch", "post"),
+    ("delte the old runs", "delete"),
+    ("shedule a call with my advisor", "schedule"),
+    ("emails raj the notes", "email"),  # an inflection, not a typo
+])
+def test_typos_that_are_not_words_and_inflections_still_count(request_, lemma):
+    assert lemma in [a["lemma"] for a in ic.requested_actions(request_)]
+
+
 @pytest.mark.parametrize("request_,kind,lemma", ASKS)
 def test_a_plan_that_only_prepares_a_requested_action_is_never_ready_and_the_action_is_restored(request_, kind, lemma):
     spec = ic.validate(drafting_only(), [], request=request_)
