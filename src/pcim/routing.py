@@ -46,6 +46,7 @@ import os
 import re
 
 from .adapters.pricing import _table
+from . import routing_learned
 from .intent import classify_task
 from .registry import ModelEntry, availability, entries, model_identity
 from .sovereignty.credentials import LOCAL_VENDORS, find_credentials
@@ -53,15 +54,22 @@ from .types import approx_tokens
 
 TIERS = {1: "light", 2: "standard", 3: "deep"}
 PREFERENCES = ("economy", "balanced", "quality")
+# "learned": routing_learned (local embeddings + calibrated logistic regression, escalates when
+# unsure). On sealed set #2 (60 requests, run once): under-routed 1/60, deep recall 15/16, exact
+# 36/60, versus the lexical markers' 33/60 under-routed and 0/16 deep (experiments/routing/REPORT.md).
+# "lexical": the original keyword markers, kept for comparison and as the fallback.
+ESTIMATORS = ("learned", "lexical")
 # The lowest tier each preference will route to. On a held-out set written without sight of
 # this code, the lexical estimate under-routed 18 of 40 requests and found 3 of 10 deep ones
 # (experiments/routing/REPORT.md). Under-routing costs answer quality, so only `economy`, the
 # person's explicit choice, routes to the light tier. Decided after seeing that set, so it can
 # no longer measure this floor cleanly.
 FLOORS = {"economy": 1, "balanced": 2, "quality": 2}
+PROFILE_VENDOR = "anthropic"  # whose models PROFILES describes
 OUTPUT_TOKENS = {1: 500, 2: 1500, 3: 4000}  # budgeting guesses for the cost estimate only
 SYSTEM_OVERHEAD = 300  # preamble and directives, tokens
 MAX_FALLBACKS = 4
+SCAN_CHARS = 8000
 MIN_LATENCY_SAMPLES = 5
 
 
@@ -90,16 +98,20 @@ def load_overrides(path: str | None = None) -> dict[str, dict]:
     path = path or os.environ.get("PCIM_CAPABILITIES")
     if not path or not os.path.exists(path):
         return {}
-    raw = json.load(open(path))
+    try:
+        with open(path) as fh:
+            raw = json.load(fh)
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        raise CapabilityFileError(f"{path} is not valid JSON: {e}") from None
     if not isinstance(raw, dict):
         raise CapabilityFileError("the capabilities file must be a JSON object")
     for k, d in raw.items():
         if not isinstance(d, dict):
             raise CapabilityFileError(f"{k}: expected an object")
-        if "tier" in d and d["tier"] not in (1, 2, 3, None):
+        if "tier" in d and (isinstance(d["tier"], bool) or d["tier"] not in (1, 2, 3, None)):
             raise CapabilityFileError(f"{k}: tier must be 1, 2, 3 or null")
         for f in ("context_window", "max_output"):
-            if f in d and d[f] is not None and (not isinstance(d[f], int) or d[f] <= 0):
+            if f in d and d[f] is not None and (isinstance(d[f], bool) or not isinstance(d[f], int) or d[f] <= 0):
                 raise CapabilityFileError(f"{k}: {f} must be a positive integer")
         if "strengths" in d and not (isinstance(d["strengths"], list) and all(isinstance(s, str) for s in d["strengths"])):
             raise CapabilityFileError(f"{k}: strengths must be a list of strings")
@@ -114,7 +126,9 @@ def canonical(e: ModelEntry) -> str:
 def capability(e: ModelEntry, overrides: dict | None = None) -> Capability:
     ov = load_overrides() if overrides is None else overrides
     canon = canonical(e)
-    base = PROFILES.get(canon, Capability(None))
+    # Built-in profiles describe Anthropic's own models. A local or third-party server that names
+    # its model "claude-opus-5-5" is not Opus: only the vendor's own entries inherit the profile.
+    base = PROFILES.get(canon, Capability(None)) if e.vendor == PROFILE_VENDOR else Capability(None)
     if e.test_double:
         base = Capability(None, source="test double: its answers are not a model's")
     for k in (e.key, canon):
@@ -132,7 +146,7 @@ def _rx(*pats: str) -> tuple[re.Pattern, ...]:
     return tuple(re.compile(p, re.I) for p in pats)
 
 
-_DEEP = _rx(r"\bprove\b.*\b(general|for all|every)\b", r"\bderiv(e|ation)\b", r"\barchitect", r"\bdesign (a|an|the)\b",
+_DEEP = _rx(r"\bprove\b[^\n]{0,120}?\b(general|for all|every)\b", r"\bderiv(e|ation)\b", r"\barchitect", r"\bdesign (a|an|the)\b",
             r"\btrade-?offs?\b", r"\bthreat model", r"\bsecurity review\b", r"\brefactor\b", r"\bmigrat(e|ion)\b",
             r"\broot cause\b", r"\brace condition\b", r"\bconcurren", r"\bdistributed\b", r"\btheorem\b",
             r"\bstrategy\b", r"\bend-to-end\b", r"\bresearch design\b", r"\bcritique\b", r"\btrustworthy\b",
@@ -147,7 +161,7 @@ _MATH = _rx(r"\bintegral\b", r"\bderivative\b", r"\bprobabilit", r"\bexpected va
             r"\beigen", r"\bequation", r"\bsolve for\b", r"\bvariance\b", r"\bregression\b", r"\bstatistic",
             r"\bbayes", r"\bp-?value\b", r"\bconfidence interval\b")
 _CODE = _rx(r"```", r"\btraceback\b", r"\bstack trace\b", r"\b\w+\.(py|ts|tsx|js|go|rs|java|rb|sql|sh)\b",
-            r"\bdef \w+\(", r"\b(Type|Value|Key|Attribute|Index|Name)Error\b", r"\bexception\b", r"\bSELECT\b.*\bFROM\b",
+            r"\bdef \w+\(", r"\b(Type|Value|Key|Attribute|Index|Name)Error\b", r"\bexception\b", r"\bSELECT\b[^\n]{0,400}?\bFROM\b",
             r"\bfunction\b", r"\bmodule\b", r"\bquery\b")
 
 
@@ -168,20 +182,38 @@ class Requirement:
 
 
 def estimate(task: str, *, mode: str | None = None, preference: str = "balanced", budget_tokens: int = 1200,
-             min_tier: int | None = None, apply_floor: bool = True) -> Requirement:
+             min_tier: int | None = None, apply_floor: bool = True, estimator: str = "learned",
+             embedder=None) -> Requirement:
     """What this request needs, with the reasons. Deterministic, local, no model call.
     `apply_floor=False` gives the raw lexical estimate (what the benchmark measures)."""
     if preference not in PREFERENCES:
         raise ValueError(f"preference must be one of {PREFERENCES}")
-    probs = classify_task(task)
+    if estimator not in ESTIMATORS:
+        raise ValueError(f"estimator must be one of {ESTIMATORS}")
+    # Markers are read from the first SCAN_CHARS characters: enough to judge a request, and a
+    # bound on the work a huge paste can cause. Length still counts from the whole text.
+    head = task[:SCAN_CHARS]
+    probs = classify_task(head)
     ttype = max(probs, key=probs.get)
     signals, domains = [], []
-    deep, std = _matches(_DEEP, task), _matches(_STANDARD, task)
-    if any(p.search(task) for p in _CODE) or (ttype == "code" and probs[ttype] > 0.5):
+    deep, std = _matches(_DEEP, head), _matches(_STANDARD, head)
+    if any(p.search(head) for p in _CODE) or (ttype == "code" and probs[ttype] > 0.5):
         domains.append("code")
-    if any(p.search(task) for p in _MATH):
+    if any(p.search(head) for p in _MATH):
         domains.append("math")
-    if deep:
+    learned = None
+    if estimator == "learned":
+        try:
+            learned = routing_learned.estimate_tier(head, embedder=embedder)
+        except Exception as e:  # a missing or corrupt artifact must not stop routing
+            signals.append(f"learned estimator unavailable ({type(e).__name__}); using the lexical markers")
+    if learned is not None:
+        tier, _conf, why = learned
+        signals.append(why)
+        cues = (deep + std)[:3]
+        if cues:
+            signals.append("wording cues (reported, not used for the tier): " + ", ".join(f"'{w}'" for w in cues))
+    elif deep:
         tier = 3
         signals.append("asks for deep reasoning: " + ", ".join(f"'{w}'" for w in deep[:3]))
     elif std:
@@ -190,17 +222,18 @@ def estimate(task: str, *, mode: str | None = None, preference: str = "balanced"
     else:
         tier = 1
         signals.append("no reasoning or construction markers")
-    n_parts = len(re.findall(r"(?m)^\s*(\d+[.)]|[-*•])\s+\S", task)) + max(0, task.count("?") - 1)
-    if n_parts >= 3 and tier < 3:
-        tier += 1
-        signals.append(f"{n_parts} parts")
+    if learned is None:
+        n_parts = len(re.findall(r"(?m)^[ \t]*(\d+[.)]|[-*•])[ \t]+\S", head)) + max(0, head.count("?") - 1)
+        if n_parts >= 3 and tier < 3:
+            tier += 1
+            signals.append(f"{n_parts} parts")
     if len(task) > 4000 and tier < 3:
         tier = 3
         signals.append(f"long request ({approx_tokens(task):,} tokens)")
     elif len(task) > 1500 and tier < 2:
         tier = 2
         signals.append(f"long request ({approx_tokens(task):,} tokens)")
-    if "math" in domains and tier < 2:
+    if learned is None and "math" in domains and tier < 2:
         tier = 2
         signals.append("mathematics")
     if mode == "challenge" and tier < 3:
@@ -332,11 +365,13 @@ def estimated_cost(e: ModelEntry, in_tokens: int, out_tokens: int) -> float | No
 
 def plan(task: str, *, allowed_vendors: set[str], mode: str | None = None, preference: str = "balanced",
          budget_tokens: int = 1200, pinned: str | None = None, include_test_doubles: bool | None = None,
-         latency: dict | None = None, min_tier: int | None = None, overrides: dict | None = None) -> RoutePlan:
+         latency: dict | None = None, min_tier: int | None = None, overrides: dict | None = None,
+         estimator: str = "learned", embedder=None) -> RoutePlan:
     """Rank every known model for `task`. `allowed_vendors` is already the intersection of the
     person's egress grants and, in a project, its provider access. `latency` maps
     (provider, canonical model) to (p50 ms, n) from this machine's own interaction log."""
-    req = estimate(task, mode=mode, preference=preference, budget_tokens=budget_tokens, min_tier=min_tier)
+    req = estimate(task, mode=mode, preference=preference, budget_tokens=budget_tokens, min_tier=min_tier,
+                   estimator=estimator, embedder=embedder)
     ov = load_overrides() if overrides is None else overrides
     allowed = set(allowed_vendors)
     if req.credentials:

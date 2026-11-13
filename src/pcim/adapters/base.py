@@ -5,6 +5,8 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import re
+from http import HTTPStatus
 from typing import Protocol
 
 
@@ -93,8 +95,126 @@ class AgentStep:
     refusal: bool = False
 
 
+# ---------------------------------------------------------------- provider failures
+# What went wrong, as facts a caller can act on. An adapter builds a ProviderError's message
+# from these facts only: never the request, a header or a key, and never free text from
+# the provider's error body (bodies can echo the request, and some quote part of the key).
+KINDS = ("timeout", "connection", "rate_limit", "server", "auth", "permission", "no_credentials", "quota",
+         "request", "malformed", "config", "unknown")
+CREDENTIAL_KINDS = frozenset({"auth", "permission", "no_credentials"})  # report as a credential problem
+PROVIDER_WIDE_KINDS = frozenset({"auth", "no_credentials", "config"})  # every model on that provider fails alike
+
+
 class ProviderError(RuntimeError):
-    """The provider could not produce a reply (transport failure, auth, malformed output)."""
+    """The provider could not produce a reply (transport failure, auth, malformed output).
+
+    `retryable`: the same request may succeed later (timeouts, connection failures, 408, 429, 5xx).
+    `status`: the HTTP status the provider answered with when it answered with an error, else None.
+    `kind`: one of KINDS. The defaults keep a bare `ProviderError("...")` meaning what it always did.
+    """
+
+    def __init__(self, *args, retryable: bool = False, status: int | None = None, kind: str = "unknown"):
+        super().__init__(*args)
+        self.retryable = bool(retryable)
+        self.status = status
+        self.kind = kind
+
+    @property
+    def credential_problem(self) -> bool:
+        return self.kind in CREDENTIAL_KINDS
+
+
+_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}")
+QUOTA_CODES = frozenset({"insufficient_quota"})  # OpenAI's 429 for an exhausted balance: waiting does not help
+_HINT = {401: "the credential was rejected", 402: "payment required", 403: "permission denied",
+         404: "model or endpoint not found", 408: "the request timed out", 413: "the request is too large"}
+
+
+def safe_token(value, avoid=()) -> str | None:
+    """A provider-supplied identifier (error code, request id) fit for a message: one short
+    token that is not part of any string in `avoid` (the request, the key), else None."""
+    if not isinstance(value, str) or not _TOKEN.fullmatch(value):
+        return None
+    if any(a and (value in a or (len(a) >= 8 and a in value)) for a in avoid):
+        return None
+    return value
+
+
+def redact(text: str, secrets=()) -> str:
+    for s in secrets:
+        if s and len(s) >= 4:
+            text = text.replace(s, "[redacted]")
+    return text
+
+
+def classify_status(status: int, code: str | None = None) -> tuple[str, bool]:
+    """(kind, retryable) for an HTTP error status."""
+    if status == 401:
+        return "auth", False
+    if status == 403:
+        return "permission", False
+    if status == 402:
+        return "quota", False
+    if status == 408:
+        return "timeout", True
+    if status == 429:
+        return ("quota", False) if code in QUOTA_CODES else ("rate_limit", True)
+    if 500 <= status <= 599:
+        return "server", True
+    if 400 <= status <= 499:
+        return "request", False
+    return "malformed", False  # 1xx/3xx where a reply was expected
+
+
+def status_failure(provider: str, status: int, *, host: str | None = None, code=None, request_id=None,
+                   kind: str | None = None, avoid=(), secrets=()) -> ProviderError:
+    """The provider answered with an HTTP error. `code` and `request_id` come from the provider and
+    are kept only when they are single tokens found nowhere in `avoid` + `secrets`."""
+    avoid = tuple(avoid) + tuple(secrets)
+    code, rid = safe_token(code, avoid), safe_token(request_id, avoid)
+    k, retryable = classify_status(status, code)
+    k = kind or k
+    try:
+        phrase = " " + HTTPStatus(status).phrase
+    except ValueError:
+        phrase = ""
+    hint = ("the credential was rejected" if k == "auth" else "quota exhausted" if k == "quota"
+            else "rate limited" if k == "rate_limit" else "server error" if k == "server"
+            else _HINT.get(status, "request rejected" if 400 <= status <= 499 else "unexpected status"))
+    msg = (f"{provider} returned HTTP {status}{phrase}{f' from {host}' if host else ''}: {hint}"
+           f"{f' ({code})' if code else ''}{f'; request id {rid}' if rid else ''}")
+    return ProviderError(redact(msg, secrets), retryable=retryable, status=status, kind=k)
+
+
+def transport_failure(provider: str, exc: Exception, *, host: str | None = None, secrets=()) -> ProviderError:
+    """An httpx error before any HTTP answer. Only the exception's class name is reported: its
+    text and its `.request` (headers, body) stay out of the message."""
+    import httpx
+
+    name, where = type(exc).__name__, f" to {host}" if host else ""
+    if isinstance(exc, httpx.TimeoutException):
+        kind, retryable, what = "timeout", True, "timed out"
+    elif isinstance(exc, (httpx.NetworkError, httpx.RemoteProtocolError, httpx.ProxyError)):
+        kind, retryable, what = "connection", True, "failed: could not connect or the connection dropped"
+    elif isinstance(exc, httpx.DecodingError):
+        kind, retryable, what = "malformed", False, "failed: the response could not be decoded"
+    elif isinstance(exc, (httpx.UnsupportedProtocol, httpx.LocalProtocolError)):
+        kind, retryable, what = "config", False, "failed: the endpoint URL or request is not usable"
+    else:
+        kind, retryable, what = "unknown", False, "failed"
+    return ProviderError(redact(f"{provider} request{where} {what} ({name})", secrets), retryable=retryable, kind=kind)
+
+
+def malformed_response(provider: str, what: str = "unexpected shape") -> ProviderError:
+    return ProviderError(f"{provider} returned a malformed response ({what})", kind="malformed")
+
+
+def url_host(url) -> str | None:
+    """host[:port] of an httpx.URL, without userinfo, path or query."""
+    host = getattr(url, "host", None)
+    if not host:
+        return None
+    return f"{host}:{url.port}" if getattr(url, "port", None) else host
 
 
 class Adapter(Protocol):

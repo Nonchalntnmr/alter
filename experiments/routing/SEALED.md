@@ -15,3 +15,9 @@ worktree without this file, the first held-out set, or the reports that quote it
 Registered use: one run per estimator version, reported unedited in REPORT.md: exact accuracy,
 under-routing rate, deep recall, and estimated cost against always-Opus. The file is added to
 the repository with that first run, and its hash checked by `run.py`.
+
+## Registered run (2026-11-12)
+Hash re-checked before the run. Results in REPORT.md: the learned estimator passed all four
+preregistered targets (under-routed 1/60, deep 15/16, exact 36/60, cost 0.837 of always-Opus);
+the lexical markers found 0 of 16 deep requests. The file is now in the repository as
+`sealed2.json` and is no longer sealed: a further estimator needs a new set.

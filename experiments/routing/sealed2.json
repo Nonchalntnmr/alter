@@ -1,0 +1,308 @@
+{
+ "format": "pcim-routing-sealed/2",
+ "written": "2026-11-11, by a separate agent given only the labelling rubric, with no access to any CI code",
+ "label": "tier = the lowest capability tier (1 light, 2 standard, 3 deep) the labeller would trust to do the task well",
+ "custody": "kept outside every git worktree; only its sha256 is committed until the registered run. The integrator saw the content when it arrived and changed no estimator code afterwards.",
+ "tasks": [
+  {
+   "id": "s01",
+   "tier": 1,
+   "text": "whats the git command to undo my last commit but keep the changes staged"
+  },
+  {
+   "id": "s02",
+   "tier": 2,
+   "text": "postgres or mongodb for a small b2b saas? data is pretty relational (accounts, users, invoices, line items) but my cofounder wants mongo bc \"schemaless = faster to iterate\". help me decide and give me something i can say to him"
+  },
+  {
+   "id": "s03",
+   "tier": 3,
+   "text": "we rolled out a new discharge protocol at 4 of our 8 hospitals (picked by coin flip) and kept the other 4 doing the usual thing. about 2,000 patients per hospital. 30-day readmission was 11.2% vs 13.0%, and our analyst got p = 0.0001 from a chi-square test on all 16,000 patients. can we tell the board it works?"
+  },
+  {
+   "id": "s04",
+   "tier": 1,
+   "text": "design a subject line for an email telling the team standup moves to 10am starting monday"
+  },
+  {
+   "id": "s05",
+   "tier": 2,
+   "text": "my binary search hangs on some inputs, why?\n\ndef lower_bound(a, x):\n    lo, hi = 0, len(a)\n    while lo < hi:\n        mid = (lo + hi) // 2\n        if a[mid] < x:\n            lo = mid\n        else:\n            hi = mid\n    return lo"
+  },
+  {
+   "id": "s06",
+   "tier": 1,
+   "text": "app wont start after deploy, what's wrong?\n\nException in thread \"main\" org.springframework.beans.factory.BeanCreationException: Error creating bean with name 'configLoader' defined in class path resource [com/acme/config/AppConfig.class]: Bean instantiation via factory method failed; nested exception is org.springframework.beans.BeanInstantiationException: Failed to instantiate [com.acme.config.ConfigLoader]: Factory method 'configLoader' threw exception; nested exception is java.lang.IllegalStateException: could not load settings\n\tat org.springframework.beans.factory.support.ConstructorResolver.instantiate(ConstructorResolver.java:658)\n\tat org.springframework.beans.factory.support.ConstructorResolver.instantiateUsingFactoryMethod(ConstructorResolver.java:486)\n\tat org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.createBean(AbstractAutowireCapableBeanFactory.java:542)\n\t... 14 more\nCaused by: java.lang.IllegalStateException: could not load settings\n\tat com.acme.config.ConfigLoader.<init>(ConfigLoader.java:41)\nCaused by: java.io.FileNotFoundException: config/application-prod.yml (No such file or directory)\n\tat java.base/java.io.FileInputStream.open0(Native Method)\n\tat com.acme.config.ConfigLoader.<init>(ConfigLoader.java:38)"
+  },
+  {
+   "id": "s07",
+   "tier": 3,
+   "text": "why does our redis lock (SET key val NX PX 30000, then DEL when the job finishes) occasionally let two workers process the same invoice? happens maybe once a week"
+  },
+  {
+   "id": "s08",
+   "tier": 2,
+   "text": "my landlord is keeping $800 of my $1500 deposit for \"repainting and carpet cleaning\" after i lived there 3 years. this is in texas. is that legit and what should i do"
+  },
+  {
+   "id": "s09",
+   "tier": 1,
+   "text": "analyze this for me: is \"irregardless\" actually a word or not"
+  },
+  {
+   "id": "s10",
+   "tier": 2,
+   "text": "is this query right? i want every customer and their 2024 order count, including customers with zero orders\n\nSELECT c.id, c.name, COUNT(o.id) AS orders_2024\nFROM customers c\nLEFT JOIN orders o ON o.customer_id = c.id\nWHERE o.created_at >= '2024-01-01' AND o.created_at < '2025-01-01'\nGROUP BY c.id, c.name;"
+  },
+  {
+   "id": "s11",
+   "tier": 3,
+   "text": "my dad is 63 and wants to retire this year. about $1.4M in his 401k, $300k in a regular brokerage account, $80k cash, house is paid off. my mom is 60 and never worked outside the home. should he take social security now or wait, and should he be doing anything with the 401k before he's forced to take money out? i need an actual plan, he will literally do whatever i tell him"
+  },
+  {
+   "id": "s12",
+   "tier": 1,
+   "text": "72 F in celsius?"
+  },
+  {
+   "id": "s13",
+   "tier": 1,
+   "text": "optimize this:\n\nif is_valid == True:\n    return True\nelse:\n    return False"
+  },
+  {
+   "id": "s14",
+   "tier": 2,
+   "text": "pandas q - df has customer_id, order_date, amount. i want one row per customer with first order date, last order date, total spend, and number of days between first and last order. order_date is a string like '2024-03-07'"
+  },
+  {
+   "id": "s15",
+   "tier": 3,
+   "text": "find all real n x n matrices A with A^2 = A^T. full characterization with proof please"
+  },
+  {
+   "id": "s16",
+   "tier": 2,
+   "text": "help me push back on my managers deadline without sounding like im refusing. she wants the billing migration done by the 15th, realistically it's the 29th bc the auth team still hasn't given us the new endpoints. draft a slack msg"
+  },
+  {
+   "id": "s17",
+   "tier": 1,
+   "text": "plan a packing list for a 3 day work trip to chicago in november, carry-on only"
+  },
+  {
+   "id": "s18",
+   "tier": 2,
+   "text": "can you turn this into a list comprehension\n\nresult = []\nfor line in lines:\n    if line.startswith('#'):\n        continue\n    if line.strip() == 'END':\n        break\n    result.append(line.strip().lower())"
+  },
+  {
+   "id": "s19",
+   "tier": 3,
+   "text": "looks fine to me but can you confirm before we ship? this guards every endpoint in our api\n\nimport jwt\n\ndef verify(token):\n    alg = jwt.get_unverified_header(token)['alg']\n    return jwt.decode(token, PUBLIC_KEY, algorithms=[alg])\n\n# PUBLIC_KEY is our RSA public key PEM, also served at /.well-known/jwks.json\n# tokens are issued by our auth service with RS256"
+  },
+  {
+   "id": "s20",
+   "tier": 1,
+   "text": "turn this into a markdown table:\n\nname,role,start_date,location\nPriya Shah,Backend Engineer,2023-04-03,Austin\nMarcus Lee,Designer,2022-11-14,Remote\nAna Gomez,Data Scientist,2024-01-08,Chicago\nTom Becker,PM,2021-06-21,Austin\nLi Wei,SRE,2023-09-11,Seattle\nFatima Noor,Backend Engineer,2024-02-26,Remote"
+  },
+  {
+   "id": "s21",
+   "tier": 2,
+   "text": "explain the bias-variance tradeoff so a high schooler would get it, with one concrete example"
+  },
+  {
+   "id": "s22",
+   "tier": 3,
+   "text": "two even-money bets I can make every week. bet 1 wins 55% of the time, bet 2 wins 53%, and the outcomes are correlated (about 0.4). what fraction of my bankroll should go on each to maximize long-run growth? and how much should i shade that down given i estimated those win rates from only ~200 past results each"
+  },
+  {
+   "id": "s23",
+   "tier": 1,
+   "text": "regex for a US zip code, either 12345 or 12345-6789"
+  },
+  {
+   "id": "s24",
+   "tier": 2,
+   "text": "worth refinancing? balance $310k, current rate 6.8%, new rate 5.9%, both 30yr fixed, closing costs ~$4,200. we'll prob sell in about 4 years"
+  },
+  {
+   "id": "s25",
+   "tier": 1,
+   "text": "prove the sum of two even numbers is always even (discrete math hw, just need the short version)"
+  },
+  {
+   "id": "s26",
+   "tier": 3,
+   "text": "we have this in an aiohttp service. two problems: when the cache is cold we get a stampede of identical db queries for the same user, and every so often a profile shows old data even though we invalidate on update. how do i fix both properly?\n\ncache = {}\n\nasync def get_user(uid):\n    if uid in cache:\n        return cache[uid]\n    user = await db.fetch_user(uid)\n    cache[uid] = user\n    return user\n\nasync def on_user_updated(event):  # called from pubsub\n    cache.pop(event.uid, None)"
+  },
+  {
+   "id": "s27",
+   "tier": 2,
+   "text": "quiz me on the krebs cycle. 10 questions, getting harder, dont show the answers until i reply"
+  },
+  {
+   "id": "s28",
+   "tier": 1,
+   "text": "pull out the action items w/ owners from these notes:\n\nsync 11/4 - attendees: dana, raj, kim, oliver\n- dana walked through Q4 roadmap, no changes\n- raj: vendor contract renewal due 11/30, he'll get the redlines to legal by friday\n- discussed onboarding doc, kim thinks it's outdated. kim to update the setup section, oliver to review\n- long tangent about the offsite location, no decision\n- oliver will send the budget spreadsheet to finance by 11/8\n- next sync 11/18"
+  },
+  {
+   "id": "s29",
+   "tier": 2,
+   "text": "if P(A|B) > P(A) and P(A|C) > P(A), does it follow that P(A|B,C) > P(A)? if not give me a concrete counterexample with actual numbers"
+  },
+  {
+   "id": "s30",
+   "tier": 3,
+   "text": "designing sync for an offline-first notes app (ios, android, web). people edit the same note on multiple devices while offline, sometimes for days. we can't lose edits, notes are rich text, and we want server costs low. CRDT vs OT vs last-write-wins per block - what would you actually build, and what's going to bite us in a year"
+  },
+  {
+   "id": "s31",
+   "tier": 1,
+   "text": "optimize this sentence for clarity: \"Due to the fact that we were not in possession of the necessary documentation, the meeting was postponed to a later date.\""
+  },
+  {
+   "id": "s32",
+   "tier": 2,
+   "text": "container keeps dying, logs just stop and then:\n\n$ docker ps -a\nCONTAINER ID   IMAGE            COMMAND           STATUS\n3f9c2a1b7d10   etl-worker:2.1   \"python run.py\"   Exited (137) 2 minutes ago\n\nit's a pandas job that reads a 6GB csv. works fine on my laptop (32GB ram). what's going on and how do i fix it without just throwing a bigger machine at it"
+  },
+  {
+   "id": "s33",
+   "tier": 1,
+   "text": "architecture question - in a create-react-app project where am i supposed to put static stuff like the favicon and logo images"
+  },
+  {
+   "id": "s34",
+   "tier": 3,
+   "text": "reviewing a colleague's paper before submission. cohort of 52k newly diagnosed heart failure patients from claims data. exposure = filled a statin prescription at any point in the 12 months after diagnosis. follow-up starts at the diagnosis date for everyone. outcome all-cause mortality, cox model adjusted for age, sex, and comorbidities. HR 0.68 (95% CI 0.63-0.73). anything wrong with this before it goes out?"
+  },
+  {
+   "id": "s35",
+   "tier": 2,
+   "text": "write a 1 page proposal for adding dark mode to our internal analytics dashboard. audience is my eng manager, she cares about effort vs whether it actually helps anyone. ~300 internal users, 3 people have asked for it, frontend is react + tailwind"
+  },
+  {
+   "id": "s36",
+   "tier": 1,
+   "text": "change the host port to 3000, leave everything else alone:\n\nservices:\n  api:\n    image: myorg/api:1.4.2\n    ports:\n      - \"8080:8080\"\n    environment:\n      - LOG_LEVEL=info\n      - DB_HOST=postgres\n      - DB_PORT=5432\n    depends_on:\n      - postgres\n  postgres:\n    image: postgres:16\n    volumes:\n      - pgdata:/var/lib/postgresql/data\nvolumes:\n  pgdata:"
+  },
+  {
+   "id": "s37",
+   "tier": 2,
+   "text": "got my bloodwork back: LDL 162, HDL 38, triglycerides 210, fasting glucose 99. i'm 34, male, don't smoke, desk job. how worried should i be and what should i ask my doctor"
+  },
+  {
+   "id": "s38",
+   "tier": 3,
+   "text": "we encrypt sensitive db columns with AES-256-GCM, one key for everything. nonce is 4 random bytes chosen at process start + an 8 byte counter starting at 0. ~40 pods, they all restart on every deploy (a few deploys a day), and we've done this for 2 years. is this fine?"
+  },
+  {
+   "id": "s39",
+   "tier": 1,
+   "text": "python: read a file into a list of lines w/o the trailing newlines, one liner pls"
+  },
+  {
+   "id": "s40",
+   "tier": 2,
+   "text": "why does this component keep re-fetching forever?\n\nfunction Orders({ customerId }) {\n  const [orders, setOrders] = useState([]);\n  const filters = { customerId, status: 'open' };\n  useEffect(() => {\n    fetchOrders(filters).then(setOrders);\n  }, [filters]);\n  return <OrderList orders={orders} />;\n}"
+  },
+  {
+   "id": "s41",
+   "tier": 1,
+   "text": "whats the difference between APR and APY, one sentence each"
+  },
+  {
+   "id": "s42",
+   "tier": 3,
+   "text": "need a plan to move our prod postgres 11 db (2.1TB, 24/7 traffic, ~5k writes/sec at peak, a handful of big tables with no primary key) onto a new postgres 16 cluster with under a minute of downtime. step by step, and what can go wrong"
+  },
+  {
+   "id": "s43",
+   "tier": 2,
+   "text": "L1 vs L2 regularization - what's the actual difference in what they do to the weights, and when would i pick one over the other?"
+  },
+  {
+   "id": "s44",
+   "tier": 1,
+   "text": "rewrite this so it doesn't sound passive aggressive: \"As I've already mentioned in my last three emails, the report is still missing.\""
+  },
+  {
+   "id": "s45",
+   "tier": 2,
+   "text": "3 of us splitting $3,300 rent. room A is biggest and has its own bathroom, B is medium, C is small but quiet, and the person in C works from home and is in the living room all day. how do we split it so nobody feels cheated? i want a method we can all agree to, not just numbers"
+  },
+  {
+   "id": "s46",
+   "tier": 3,
+   "text": "we just found out an S3 bucket with customer exports (names, emails, some phone numbers, ~120k customers in the EU and US) was public for maybe 3 weeks. no idea yet if anyone downloaded it. what do we do in the next 72 hours, in order? i'm CTO of a 25 person company, we don't have a security team"
+  },
+  {
+   "id": "s47",
+   "tier": 1,
+   "text": "sql to get the 10 most recent rows from orders by created_at"
+  },
+  {
+   "id": "s48",
+   "tier": 2,
+   "text": "train R^2 0.98, test R^2 0.41. random forest, 1200 rows, ~300 features. whats happening and what should i try first"
+  },
+  {
+   "id": "s49",
+   "tier": 1,
+   "text": "need a strategy for my 4th grader to remember the order of the planets. like a mnemonic"
+  },
+  {
+   "id": "s50",
+   "tier": 3,
+   "text": "find all integer solutions to x^2 - 2y^2 = 7 and prove there are no others"
+  },
+  {
+   "id": "s51",
+   "tier": 2,
+   "text": "write pytest tests for this, cover the edge cases:\n\ndef parse_duration(s: str) -> int:\n    # '1h30m' -> 5400, '45s' -> 45, '2h' -> 7200\n    units = {'h': 3600, 'm': 60, 's': 1}\n    total, num = 0, ''\n    for ch in s.strip():\n        if ch.isdigit():\n            num += ch\n        elif ch in units and num:\n            total += int(num) * units[ch]\n            num = ''\n        else:\n            raise ValueError(f'bad duration: {s}')\n    if num:\n        raise ValueError(f'bad duration: {s}')\n    return total"
+  },
+  {
+   "id": "s52",
+   "tier": 1,
+   "text": "design a sqlite table for a todo app. just need title, a done flag and a due date"
+  },
+  {
+   "id": "s53",
+   "tier": 3,
+   "text": "how should we count likes so the number is always right? some posts get ~50k likes a second during live events, people get really mad if the count goes down or their like disappears, and the like button has to feel instant"
+  },
+  {
+   "id": "s54",
+   "tier": 2,
+   "text": "6 week study plan for GRE quant? i have about an hour a day on weekdays, more on weekends. diagnostic was 152, target is 165"
+  },
+  {
+   "id": "s55",
+   "tier": 1,
+   "text": "what does http 429 mean"
+  },
+  {
+   "id": "s56",
+   "tier": 2,
+   "text": "convert this to async/await, keep the error handling behavior exactly the same:\n\nfunction loadConfig(path, cb) {\n  fs.readFile(path, 'utf8', (err, data) => {\n    if (err) return cb(err);\n    let cfg;\n    try { cfg = JSON.parse(data); } catch (e) { return cb(new Error('invalid config: ' + e.message)); }\n    db.connect(cfg.dbUrl, (err, conn) => {\n      if (err) return cb(err);\n      cb(null, { cfg, conn });\n    });\n  });\n}"
+  },
+  {
+   "id": "s57",
+   "tier": 3,
+   "text": "should i exercise my ISOs now? 40,000 shares, strike $1.20, latest 409A is $9.00. company is private, maybe IPO in 2 years but who knows. i make $180k salary in california. worried about AMT and about losing the money if the company dies"
+  },
+  {
+   "id": "s58",
+   "tier": 1,
+   "text": "fix the typos, dont change anything else: \"Teh quarterly reveiw is scheduled for Thrusday, plese confirm your attendence by EOD.\""
+  },
+  {
+   "id": "s59",
+   "tier": 2,
+   "text": "write a short cover letter paragraph for a data analyst internship. i'm a junior, econ major w/ stats minor, did a project predicting bike share demand from weather data with regression + a dashboard in tableau"
+  },
+  {
+   "id": "s60",
+   "tier": 3,
+   "text": "is this a valid 95% CI for median survival? i bootstrap patients 2000 times, fit kaplan-meier on each resample, take the median survival time, and use the 2.5th/97.5th percentiles. about 40% of the resamples never drop below 50% survival so the median is undefined and i just drop those"
+  }
+ ]
+}

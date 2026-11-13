@@ -39,13 +39,19 @@ from .engine import PersonalCI, RoutingError
 from .registry import availability, entries
 from .routing import PREFERENCES, TIERS, capability
 from .twin import CognitiveTwin, render
+from .textsafe import terminal_safe
 from .types import approx_tokens
 from .workspace import Workspace
 
 SUBCOMMANDS = ("ask", "route", "mode", "prefer", "models", "outcome", "practice", "skills", "scorecard",
                "weekly", "status", "challenge", "help")
-RIGHT = {"right", "correct", "yes", "y", "pass", "solved", "1", "true"}
-WRONG = {"wrong", "incorrect", "no", "n", "fail", "failed", "0", "false"}
+# Explicit words only: "…should I say yes" is a question, not a recorded correct attempt.
+RIGHT = {"right", "correct"}
+WRONG = {"wrong", "incorrect"}
+
+
+class AmbiguousWorkspace(Exception):
+    pass
 
 
 @dataclasses.dataclass
@@ -75,13 +81,20 @@ def _here(ci: PersonalCI, uid: str, cwd: Path | None = None) -> Here | None:
     """The project whose authorized workspace contains the current directory (the deepest one)."""
     cwd = (cwd or Path.cwd()).resolve()
     ws = Workspace(ci)
-    best = None
+    hits = []
     for a in ws.active_auths(uid, None, "workspace"):
         root = Path(a["spec"]["root"]).resolve()
-        if (cwd == root or root in cwd.parents) and (best is None or len(root.parts) > len(Path(best[1]).parts)):
-            best = (a["project_id"], str(root))
-    if best is None:
+        if cwd == root or root in cwd.parents:
+            hits.append((len(root.parts), a["project_id"], str(root)))
+    if not hits:
         return None
+    depth = max(h[0] for h in hits)
+    tied = sorted({h[1] for h in hits if h[0] == depth})
+    if len(tied) > 1:  # which project's vendors apply is the person's call, not a guess
+        names = ", ".join(ws.get_project(uid, pid).name for pid in tied)
+        raise AmbiguousWorkspace(f"more than one project authorizes this directory ({names}); "
+                                 "revoke one of the workspace authorizations so CI knows which rules apply")
+    best = next((h[1], h[2]) for h in hits if h[0] == depth)
     p = ws.get_project(uid, best[0])
     return Here(p.id, p.name, set(ws.provider_vendors(uid, p.id)), best[1])
 
@@ -110,7 +123,11 @@ def cmd_ask(argv: list[str]) -> int:
     a = ap.parse_args(argv)
     task = " ".join(a.task)
     ci, uid = _open()
-    here = _here(ci, uid)
+    try:
+        here = _here(ci, uid)
+    except AmbiguousWorkspace as e:
+        print(f"Not sent: {e}", file=sys.stderr)
+        return 2
     try:
         r = ci.ask_routed(uid, task, mode=a.mode, pinned=a.model, project_id=here.project_id if here else None,
                           project_vendors=here.vendors if here else None, budget_tokens=a.budget)
@@ -130,9 +147,9 @@ def cmd_ask(argv: list[str]) -> int:
     chosen = route["plan"]["chosen"]
     served = route["served_by"]
     label = chosen["label"] if chosen and chosen["model"] == served else served
-    print(r.text.rstrip())
+    print(terminal_safe(r.text.rstrip()))
     print()
-    where = f" · {here.name}" if here else ""
+    where = f" · {terminal_safe(here.name)}" if here else ""
     print(f"─ {md['mode']} ({md['why']}) · {label} · {route['plan']['requirement']['tier']} task: "
           f"{route['plan']['reason']}{where}")
     cost = _money(rec["cost_usd"]) + (" notional" if served.startswith("claude-cli") and rec["cost_usd"] else "")
@@ -159,7 +176,11 @@ def cmd_route(argv: list[str]) -> int:
     a = ap.parse_args(argv)
     task = " ".join(a.task)
     ci, uid = _open()
-    here = _here(ci, uid)
+    try:
+        here = _here(ci, uid)
+    except AmbiguousWorkspace as e:
+        print(e, file=sys.stderr)
+        return 2
     md = ci.resolve_mode(uid, task, a.mode)
     plan = ci.route(uid, task, mode=md.mode, pinned=a.model, project_vendors=here.vendors if here else None)
     if a.json:
@@ -172,7 +193,17 @@ def cmd_route(argv: list[str]) -> int:
 
 
 # ---------------------------------------------------------------------- settings
+def _one_word(cmd: str, argv: list[str]) -> bool:
+    if len(argv) > 1:
+        print(f"ci {cmd} takes one word. To ask something, quote it or use `ci ask …`; nothing was changed.",
+              file=sys.stderr)
+        return False
+    return True
+
+
 def cmd_mode(argv: list[str]) -> int:
+    if not _one_word("mode", argv):
+        return 2
     ci, uid = _open()
     if argv:
         try:
@@ -192,6 +223,8 @@ def cmd_mode(argv: list[str]) -> int:
 
 
 def cmd_prefer(argv: list[str]) -> int:
+    if not _one_word("prefer", argv):
+        return 2
     ci, uid = _open()
     if argv:
         try:
@@ -253,7 +286,10 @@ def cmd_practice(argv: list[str]) -> int:
     if len(args) < 2 or args[-1].lower() not in RIGHT | WRONG:
         print("usage: ci practice <skill> right|wrong [--assisted]", file=sys.stderr)
         return 2
-    skill, correct = " ".join(args[:-1]), args[-1].lower() in RIGHT
+    skill, correct = " ".join(args[:-1]).strip(), args[-1].lower() in RIGHT
+    if not skill:
+        print("usage: ci practice <skill> right|wrong [--assisted]", file=sys.stderr)
+        return 2
     ci, uid = _open()
     r = ci.probe(uid, skill, correct, assisted=assisted, source="practice")
     if r["counted"]:
@@ -295,7 +331,13 @@ def cmd_scorecard(argv: list[str]) -> int:
     from .evaluation import scorecard
     from .types import utcnow
     import datetime as dt
-    days = int(argv[argv.index("--days") + 1]) if "--days" in argv else 7
+    try:
+        days = int(argv[argv.index("--days") + 1]) if "--days" in argv else 7
+        if not 1 <= days <= 365:
+            raise ValueError
+    except (ValueError, IndexError):
+        print("usage: ci scorecard [--days N]  (N from 1 to 365)", file=sys.stderr)
+        return 2
     ci, uid = _open()
     now = utcnow()
     _print_json(scorecard(ci, uid, now - dt.timedelta(days=days), now))
@@ -340,7 +382,7 @@ def cmd_challenge(argv: list[str]) -> int:
             return 0
         for r in rows:
             exp = (r["challenge"] or {}).get("falsification", {}).get("experiment") or "(unstructured reply)"
-            print(f"  {r['id']}  {r['status']:<12} {r['ts'][:10]}  {r['claim'][:60]}\n      test: {exp[:110]}")
+            print(terminal_safe(f"  {r['id']}  {r['status']:<12} {r['ts'][:10]}  {r['claim'][:60]}\n      test: {exp[:110]}"))
         if not rows:
             print("No open challenges." if recs else "No challenges yet: ci challenge \"<an idea you believe>\"")
         m = ch.metrics(recs)
@@ -351,7 +393,11 @@ def cmd_challenge(argv: list[str]) -> int:
                      if m["challenger_brier"] is not None else ""))
         return 0
     claim = " ".join(a.claim)
-    here = _here(ci, uid)
+    try:
+        here = _here(ci, uid)
+    except AmbiguousWorkspace as e:
+        print(f"Not sent: {e}", file=sys.stderr)
+        return 2
     try:
         rec = ch.challenge(ci, uid, claim, pinned=a.model, project_id=here.project_id if here else None,
                            project_vendors=here.vendors if here else None)
@@ -363,7 +409,7 @@ def cmd_challenge(argv: list[str]) -> int:
     if a.json:
         _print_json({k: v for k, v in rec.items() if k != "receipt"} | {"route": rec["receipt"]["route"]})
         return 0
-    print(ch.render(rec))
+    print(terminal_safe(ch.render(rec)))
     rt = rec["receipt"]["route"]
     print(f"\n─ challenge · {rt['served_by']} · {rt['plan']['requirement']['tier']} · {_money(rec['receipt']['cost_usd'])}"
           f" · {rec['id']}")
@@ -456,7 +502,11 @@ def _deep(twin: CognitiveTwin, uid: str, review, yes: bool) -> dict | None:
 
 def cmd_status(argv: list[str]) -> int:
     ci, uid = _open()
-    here = _here(ci, uid)
+    try:
+        here = _here(ci, uid)
+    except AmbiguousWorkspace as e:
+        here = None
+        print(f"Here: {e}")
     twin = CognitiveTwin(ci)
     print(f"{uid} · mode {ci.get_intelligence_mode(uid) or intelligence.DEFAULT_MODE} · routing "
           f"{ci.get_routing_preference(uid)} · vendors {', '.join(sorted(ci.authorized_vendors(uid))) or 'none'}")
@@ -466,9 +516,11 @@ def cmd_status(argv: list[str]) -> int:
     if snap and snap.get("priorities"):
         review = twin.review(uid, days=7)
         print(f"This week's priorities ({twin.name(uid)}, v{version}, {snap['week']}):")
+        from .twin import resolve
+        labels = twin.labels_now(uid)
         for p in snap["priorities"]:
             status, ev = twin.check(p["check"], review.facts, review.since, review.until)
-            print(f"  [{status}] {p['action']} ({ev})")
+            print(terminal_safe(f"  [{status}] {resolve(p['action'], labels)} ({ev})"))
     else:
         print("No weekly priorities yet: `ci weekly`.")
     return 0

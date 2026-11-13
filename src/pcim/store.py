@@ -754,6 +754,39 @@ class Store:
                 "DELETE FROM policy_states WHERE user_id=? AND name=?", (user_id, name)
             ).rowcount
 
+    def update_policy_state(self, user_id: str, name: str, fn, note: str = "") -> int:
+        """Read-modify-write of the active version under a database write lock (BEGIN IMMEDIATE),
+        so two processes appending to one log (a CLI next to the server) cannot lose a write.
+        `fn` gets the current plaintext (or None) and returns the new plaintext."""
+        with self._lock:
+            self._db.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._db.execute("SELECT version, state_ct FROM policy_states WHERE user_id=? AND name=? "
+                                       "AND active=1", (user_id, name)).fetchone()
+                dek = self._user_dek(user_id)
+                if row:
+                    version = row["version"]
+                    new = fn(unseal(dek, row["state_ct"], f"{user_id}/{name}/{version}"))
+                    self._db.execute("UPDATE policy_states SET state_ct=? WHERE user_id=? AND name=? AND version=?",
+                                     (seal(dek, new, f"{user_id}/{name}/{version}"), user_id, name, version))
+                else:
+                    version = self._db.execute("SELECT COALESCE(MAX(version), 0) AS v FROM policy_states "
+                                               "WHERE user_id=? AND name=?", (user_id, name)).fetchone()["v"] + 1
+                    new = fn(None)
+                    self._db.execute("INSERT INTO policy_states VALUES (?,?,?,?,?,?,?,?)",
+                                     (user_id, name, version, _ts(utcnow()), None, note, 1,
+                                      seal(dek, new, f"{user_id}/{name}/{version}")))
+                self._db.execute("COMMIT")
+            except Exception:
+                self._db.execute("ROLLBACK")
+                raise
+            return version
+
+    def flush_deleted(self) -> None:
+        """Checkpoint and truncate the WAL so overwritten ciphertext does not linger there."""
+        with self._lock:
+            self._flush_deleted()
+
     def overwrite_policy_state(self, user_id: str, name: str, version: int, state: bytes) -> None:
         """Replace the state of an existing version in place (between snapshots)."""
         ct = seal(self._user_dek(user_id), state, f"{user_id}/{name}/{version}")

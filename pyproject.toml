@@ -43,7 +43,7 @@ pcim-mcp = "pcim.mcp_server:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-pcim = ["dashboard/*"]
+pcim = ["dashboard/*", "data/routing_model.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

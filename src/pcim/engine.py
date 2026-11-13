@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import hmac
 import json
 import secrets
 from pathlib import Path
@@ -30,7 +31,7 @@ import numpy as np
 
 from . import modes as intelligence
 from .adapters import ContextPacket, PacketItem, get_adapter, render
-from .adapters.base import ProviderError
+from .adapters.base import CREDENTIAL_KINDS, PROVIDER_WIDE_KINDS, ProviderError
 from .assist import DIRECTIVES, AssistPolicy
 from .embed import HASHING_NAME, Embedder, default_embedder_name, embedder_from_name
 from .feedback import reward_from_signals
@@ -47,6 +48,7 @@ from .registry import VENDORS, model_identity, vendor_of
 from .routing import PREFERENCES, RoutePlan
 from .routing import plan as route_plan
 from .sovereignty.audit import AuditLog
+from .sovereignty.credentials import LOCAL_VENDORS, find_credentials, redact
 from .sovereignty.consent import ConsentLedger
 from .sovereignty.crypto import KeyRing
 from .sovereignty.egress import CONFIRMED_FLAG, INSTRUCTION_FLAG, EgressGuard
@@ -71,6 +73,26 @@ class RoutingError(RuntimeError):
 
 
 _FALLBACK_ERRORS: tuple | None = None
+
+
+def _scrub(obj, needle: str, label: str = "(a forgotten skill)"):
+    """Remove a forgotten skill from a weekly snapshot: its key under "skills", and its name
+    anywhere in text; checks that pointed at it become inert."""
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            if k == "skills" and isinstance(v, dict):
+                out[k] = {sk: _scrub(sv, needle, label) for sk, sv in v.items() if sk != needle}
+            elif k == "check" and isinstance(v, dict) and v.get("skill") == needle:
+                out[k] = {"type": "forgotten"}
+            else:
+                out[k] = _scrub(v, needle, label)
+        return out
+    if isinstance(obj, list):
+        return [_scrub(x, needle, label) for x in obj]
+    if isinstance(obj, str) and needle in obj:
+        return obj.replace(needle, label)
+    return obj
 
 
 def fallback_errors() -> tuple:
@@ -352,6 +374,17 @@ class PersonalCI:
         probs, task_type, chosen, sel, pol, decision = cx.probs, cx.task_type, cx.chosen, cx.sel, cx.policy, cx.decision
         profile, memories = cx.profile, cx.memories
         cs_len = cx.n_candidates
+        # Memory that looks like it holds a credential never leaves the machine, whatever its
+        # consent says: the credential tripwire applies to context as well as to the request.
+        cred_withheld: list[str] = []
+        if vendor_of(provider) not in LOCAL_VENDORS:
+            cred_withheld = [i.id for i in chosen if find_credentials(i.content)]
+            if cred_withheld:
+                bad = set(cred_withheld)
+                chosen = [i for i in chosen if i.id not in bad]
+                profile = [x for x in profile if x.id not in bad]
+                memories = [x for x in memories if x.id not in bad]
+                self.audit.append(user_id, "egress.credential_withheld", interaction=interaction_id, items=len(bad))
 
         ap = self._assist(user_id)
         md = _mode
@@ -378,7 +411,8 @@ class PersonalCI:
             "sent": [{"id": i.id, "kind": i.kind, "source": i.source, "trust": i.trust.value,
                       "where": "profile" if i.pinned and i.trust.rank >= Trust.USER_STATED.rank else "notes"}
                      for i in chosen],
-            "withheld_by_egress": [{"id": i, "reason": r} for i, r in decision.blocked],
+            "withheld_by_egress": [{"id": i, "reason": r} for i, r in decision.blocked]
+                                  + [{"id": i, "reason": "credential-shaped content"} for i in cred_withheld],
             "candidates_considered": cs_len,
             "retrieval_plan": queries,
             "plan_usage": dataclasses.asdict(plan.usage) if plan is not None else None,
@@ -487,7 +521,8 @@ class PersonalCI:
             allowed &= set(project_vendors)
         return route_plan(task, allowed_vendors=allowed, mode=mode, preference=self.get_routing_preference(user_id),
                           budget_tokens=budget_tokens or self.budget_tokens, pinned=pinned,
-                          include_test_doubles=include_test_doubles, latency=self._latency(user_id), min_tier=min_tier)
+                          include_test_doubles=include_test_doubles, latency=self._latency(user_id), min_tier=min_tier,
+                          embedder=self.embedder)
 
     def resolve_mode(self, user_id: str, task: str, mode: str | None = None) -> "intelligence.ModeDecision":
         probs = classify_task(task)
@@ -503,6 +538,10 @@ class PersonalCI:
         may not see. Raises RoutingError when routing refuses or every candidate fails."""
         if self.store.get_user(user_id) is None:
             raise KeyError(f"unknown user {user_id}")
+        if project_id is not None and project_vendors is None:
+            # Fail closed: project memory may only reach vendors the project allows.
+            from .workspace import Workspace
+            project_vendors = set(Workspace(self).provider_vendors(user_id, project_id))
         md = self.resolve_mode(user_id, task, mode)
         plan = self.route(user_id, task, mode=md.mode, pinned=pinned, project_vendors=project_vendors,
                           budget_tokens=budget_tokens, include_test_doubles=include_test_doubles, min_tier=min_tier)
@@ -512,7 +551,11 @@ class PersonalCI:
         if plan.refused:
             raise RoutingError(plan.refused, plan)
         attempts: list[dict] = []
+        dead: dict[str, str] = {}  # provider -> why each of its models would fail the same way (key, login, setup)
         for c in plan.candidates:
+            if c.entry.provider in dead:
+                attempts.append({"model": c.key, "error": f"skipped: {dead[c.entry.provider]}", "kind": "skipped"})
+                continue
             info = {"plan": plan.as_dict(), "served_by": c.key, "served_meets": c.meets,
                     "served_tier": c.as_dict()["tier"], "served_est_cost_usd": c.est_cost_usd,
                     "failed_before": list(attempts)}
@@ -520,9 +563,20 @@ class PersonalCI:
                 return self.ask(user_id, task, c.entry.provider, c.entry.model or None, budget_tokens,
                                 _mode=md, project_id=project_id, route=info)
             except fallback_errors() as e:
-                attempts.append({"model": c.key, "error": f"{type(e).__name__}: {str(e)[:200]}"})
-                self.audit.append(user_id, "route.fallback", model=c.key, error=type(e).__name__)
-        raise RoutingError("every routed model failed", plan, attempts)
+                # Every failure still falls back: another vendor or model is a different request. A
+                # non-retryable failure is not retried in place (the SDKs already retry transient ones).
+                kind, status = getattr(e, "kind", "unknown"), getattr(e, "status", None)
+                cred = kind in CREDENTIAL_KINDS
+                attempts.append({"model": c.key, "error": redact(f"{type(e).__name__}: {str(e)[:200]}")[0], "kind": kind,
+                                 "status": status, "retryable": getattr(e, "retryable", None),
+                                 "credential_problem": cred})
+                self.audit.append(user_id, "route.fallback", model=c.key, error=type(e).__name__, kind=kind,
+                                  status=status, credential_problem=cred)
+                if kind in PROVIDER_WIDE_KINDS:  # same key / login / config: its other models cannot do better
+                    dead[c.entry.provider] = f"{c.entry.provider} has a {'credential problem' if cred else 'setup problem'}"
+        creds = sorted({a["model"].split(":")[0] for a in attempts if a.get("credential_problem")})
+        raise RoutingError("every routed model failed" + (f" (credential problem: {', '.join(creds)})" if creds else ""),
+                           plan, attempts)
 
     def record_outcome(self, user_id: str, interaction_id: str, worked: bool, corrected: bool = False,
                        skill: str | None = None) -> dict:
@@ -549,7 +603,10 @@ class PersonalCI:
             self.store.put_skill(user_id, skill, state.to_dict())
         self._log_attempt(user_id, {"ts": utcnow().isoformat(), "skill": skill, "correct": bool(correct),
                                     "assisted": bool(assisted), "source": source[:20], "interaction": interaction_id})
-        self.audit.append(user_id, "growth.probe", skill=skill[:80], correct=bool(correct), assisted=assisted)
+        # The audit is plaintext and outlives erasure: it records a tag keyed by the person's own key
+        # (destroyed on erase), never the skill's name, which can say more than intended.
+        self.audit.append(user_id, "growth.probe", skill_tag=self._tag(user_id, skill), correct=bool(correct),
+                          assisted=assisted)
         return {"skill": skill, "p_mastery": state.p_mastery, "counted": not assisted}
 
     def _state_json(self, user_id: str, name: str, default):
@@ -557,26 +614,41 @@ class PersonalCI:
         return (loaded[0], json.loads(loaded[1])) if loaded else (None, default)
 
     def _log_attempt(self, user_id: str, rec: dict) -> None:
-        version, log = self._state_json(user_id, ATTEMPTS_STATE, [])
-        log = (log + [rec])[-ATTEMPT_LOG_MAX:]
-        blob = json.dumps(log).encode()
-        if version is None:
-            self.store.save_policy_state(user_id, ATTEMPTS_STATE, blob, note="attempt log")
-        else:
-            self.store.overwrite_policy_state(user_id, ATTEMPTS_STATE, version, blob)
+        def append(cur: bytes | None) -> bytes:
+            log = json.loads(cur) if cur else []
+            return json.dumps((log + [rec])[-ATTEMPT_LOG_MAX:]).encode()
+        self.store.update_policy_state(user_id, ATTEMPTS_STATE, append, note="attempt log")
 
     def attempts(self, user_id: str) -> list[dict]:
         return self._state_json(user_id, ATTEMPTS_STATE, [])[1]
 
+    def _tag(self, user_id: str, text: str) -> str:
+        return hmac.new(self.store._user_dek(user_id), text.encode(), "sha256").hexdigest()[:16]
+
     def forget_skill(self, user_id: str, skill: str) -> dict:
-        """Delete a skill's mastery state and every logged attempt at it."""
+        """Delete a skill's mastery state, every logged attempt at it, and its name and evidence in
+        every weekly snapshot."""
         version, log = self._state_json(user_id, ATTEMPTS_STATE, [])
         kept = [a for a in log if a["skill"] != skill]
         if version is not None:
             self.store.overwrite_policy_state(user_id, ATTEMPTS_STATE, version, json.dumps(kept).encode())
         had_state = self.store.delete_skill(user_id, skill)
-        self.audit.append(user_id, "growth.forget", attempts=len(log) - len(kept), state=had_state)
+        scrubbed = self._rewrite_weekly(user_id, lambda snap: _scrub(snap, skill))
+        self.store.flush_deleted()
+        self.audit.append(user_id, "growth.forget", attempts=len(log) - len(kept), state=had_state,
+                          snapshots=scrubbed)
         return {"skill": skill, "attempts_deleted": len(log) - len(kept), "state_deleted": had_state}
+
+    def _rewrite_weekly(self, user_id: str, fn) -> int:
+        n = 0
+        for v in self.store.list_policy_versions(user_id, TWIN_STATE):
+            loaded = self.store.load_policy_state(user_id, TWIN_STATE, v["version"])
+            snap = json.loads(loaded[1])
+            new = fn(snap)
+            if new != snap:
+                self.store.overwrite_policy_state(user_id, TWIN_STATE, v["version"], json.dumps(new, default=str).encode())
+                n += 1
+        return n
 
     def skill_report(self, user_id: str, now=None) -> dict:
         return independence_report(self.store.list_skills(user_id), self.attempts(user_id), now or utcnow())
@@ -612,8 +684,14 @@ class PersonalCI:
         self.audit.append(user_id, "twin.rollback", version=version)
 
     def forget_weekly(self, user_id: str) -> int:
+        """Delete every weekly snapshot and every --deep request (the digests CI sent)."""
         n = self.store.delete_policy_states(user_id, TWIN_STATE)
-        self.audit.append(user_id, "twin.forget", versions=n)
+        deep = [r["id"] for r in self.store.list_interactions(user_id, with_payload=True)
+                if ((r.get("receipt") or {}).get("route") or {}).get("purpose") == "weekly-deep"]
+        for iid in deep:
+            self.store.delete_interaction(iid)
+        self.store.flush_deleted()
+        self.audit.append(user_id, "twin.forget", versions=n, deep_requests=len(deep))
         return n
 
     def next_challenge(self, user_id: str) -> str | None:
