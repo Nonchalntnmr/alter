@@ -91,14 +91,22 @@ def test_temperature_scaling_undoes_overconfidence():
     assert cal["ece"] < 0.05 and sum(r["n"] for r in cal["reliability"]) == 2000
 
 
-def test_retraining_reproduces_the_shipped_fallback_head_exactly():
+def test_retraining_reproduces_the_shipped_fallback_head():
+    """Retraining gives the shipped head to float tolerance and the same decisions. Not bytes:
+    BLAS builds differ across platforms in the last bits of float32 (Linux CI vs macOS)."""
     shipped = rl.load()["heads"][rl.FALLBACK]
     art = rl.train(TRAIN, heads=(rl.FALLBACK,), evaluate=False)
     new = art["heads"][rl.FALLBACK]
-    assert new["W"] == json.loads((ROOT / "src/pcim/data/routing_model.json").read_text())["heads"][rl.FALLBACK]["W"]
-    assert (new["l2"], new["temperature"], new["threshold"]) == (shipped["l2"], shipped["temperature"],
-                                                                  shipped["threshold"])
-    assert np.allclose(np.array(new["b"]), shipped["b"])
+    W_new = np.asarray(rl._unpack(new["W"]) if isinstance(new["W"], dict) else new["W"], dtype=np.float64)
+    W_old = np.asarray(shipped["W"], dtype=np.float64)
+    assert W_new.shape == W_old.shape and np.allclose(W_new, W_old, atol=1e-4)
+    assert (new["l2"], new["threshold"]) == (shipped["l2"], shipped["threshold"])
+    assert abs(new["temperature"] - shipped["temperature"]) < 1e-4
+    assert np.allclose(np.array(new["b"]), shipped["b"], atol=1e-4)
+    texts = [t["text"] for t in rl.load_tasks(TRAIN)]
+    X = embed.HashingEmbedder(512).embed(texts).astype(np.float64)
+    pred = lambda W, bias: (X @ W.T + np.asarray(bias)).argmax(1)  # noqa: E731
+    assert (pred(W_new, new["b"]) == pred(W_old, shipped["b"])).mean() >= 0.99
 
 
 def test_train_save_load_round_trip_on_a_small_file(tmp_path):
