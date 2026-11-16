@@ -240,3 +240,20 @@ def test_pcim_do_routing_overrides_the_built_in_default(term, capsys, monkeypatc
     assert "direct is the default" in capsys.readouterr().out and mock.calls == 1
     monkeypatch.setenv("PCIM_DO_ROUTING", "adaptive")
     assert terminal.main(["do", "--model", "mock", "redo the cleanup we talked about"]) == 6
+
+
+def test_an_answer_never_lands_in_another_requests_conversation(term, capsys):
+    terminal, ci, ws, agent, p, repo = term
+    mock = Scripted([{"text": "Which helper do you mean?"}, {"text": "Listing files."}, {"text": "Done."}])
+    agent.set_adapter("mock", None, mock)
+    assert terminal.main(["do", "--model", "mock", "rename the helper in calc.py"]) == 0
+    first = terminal._do_log(ci, "u")[1][-1]
+    assert terminal.main(["do", "--model", "mock", "list the files"]) == 0      # closes the first conversation
+    second = terminal._do_log(ci, "u")[1][-1]
+    assert second["session_id"] != first["session_id"]
+    assert terminal.main(["do", "answer", first["id"], "the add helper"]) == 0
+    after = next(r for r in terminal._do_log(ci, "u")[1] if r["id"] == first["id"])
+    assert after["session_id"] not in (first["session_id"], second["session_id"])  # a new conversation
+    st = agent._load("u", p.id, after["session_id"])
+    user_text = " ".join(m["content"] if isinstance(m["content"], str) else "" for m in st["messages"] if m["role"] == "user")
+    assert "rename the helper in calc.py" in user_text and "the add helper" in user_text

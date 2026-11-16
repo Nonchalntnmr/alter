@@ -946,10 +946,19 @@ def cmd_do(argv: list[str]) -> int:
             print("that request belongs to another project folder", file=sys.stderr)
             return 2
         answer = " ".join(" ".join(argv[2:]).split())
-        if rec.get("session_id"):  # a running conversation with the agent: the answer is the next message
-            return _do_act(ci, uid, here, rec, Route(**rec["route"]), answer, None)
+        if rec.get("session_id"):
+            # Its own conversation, if still open, gets the answer as the next message. A later
+            # request or the idle timeout closes it (one open session per project), and then the
+            # answer would land in someone else's conversation, or alone in a new one. So it
+            # starts again with the request and the answer together.
+            if _workspace_agent(ci).open_session(uid, here.project_id) == rec["session_id"]:
+                return _do_act(ci, uid, here, rec, Route(**rec["route"]), answer, None)
+            rec["session_id"], rec["answers"] = None, answer
+            return _do_act(ci, uid, here, rec, Route(**rec["route"]),
+                           f"{rec['text']}\n\nAnswer to your question: {answer}", None)
         if rec["status"] != "needs_answer":
-            print(f"{rec['id']} is {rec['status']}; see ci plan show {rec.get('plan_id')}", file=sys.stderr)
+            hint = f"answer the plan with: ci plan answer {rec['plan_id']} \"…\"" if rec.get("plan_id") else ""
+            print(f"{rec['id']} is {rec['status']}" + (f"; {hint}" if hint else ""), file=sys.stderr)
             return 2
         rec["answers"] = answer
         r = route(rec["text"], answered=True, answers=answer)
