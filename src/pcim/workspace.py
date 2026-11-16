@@ -212,7 +212,11 @@ class Workspace:
         for item in self.ci.memory.all(user_id):
             if tag in item.tags and item.id not in doomed and self.store.get_item(item.id) is not None:
                 doomed += self.ci.memory.delete(user_id, item.id, cascade=True)
-        counts = self.store.delete_project_rows(project_id, row["key_id"])
+        interaction_ids = [
+            r["id"] for r in self.store.list_interactions(user_id, with_payload=True)
+            if (r.get("receipt") or {}).get("project_id") == project_id
+        ]
+        counts = self.store.delete_project_rows(project_id, row["key_id"], interaction_ids=interaction_ids)
         counts["memory_items"] = len(doomed)
         self.audit.append(user_id, "project.delete", project=project_id, **{k: int(v) for k, v in counts.items()})
         return counts

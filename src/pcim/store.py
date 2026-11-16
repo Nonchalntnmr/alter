@@ -858,14 +858,22 @@ class Store:
         with self._lock:
             return self._db.execute(sql, args).fetchall()
 
-    def delete_project_rows(self, project_id: str, key_id: str) -> dict:
+    def delete_project_rows(self, project_id: str, key_id: str, interaction_ids: list[str] | None = None) -> dict:
         with self._lock:
             self._db.execute("BEGIN")
             try:
                 counts = {t: self._db.execute(f"DELETE FROM {t} WHERE project_id=?", (project_id,)).rowcount
                           for t in ("sessions", "tasks", "authorizations", "claims", "exchange_messages")}
                 counts["projects"] = self._db.execute("DELETE FROM projects WHERE id=?", (project_id,)).rowcount
-                self._destroy_keys([key_id])
+                doomed_keys = [key_id]
+                int_deleted = 0
+                for iid in interaction_ids or ():
+                    irow = self._db.execute("SELECT key_id FROM interactions WHERE id=?", (iid,)).fetchone()
+                    if irow is not None:
+                        doomed_keys.append(irow["key_id"])
+                        int_deleted += self._db.execute("DELETE FROM interactions WHERE id=?", (iid,)).rowcount
+                counts["interactions"] = int_deleted
+                self._destroy_keys(doomed_keys)
                 self._db.execute("COMMIT")
             except Exception:
                 self._db.execute("ROLLBACK")
