@@ -21,8 +21,9 @@
     ci plan "rough idea"                                      intent compiler: goal, steps, assumptions, the
                                                               questions that matter; nothing runs
     ci plan [list] | show <id> | answer <id> "…" | approve <id>
-    ci execute <plan> [--done ID] [--retry STEP] [--cancel]   run an approved plan, step by step, through the
-                                                              governed workspace agent (inside its project folder)
+    ci execute <plan> [--done ID] [--retry contract|STEP] [--cancel]
+                                                              run an approved plan in one governed agent session,
+                                                              its steps as the checklist (inside its project folder)
     ci approve <task> · ci deny <task> ["why"]                resolve an action a plan step is waiting on
     ci halt · ci resume                                       Stop-all: cancel every pending or running action
     ci learn "…"                                              same as ci -l
@@ -827,7 +828,8 @@ def cmd_halt(argv: list[str]) -> int:
 def cmd_resume(argv: list[str]) -> int:
     ci, uid = _open()
     Workspace(ci).set_halted(uid, False)
-    print("Resumed. Halted plan steps stay halted until you retry them (ci execute <plan> --retry <step>).")
+    print("Resumed. A halted plan stays halted until you retry it: ci execute <plan> --retry contract "
+          "(or --retry <step> for a plan run step by step).")
     return 0
 
 

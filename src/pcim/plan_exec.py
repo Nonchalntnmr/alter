@@ -267,6 +267,8 @@ def _execute(ci, uid, plan_id, project_id, vendors, *, provider, model, agent, d
                     ostate[oid] = {"status": "yours_done", "at": _now(), "via": x}
         else:
             raise ExecError(f"only an external step or an outcome that is yours can be marked done; {x} is neither")
+    if retry and ws.is_halted(uid):
+        raise ExecError("Stop-all is on (ci halt): run ci resume first, then retry")
     for x in retry or []:
         if rec.get("execution_mode") == "contract" and x in ("contract", "all"):
             cs = rec.get("contract_state") or {}
@@ -402,6 +404,20 @@ def _execute(ci, uid, plan_id, project_id, vendors, *, provider, model, agent, d
     return {"plan": rec, "outcome": rec["status"]}
 
 
+def _pending_detail(queue: TaskQueue, uid: str, ids: list[str]) -> list[dict]:
+    """What each action waiting on the person is: the tool and its target, for the approve prompt."""
+    out = []
+    for tid in ids:
+        try:
+            t = queue.get(uid, tid)
+        except KeyError:
+            continue
+        args = t.args or {}
+        target = args.get("path") or args.get("reason") or ""
+        out.append({"id": tid, "tool": t.tool, "target": str(target)[:80]})
+    return out
+
+
 def _contract_outcomes(rec: dict, evidence_ok: bool, attempted: bool) -> dict:
     """Judge each outcome in contract mode from tool evidence, never from model claims."""
     spec, out = rec["spec"], {}
@@ -449,7 +465,7 @@ def _execute_contract(ci, uid: str, rec: dict, project_id: str, vendors: set[str
             tr = agent.transcript(uid, project_id, cs.get("session"))
             live = [t for t in tr.get("pending", []) if queue.get(uid, t).status not in TERMINAL]
             if live:
-                cs = dict(cs, pending=live)
+                cs = dict(cs, pending=live, pending_detail=_pending_detail(queue, uid, live))
                 halt = "waiting"
             else:
                 tasks = _session_tasks(queue, uid, project_id, cs.get("session"), cs["started"])
@@ -463,6 +479,7 @@ def _execute_contract(ci, uid: str, rec: dict, project_id: str, vendors: set[str
     elif status == "not_started":
         if ws.is_halted(uid):
             halt = "halted"
+            cs = dict(cs, status="halted", why="Stop-all was on before the session started", at=_now())
         else:
             prov, mdl = _model(vendors, provider, model)
             _clear_stale_pending(ci, agent, queue, uid, project_id)
@@ -483,7 +500,8 @@ def _execute_contract(ci, uid: str, rec: dict, project_id: str, vendors: set[str
                          "task_status": {t["id"]: t["status"] for t in tasks}, "model": f"{prov}:{mdl or ''}",
                          "started": started, "at": _now()}
                 if turn.status == "awaiting_approval":
-                    cs = entry | {"status": "waiting", "pending": list(turn.pending)}
+                    cs = entry | {"status": "waiting", "pending": list(turn.pending),
+                                  "pending_detail": _pending_detail(queue, uid, list(turn.pending))}
                     halt = "waiting"
                 elif turn.status != "done":
                     stopped = "halted" if turn.stop_reason == "halted" or ws.is_halted(uid) else "failed"
@@ -573,9 +591,37 @@ def _cancel(ci, uid: str, rec: dict, state: dict, agent: Agent, project_id: str)
     return {"plan": rec, "outcome": "cancelled"}
 
 
+def _render_contract(rec: dict) -> list[str]:
+    cs = rec.get("contract_state") or {}
+    L = [f"  contract: {cs.get('status', 'not_started')}" + (f" · session {cs['session']}" if cs.get("session") else "")
+         + " (the steps below are its checklist, run in one session)"]
+    if cs.get("status") == "waiting":
+        det = {d["id"]: d for d in cs.get("pending_detail") or []}
+        for t in cs.get("pending", []):
+            d = det.get(t)
+            what = f"  ({d['tool']} {d['target']})".rstrip() if d else ""
+            L.append(f"      approve: ci approve {t}   ·   deny: ci deny {t}{what}")
+    for pr in cs.get("problems") or []:
+        L.append(f"      ! {pr}")
+    if cs.get("why"):
+        L.append(f"      ! {cs['why'][:160]}")
+    for dn in cs.get("denials") or []:
+        L.append(f"      denied: {dn.get('tool')} {dn.get('status')}" + (f": {dn['reason'][:100]}" if dn.get("reason") else ""))
+    for bk in cs.get("bookkeeping_failures") or []:
+        L.append(f"      (bookkeeping only, does not decide the outcome) {bk}")
+    if cs.get("status") == "halted":
+        L.append(f"      Stop-all is on: ci resume, then ci execute {rec['id']} --retry contract")
+    elif cs.get("status") in RETRYABLE:
+        L.append(f"      re-run deliberately: ci execute {rec['id']} --retry contract")
+    return L
+
+
 def render(res: dict) -> str:
     rec = res["plan"]
+    contract = rec.get("execution_mode") == "contract"
     L = [f"plan {rec['id']} · {rec['status']}"]
+    if contract:
+        L += _render_contract(rec)
     for level in rec["spec"]["levels"]:
         for sid in level:
             s = next(x for x in rec["spec"]["steps"] if x["id"] == sid)
@@ -590,10 +636,12 @@ def render(res: dict) -> str:
                 L.append(f"      ! {pr}")
             if st.get("why"):
                 L.append(f"      ! {st['why'][:160]}")
-            if st.get("status") == "waiting":
-                L += [f"      approve: ci approve {t}   ·   deny: ci deny {t}" for t in st.get("pending", [])]
             if st.get("status") == "yours":
                 L.append(f"      yours to do; then: ci execute {rec['id']} --done {sid}")
+            if contract:
+                continue  # the contract block above says what to approve, retry or resume
+            if st.get("status") == "waiting":
+                L += [f"      approve: ci approve {t}   ·   deny: ci deny {t}" for t in st.get("pending", [])]
             if st.get("status") in RETRYABLE:
                 L.append(f"      re-run deliberately: ci execute {rec['id']} --retry {sid}")
             if st.get("status") == "halted":
@@ -604,6 +652,12 @@ def render(res: dict) -> str:
             os_ = rec["outcomes_state"].get(o["id"]) or {}
             hint = f"  (when done: ci execute {rec['id']} --done {o['id']})" if os_.get("status") == "yours_pending" else ""
             L.append(f"  {o['id']} {os_.get('status', '?'):<13} {o['text'][:70]}{hint}")
+    if contract and rec.get("outcome_success"):
+        pc, ac = rec.get("plan_completion") or {}, rec.get("authorization_compliance") or {}
+        basis = next((v.get("judged_by") for v in (rec.get("outcomes_state") or {}).values() if v.get("judged_by")), "")
+        L.append(f"Outcome: {rec['outcome_success']['status']} · checklist {pc.get('steps_done', 0)}/{pc.get('steps_total', 0)}"
+                 f" · authorization: " + ("clean" if ac.get("clean", True) else f"{len(ac.get('denials') or [])} denied")
+                 + (f" · met means: {basis}" if basis else ""))
     if rec["status"] != "done":
         L.append(f"Not done: {rec['status']}. Nothing above is complete unless it says done, met or yours_done.")
     return "\n".join(L)

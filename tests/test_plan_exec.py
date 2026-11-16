@@ -407,3 +407,38 @@ def test_contract_tests_are_required_after_a_change_even_if_the_plan_lists_no_ru
             agent.resolve("u", tid, approve=True)
         r = px.execute(ci, "u", rec["id"], p.id, {"mock"}, provider="mock", agent=agent)
     assert r["outcome"] == "incomplete" and r["outcome_success"]["status"] == "unmet"
+
+
+def test_contract_waiting_says_what_to_approve_and_how(setup):
+    ci, ws, agent, p, repo = setup
+    rec = approved_plan(ci, [{"id": "s1", "action": "update calc.py", "kind": "write", "depends_on": [], "serves": ["o1"]}],
+                        p.id, outcomes=[{"id": "o1", "text": "calc.py updated", "kind": "deliverable"}])
+    rec["execution_mode"] = "contract"
+    ic._save(ci, "u", rec)
+    agent.set_adapter("mock", None, MockAgentAdapter(script=[
+        {"text": "Writing.", "tool_uses": [{"id": "t1", "name": "write_file",
+                                            "input": {"path": "calc.py", "content": "x = 2\n", "reason": "fix"}}]},
+        {"text": "Done."}]))
+    r = px.execute(ci, "u", rec["id"], p.id, {"mock"}, provider="mock", agent=agent)
+    assert r["outcome"] == "waiting"
+    tid = r["plan"]["contract_state"]["pending"][0]
+    out = px.render(r)
+    assert f"ci approve {tid}" in out and f"ci deny {tid}" in out and "write_file calc.py" in out
+
+
+def test_a_retry_during_stop_all_is_refused_and_a_halted_contract_reads_halted(setup):
+    ci, ws, agent, p, repo = setup
+    rec = approved_plan(ci, [{"id": "s1", "action": "update calc.py", "kind": "write", "depends_on": [], "serves": ["o1"]}],
+                        p.id, outcomes=[{"id": "o1", "text": "calc.py updated", "kind": "deliverable"}])
+    rec["execution_mode"] = "contract"
+    ic._save(ci, "u", rec)
+    ws.set_halted("u", True)
+    r = px.execute(ci, "u", rec["id"], p.id, {"mock"}, provider="mock", agent=agent)
+    assert r["outcome"] == "halted" and r["plan"]["contract_state"]["status"] == "halted"
+    with pytest.raises(px.ExecError, match="ci resume"):
+        px.execute(ci, "u", rec["id"], p.id, {"mock"}, provider="mock", agent=agent, retry=["contract"])
+    assert ic.get(ci, "u", rec["id"])["contract_state"]["status"] == "halted"  # unchanged by the refused retry
+    ws.set_halted("u", False)
+    agent.set_adapter("mock", None, MockAgentAdapter(script=[{"text": "Nothing to do."}]))
+    r = px.execute(ci, "u", rec["id"], p.id, {"mock"}, provider="mock", agent=agent, retry=["contract"])
+    assert r["plan"]["contract_state"]["status"] != "halted"  # after resume, the retry runs
