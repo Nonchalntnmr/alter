@@ -1,6 +1,7 @@
 """End-to-end check of the `ci` commands against their documented behaviour. No model calls.
 
     HF_HUB_OFFLINE=1 PYTHONPATH=src python scripts/e2e_terminal.py
+    E2E_INSTALLED=1 <venv>/bin/python scripts/e2e_terminal.py    # against an installed wheel instead
 
 Everything runs through the real `ci` entry point (pcim.terminal.main) in subprocesses, in a
 temporary PCIM_HOME with a temporary git repo authorized as a project. The only stand-in is the
@@ -100,8 +101,11 @@ class Env:
         fake.chmod(0o755)
         (self.state / "plan.json").write_text(json.dumps(PLAN))
         self.script(SESSION)
-        self.env = {**os.environ, "PCIM_HOME": str(self.home), "PCIM_CLAUDE_BIN": str(fake), "PYTHONPATH": str(SRC),
-                    "HF_HUB_OFFLINE": "1"}
+        self.env = {**os.environ, "PCIM_HOME": str(self.home), "PCIM_CLAUDE_BIN": str(fake), "HF_HUB_OFFLINE": "1"}
+        if os.environ.get("E2E_INSTALLED") == "1":  # test the installed package, not this checkout's src/
+            self.env.pop("PYTHONPATH", None)
+        else:
+            self.env["PYTHONPATH"] = str(SRC)
         self.env.pop("PCIM_CLI_REQUIRE_ISOLATION", None)
 
     def script(self, steps: list[dict]) -> None:

@@ -643,7 +643,9 @@ def compile_intent(ci, uid: str, text: str, *, answers: str | None = None, paren
                       project_vendors=project_vendors)
     sent_notes = [s["id"] for s in r.receipt.get("sent", []) if s.get("where") == "notes"]
     raw = parse(r.text)
+    first_failed = None
     if raw is None:
+        first_failed = r.interaction_id
         reask = (f"{request}\n\nYour previous reply was not a valid JSON object. "
                  "Reply with ONE JSON object matching the plan schema and nothing else.")
         r2 = ci.ask_routed(uid, reask, mode="plan", pinned=pinned, project_id=project_id,
@@ -654,6 +656,8 @@ def compile_intent(ci, uid: str, text: str, *, answers: str | None = None, paren
             sent_notes = [s["id"] for s in r.receipt.get("sent", []) if s.get("where") == "notes"]
     rec = {"id": new_id("plan"), "ts": utcnow().isoformat(), "text": text, "answers": answers, "parent": parent,
            "interaction": r.interaction_id, "served_by": r.receipt.get("route", {}).get("served_by"),
+           # a reply that was not a plan, and the one re-ask it led to: both are model calls that cost
+           "reask_of": first_failed if first_failed != r.interaction_id else None,
            "project_id": project_id, "context_items": sent_notes, "execution_mode": "contract",
            "spec": None, "gate": None, "error": None, "status": "invalid", "steps_state": {}, "outcomes_state": {}}
     if raw is None:

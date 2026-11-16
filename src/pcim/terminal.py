@@ -886,7 +886,8 @@ def cmd_doctor(argv: list[str]) -> int:
         add("claude_cli", st, f"binary {ad.binary!r} not found")
     elif not has_login:
         st = "fail" if ad.require_isolation else "warn"
-        add("claude_cli", st, f"v{ver or '?'} at {bin_path}; no stored oauthAccount profile")
+        add("claude_cli", st, f"v{ver or '?'} at {bin_path}; no stored account profile, so identity isolation "
+                              "cannot be applied or verified")
     elif ad.require_isolation and iso["status"] != "verified":
         add("claude_cli", "fail", f"v{ver or '?'} isolation={iso['status']}: {iso['why']}")
     else:
@@ -944,7 +945,7 @@ def main(argv: list[str] | None = None) -> int:
     if not argv or argv[0] in ("help", "-h", "--help"):
         print(__doc__)
         return 0
-    if argv[0] in ("-V", "--version", "version"):
+    if argv[0] in ("-V", "--version"):  # not bare "version": a request may start with that word
         from . import __version__
         print(f"ci {__version__}")
         return 0

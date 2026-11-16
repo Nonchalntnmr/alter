@@ -183,6 +183,7 @@ def test_invalid_json_plan_gets_one_bounded_reask(env, tmp_path):
         ci.set_adapter("claude-cli", m, TwoStep())
     rec = ic.compile_intent(ci, "u", "summarise the backtests")
     assert rec["status"] == "blocked" and rec["spec"] is not None and replies == []
+    assert rec["reask_of"] and rec["reask_of"] != rec["interaction"]  # the failed first call stays on record, so its cost is not lost
 
 
 def test_plan_is_a_command_not_a_default_mode(env, tmp_path):

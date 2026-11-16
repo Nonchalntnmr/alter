@@ -124,7 +124,8 @@ def test_prompt_injection_cannot_escape_workspace_or_self_approve_or_forge_turn(
     ]))
     turn = agent.send("u", p.id, "read notes.txt", "mock")
     assert turn.status == "done"
-    assert not (tmp_path / "pwned.txt").exists()
+    # "../../pwned.txt" from repo/ is tmp_path's parent; check there (and nearer, in case of a different root)
+    assert not (tmp_path.parent / "pwned.txt").exists() and not (tmp_path / "pwned.txt").exists()
     statuses = {t["tool"]: t["status"] for t in turn.tasks}
     assert statuses["read_file"] == "succeeded"
     assert statuses["write_file"] == "denied"
