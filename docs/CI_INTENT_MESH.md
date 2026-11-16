@@ -291,6 +291,27 @@ barely separates them.
   restorations and changes nothing else.
 - That is post hoc, on a set that has since been read. It is not held-out evidence.
 
+## 5c. Paired execution evaluations (v1 and V3)
+
+Two pre-registered paired evaluations compared direct execution (`A`) against planning (`B`) on
+matched coding and external-action tasks, judged by hidden verification checks (and Haiku model
+judgement for surfacing/completion claims).
+
+- **Paired v1 (`experiments/paired/`, 16 tasks, V2.1):** Direct `A` verified **16/16** ($3.31, 112
+  calls, 48 s median) vs `B` **9/16** ($12.46, 230 calls, 127 s median); McNemar p = 0.016. Verdict:
+  **"not justified."** Every verified `B` run still ended `incomplete` or falsely `awaiting_you`.
+- **V3 paired (`experiments/eval_v3/paired/`, 16 new tasks, 48 arms, `PCIM_CLI_REQUIRE_ISOLATION=1`):**
+  - `A` (direct): **16/16** [0.81, 1.00], 0.00 mean corrections, 645 s person time, $2.62, 102 calls.
+  - `B3` (V3 plan + single-session contract): **14/16** [0.64, 0.97], 0.125 mean corrections, 1380 s
+    person time, $3.56, 126 calls, **0** false incompletes, **0** clear-task clarifications.
+  - `B21` (V2.1+): **7/16** [0.23, 0.67], 0.50 mean corrections, 2380 s person time, $7.21, 179
+    calls, 3 false incompletes (`r07`, `r09`, `r16`), 12 clear-task clarifications.
+  - **Primary (`B3` vs `A`):** McNemar p = 0.50, person-seconds sign-test p = 0.00052. Verdict:
+    **"not justified on this evidence"** (direct execution remains the default).
+  - **Secondary (`B3` vs `B21`):** McNemar p = 0.0156 (`B3_only=7`, `B21_only=0`), corrections
+    p = 0.0391, clarifications p = 3.05e-05; `fixes_confirmed: true`. V3 replaces V2.1 as the
+    opt-in `ci plan` engine.
+
 ## 6. Security and privacy findings in this work
 
 1. *Fixed.* Loading the cached embedding model during benchmarks contacted the Hugging Face
@@ -367,5 +388,9 @@ request yields an outcome the person owns, and a decision that is not ready.
 
 **H3.** Compiling intent before acting reduces corrections per task, compared with giving the
 same request to the same governed agent directly, on matched tasks.
-- *Status:* under test in the paired experiment (`experiments/paired/`). The result goes in
-  [INTENT_V2_REPORT.md](INTENT_V2_REPORT.md) §1.
+- *Status:* **refuted against direct execution** in both paired evaluations (§5c): V2.1 had 0.44
+  mean corrections vs 0.00 for direct (9/16 vs 16/16 verified), and V3 had 0.125 vs 0.00 (14/16 vs
+  16/16 verified, McNemar p = 0.50, decision: "not justified on this evidence"). Against V2.1+, V3
+  significantly improves verified completion (14/16 vs 7/16, p = 0.0156) and reduces corrections
+  (p = 0.0391) and clear-task clarifications (p = 3.05e-05). Direct execution remains the default;
+  V3 is the opt-in `ci plan` engine. See [INTENT_V2_REPORT.md](INTENT_V2_REPORT.md) §4b and §5.

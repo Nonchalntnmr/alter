@@ -317,6 +317,47 @@ item (h48), plus two over-blocks that V1 made and no registered metric counts.
 
 ---
 
+## 4b. V3 evaluation (`experiments/eval_v3/`, `feat/intent-v3` at `9efe636`)
+
+V3 redesigned plan execution around a single governed agent session per intent contract, fixed
+bookkeeping-tool false incompletes, narrowed extractor false positives on code identifiers, and
+preserved parent external/destructive outcomes across clarification unless withdrawn.
+
+**V3 intent evaluation (`experiments/eval_v3/intent/`, 50 new items, V2.1+ vs V3):**
+- H1 (26/26), H4 (39/39), H5 (6/6), H6 (50/50), H7 (10/10) met for both.
+- C1 (preservation after answer): 26/26 (V2.1+), 25/25 (V3). W1 (withdrawal): 2/4 (V2.1+), 4/4 (V3).
+- H3 (false clarification <= 0.25) missed by both: V2.1+ 16/23, V3 11/23 (false questions on clear
+  requests with outside actions). H2 regressed for V3: 18/21 (missed 3 vague requests: q29, q39, q45).
+
+**V3 paired evaluation (`experiments/eval_v3/paired/`, 16 new tasks, 48 arms, `PCIM_CLI_REQUIRE_ISOLATION=1`):**
+
+| arm | E1 verified | 95% Wilson CI | E2 corr. mean | person s (total / med) | cost | calls | E7 surfaced (judged / struct.) | F1 false incomp. | F3 clear-task clarif. |
+|---|---|---|---|---|---|---|---|---|---|
+| A (direct) | **16/16** | [0.81, 1.00] | 0.00 | 645 / 30 s | $2.62 | 102 | 7/7 / — | — | 0 |
+| B3 (V3 plan) | **14/16** | [0.64, 0.97] | 0.125 | 1380 / 70 s | $3.56 | 126 | 7/7 / 7/7 | **0** | **0** |
+| B21 (V2.1+) | **7/16** | [0.23, 0.67] | 0.50 | 2380 / 135 s | $7.21 | 179 | 7/7 / 7/7 | 3 (r07, r09, r16) | 12 |
+
+- **Primary (B3 vs A):** McNemar p = 0.50 (A_only=2, B3_only=0); person seconds sign-test p = 0.00052
+  (median +35 s). Decision rule: **"not justified on this evidence"** (completion non-inferiority,
+  gain, and cost/attention bounds not met). B3 failures: r10 (planner returned non-JSON `invalid`),
+  r15 (vague task V3 did not clarify; ended `incomplete`, no false completion).
+- **Secondary (B3 vs B21):** McNemar p = 0.0156 (B3_only=7, B21_only=0); corrections sign-test
+  p = 0.0391; clarifications sign-test p = 3.05e-05. All secondary checks passed (`fixes_confirmed: true`).
+
+---
+
 ## 5. Merge recommendation and blockers
 
-PENDING the paired result.
+- **Recommendation:** **Merge V3 (`ci plan` engine) while keeping planning opt-in; keep direct
+  execution as the default.** V3 decisively outperforms V2.1+ (14/16 vs 7/16 verified, p = 0.0156;
+  zero false incompletes; zero clear-task clarifications), but direct execution remains faster,
+  cheaper, and at least as reliable (16/16 vs 14/16, 645 s vs 1380 s person time).
+- **Blockers / open items:**
+  1. **Compiler quality (H2/H3, r10):** V3 missed H2 (18/21) and H3 (11/23) on the new intent set,
+     and r10 failed on non-JSON planner output (bounded re-ask proposed for V3.2).
+  2. **Identity isolation (`sec/cli-identity`):** verified on CLI 2.1.316 only; CLI profile refetch
+     during calls is measured clean rather than guaranteed; account id remains in API metadata.
+  3. **In-process session lock (`agent.py`):** `threading.Lock` does not serialize across processes.
+  4. **Hugging Face Hub contact:** `PersonalCI` initialization contacts HF Hub unless `HF_HUB_OFFLINE=1`.
+  5. **M10 (pre-existing on `main`):** deleting a project retains `ci` requests (strict xfail).
+  6. **No human evaluation yet:** all labellers and judges so far are models.
