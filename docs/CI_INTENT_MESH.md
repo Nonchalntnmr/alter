@@ -71,50 +71,107 @@ Ambiguity that would not change what happens is resolved and listed, never asked
   ignore (including real words one letter from a verb), restoration, idempotence, relabelled outcomes, destructive changes, conflicts and
   permissions.
 
+**V3 changes to the compiler** (`feat/intent-v3`). Each is pinned by a test that fails on the
+version before it.
+- **Code and technical prose are not requests.**
+  - A clause-initial word followed by `(`, wrapped in backticks, or followed by a finite verb
+    ("**reserve** raises…") is a subject or identifier, not an imperative. So is an inflected word
+    followed by a relative word ("**Calls** that don't pass…").
+  - A base-form verb followed by "that" or "when" is still a request ("send that to priya",
+    "post that", "send when ready").
+  - Paired v1's false "yours to do" items came from this.
+- **Actions survive clarification.**
+  - When a plan is recompiled from an answer, the parent plan's external and destructive outcomes
+    carry over unless the answer explicitly takes them back.
+  - "Explicitly" means the action's own verb, negated: "don't send it", "skip the email". For an
+    action with no known verb, its first word plus another of its words: "don't create the Jira
+    ticket".
+  - Every withdrawal is recorded in `spec["withdrawn"]` and in the flags, never silently.
+  - Paired v1's p12 lost a Jira ticket this way.
+- **No second question about the code.** After an answer, low-stakes ambiguity no longer keeps a
+  plan in `clarify`, unless the plan has a consequence CI itself would carry out, or the request
+  is nothing but the person's own action ("send the report": then it still asks who to).
+  - The plan is never `ready` while it has an action for the person.
+  - Paired v1 lost 5 tasks to repeated questions.
+- **The planner is told it cannot see the files,** and that any working directory it is told
+  about is its own process's, not the project's. Paired v1 plans had planned around the CLI's
+  sandbox directory.
+
 ## 3. Plan execution
 
-An approved plan runs level by level through the existing workspace agent, one message per
-step. Approving a plan authorizes nothing: the governor decides every tool call again, under the
-current autonomy mode and grants. The only permissioned call in plan code is `agent.cancel`.
+**V3 replaced step-by-step execution with a contract executed in one session**
+(`execution_mode: "contract"`, the default for every plan compiled from V3 on). The reason is
+measured, not stylistic. In the paired experiment (§5c), step-by-step execution completed 9 of
+16 tasks against direct execution's 16 of 16, at 3.6× the person's time and 3.8× the cost.
+Plans compiled before V3 still run step by step, as described at the end of this section.
 
-**Every step is always in one recorded state.**
+**Contract execution.**
+- An approved plan becomes **one** message to the governed workspace agent, containing:
+  - the goal;
+  - the outcomes CI must achieve;
+  - the outcomes that are the person's, which CI must not try to perform;
+  - the constraints and success criteria;
+  - an instruction to read, change, test, and report with tool evidence.
+- The steps are the checklist, not separate turns.
+- **Approving a plan authorizes nothing.** The governor decides every tool call again, under the
+  current autonomy mode and grants. Plan code makes only one permissioned call itself:
+  `agent.cancel`.
+- The agent is offered only the tools the workspace enables: no `record_claim` without a claim
+  ledger, no `write_file` with writes off, no `run_tests` without a test command.
+
+**Three separate states, never collapsed into one:**
+
+| state | what it records | how it is decided |
+|---|---|---|
+| **outcome success** (`met`, `unmet`, `awaiting_you`) | whether the requested work happened | from task records only, never from the model. A CI outcome is met only if the session made a change (when the plan changes files), every change succeeded, and **the tests passed after the last change** whenever the workspace can run them. `judged_by` says that this is the suite passing, not a check of each outcome. The person's outcomes are `yours_pending` until `--done`. |
+| **plan completion** | how much of the checklist finished | steps done out of total |
+| **authorization compliance** | what was denied or out of scope | denials listed. Bookkeeping failures (`record_note`, `record_claim`) are listed separately and never decide an outcome. |
+
+**The contract's own state:**
 
 | state | meaning |
 |---|---|
-| `not_started` | not reached (recorded, not implied) |
-| `in_progress` | written *before* the agent is called |
-| `done` | every tool the step used succeeded and tests passed, **judged from task records, never from the model** |
-| `incomplete` | the turn ended, but a tool was denied, failed, cancelled or expired, or the tests failed |
-| `waiting` | an action needs you: `ci approve` / `ci deny` |
-| `failed` | the agent could not take the step (provider, vendor) |
-| `halted` | Stop-all stopped it |
-| `interrupted` | found `in_progress` at the next run: the process died mid-step. **Never re-run silently**, because it may have acted. |
-| `yours`, `yours_done` | an external step; only you can mark it |
-| `blocked` | it depends on a step that is yours |
+| `not_started`, `in_progress` | `in_progress` is written *before* the agent is called |
+| `waiting` | an action needs you. Each pending action is shown with its tool and target, and the exact `ci approve` and `ci deny` commands. |
+| `done`, `incomplete` | the evidence rule above decides |
+| `failed` | the agent or the provider could not run the session |
+| `halted` | Stop-all. A contract halted before its session starts records `halted` itself. |
+| `interrupted` | found `in_progress` at the next run: the process died mid-session. **Never re-run silently.** |
 | `cancelled` | `--cancel` |
 
 **Rules:**
-- A step that is not done stops the plan. Only an external step lets independent steps go on.
-- `--retry STEP` re-runs a failed, interrupted, incomplete or halted step, and keeps the earlier
-  attempt. Nothing else re-runs a step.
-- `--cancel` closes the step's session **first**, then cancels its pending actions. So nothing
-  resumes, and a late `ci approve` cannot revive them.
-- `ci halt` is Stop-all. `ci resume` lifts it. Before this branch, `ci halt` fell through to a
-  model question. A halted step is left untouched if it had not started.
-- **One run at a time per plan:** `execute` holds an OS lock on the plan, and so do `ci approve`
-  and `ci deny` on a plan's action. The lock is released if the process dies. So `ci execute`
-  never judges a step while the turn it resumed is still running.
-- **Completion is about outcomes.** A plan is `done` only when every outcome is met. A CI outcome
-  is met when every step serving it is done. An external outcome is met only when you mark it
-  (`--done`). Otherwise the plan is `awaiting_you`, `incomplete`, `waiting`, `failed`,
-  `interrupted`, `halted` or `cancelled`, and it ends by saying **"Not done"**.
+- `--retry contract` re-runs a failed, interrupted, incomplete or halted contract, keeping the
+  earlier attempt. **During Stop-all a retry is refused** ("run ci resume first").
+- `--cancel` closes the session **first**, then cancels its pending actions. So nothing resumes,
+  and a late `ci approve` fails.
+- **Stop-all:** `ci halt` cancels pending and running actions and blocks model calls. `ci resume`
+  lifts it. The workspace agent now recovers by itself after Stop-all: pending actions that ended
+  are handed back to the model as results. The strict xfail that pinned the old wedge now passes.
+- **One run at a time per plan:** an OS lock on the plan, held by `execute`, `ci approve` and
+  `ci deny`, and released if the process dies.
+- **A plan is `done` only when every outcome is met or marked done by you.** Otherwise it ends
+  by saying **"Not done"**, with its status.
 
-**Parallelism: none.** Steps within a level are independent, but they run one after another.
-Parallel execution is deliberately not built until sequential execution and cancellation are
-shown to be reliable.
+**Parallelism: none.** Parallel execution is deliberately not built.
 
-**Tests:** 19 in `tests/test_plan_exec.py` (counting parametrized cases), plus one strict
-xfail that pins an agent defect (§6).
+**Verified end to end.** `scripts/e2e_terminal.py` runs 32 checks through the real `ci` entry
+point with a scripted model:
+- approve, deny, `--done`, `--retry` and `--cancel`;
+- a killed run reading `interrupted`;
+- Stop-all, resume and retry;
+- writes outside the folder, runs from another project, and reads outside an authorized folder;
+- a provider failure;
+- `mesh`, `twin`, `audit` and `learn`.
+
+All 32 pass on V3.1 and on the integration branch. On V3 as frozen it was 30 of 32; the display
+and the Stop-all retry were fixed in V3.1.
+
+**Step-by-step mode** (plans compiled before V3). Each step is one agent turn, with states
+`not_started`, `in_progress`, `done`, `incomplete`, `waiting`, `failed`, `halted`, `interrupted`,
+`yours`, `yours_done`, `blocked` and `cancelled`. The same lock, retry, cancel and evidence rules
+apply per step.
+
+**Tests:** 26 in `tests/test_plan_exec.py`, plus the end-to-end script.
 
 ## 4. The compute mesh
 
@@ -244,16 +301,30 @@ barely separates them.
    directory refuses to run in another's.
 4. *Open.* The mesh trusts `mesh.json`'s `trusted: true` as the person's statement that a LAN
    machine is theirs. There is no attestation.
-5. *Open, pre-existing on main.* The `claude` CLI adds the logged-in account's email address and
-   its working-directory path to the model's context, despite every isolation flag the adapter
-   sets.
-   - In the held-out run, identifying details appeared in 40 of 100 replies and were written into
-     plans. CI never approved sending this data, and no receipt lists it.
-   - The committed replies are redacted.
-6. *Open, pre-existing on main.* After Stop-all cancels a pending action, the workspace agent
-   refuses every further message in that session.
-   - Plan execution closes the stale session before a retry.
-   - Direct sessions stay wedged. This is pinned by a strict xfail.
+5. *Mitigated on this branch (CLI 2.1.316), from `sec/cli-identity`.* The `claude` CLI added
+   the logged-in account's email address and a working directory naming the user to every
+   request, despite every isolation flag.
+   - This was measured on the request itself, through a loopback relay, not inferred.
+   - The adapter now runs the CLI:
+     - from a fresh directory outside `$HOME`;
+     - with a per-call config holding a sanitized account profile;
+     - with git identity hidden.
+   - Measured on CLI 2.1.316: 18 of 18 isolated trials carried no identifier (12 before the review fixes, 6 after), and the baseline
+     with isolation off still carried the email.
+   - Isolation counts as verified only for a CLI version the probe recorded clean.
+     `PCIM_CLI_REQUIRE_ISOLATION=1` refuses any call that is not verified. The V3 evaluation ran
+     with it set.
+   - **Open:**
+     - the CLI refetches the profile during calls (measured clean, not guaranteed);
+     - the account id stays in API metadata;
+     - other CLI versions are unverified;
+     - older stored records are not scrubbed.
+   - Details: [SECURITY_CLI_IDENTITY.md](SECURITY_CLI_IDENTITY.md), and the independent review:
+     [SECURITY_CLI_IDENTITY_REVIEW.md](SECURITY_CLI_IDENTITY_REVIEW.md).
+6. *Fixed on this branch.* After Stop-all cancelled a pending action, the workspace agent refused
+   every further message in that session.
+   - It now hands the ended actions back to the model as results and continues.
+   - The strict xfail that pinned the defect passes, so the mark is removed.
 7. *Open, pre-existing on main.* The agent's session lock is in-process only. Plan execution adds
    a per-plan file lock.
 8. *Fixed on this branch.* `ci halt` sent "halt" to a model. It is now Stop-all.

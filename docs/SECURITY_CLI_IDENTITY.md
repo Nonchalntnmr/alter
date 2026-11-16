@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | **Mitigated for CLI 2.1.316, and enforced for identity-sensitive calls.** The 8 independent-review defects (M1–M4, L1–L4) are fixed in `55c6b77` and `0baddbb`. Fixing L4 introduced a regression: it broke the login, so every isolated call failed "Not logged in". That was caught by a live probe, not by the offline tests, and is fixed in the next commit. **14 of 14** isolated trials are clean across all runs, with a positive control showing the email when isolation is off. Other CLI versions are `unverified` until probed. |
+| **Status** | **Mitigated for CLI 2.1.316, and enforced for identity-sensitive calls.** The 8 independent-review defects (M1–M4, L1–L4) are fixed in `55c6b77` and `0baddbb`. Fixing L4 introduced a regression: it broke the login, so every isolated call failed "Not logged in". That was caught by a live probe, not by the offline tests, and is fixed in the next commit. **18 of 18** isolated trials are clean across all runs (12 before the review fixes, 6 after), with a positive control showing the email when isolation is off. Other CLI versions are `unverified` until probed. |
 | **Affects** | `src/pcim/adapters/claude_cli.py` on `main` (1f9bd08) and every branch built on it |
 | **Found** | 2026-11-13, in the held-out intent evaluation |
 | **Kind** | Privacy: data reaches the model that CI's consent filter never approved and its receipts never listed |
