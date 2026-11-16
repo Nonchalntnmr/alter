@@ -80,7 +80,10 @@ PLAN_FORMAT = (
     "answer; read = reading the person's files; run = running code or tests; write = creating or changing files; "
     "external = doing an external_action. Keep steps minimal and direct: do not invent backup-copy steps outside the "
     "project or temporary scratch scripts. Drafting something is preparatory, never a replacement for sending or "
-    "posting it. Never invent facts about the person; cite a note only if it says what you claim.")
+    "posting it. You cannot see the person's files while planning: CI's agent reads them in the person's "
+    "authorized project folder when it executes, so plan read steps instead of asking where files are. Any "
+    "working directory you are told about is your own process's and has nothing to do with the project. "
+    "Never invent facts about the person; cite a note only if it says what you claim.")
 
 
 def normalize(mode: str | None) -> str | None:

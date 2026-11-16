@@ -542,7 +542,13 @@ def gate(spec: dict, request: str | None = None, *, after_answer: bool = False) 
     if request:
         preserve(spec, request)
     reasons, questions = [], list(spec.get("questions") or [])
-    has_consequential_outcome = any(o["kind"] in ("external_action", "destructive_change") for o in spec["outcomes"])
+    # After an answer, low-stakes ambiguity stays open only for consequences CI itself would carry out, or
+    # when the request is nothing but the person's own action (who to email, what to post): then there is no
+    # CI work to get on with. An action that is the person's, beside CI work, is never performed by CI and
+    # already keeps the plan from being ready; asking again about the code is what loops (paired v1, p10/p11).
+    ci_work = any(o.get("by") != "you" and o["kind"] == "deliverable" for o in spec["outcomes"])
+    has_consequential_outcome = any(o["kind"] in ("external_action", "destructive_change")
+                                    and (o.get("by") != "you" or not ci_work) for o in spec["outcomes"])
     defer_to_assumed = after_answer and not has_consequential_outcome and not spec["conflicts"] and bool(
         spec.get("steps") or spec["outcomes"])
     interps = spec.get("interpretations") or []

@@ -314,3 +314,16 @@ def test_a_parent_action_is_not_hidden_by_a_different_action_that_shares_a_word(
     child = ic.answer(ci, "u", parent["id"], "the march report, don't include the appendix")
     texts = [o["text"] for o in child["spec"]["outcomes"] if o["kind"] == "external_action"]
     assert "email the report to raj" in texts and not child["spec"].get("withdrawn")
+
+
+def test_after_an_answer_the_persons_own_external_action_does_not_keep_low_stakes_questions_open():
+    spec = ic.validate({"goal": "fix paginate and email raj the diff",
+                        "interpretations": [{"goal": "fix and email", "p": 0.5}, {"goal": "fix, draft only", "p": 0.4}],
+                        "outcomes": [{"id": "o1", "text": "paginate fixed", "kind": "deliverable"},
+                                     {"id": "o2", "text": "email raj the diff", "kind": "external_action"}],
+                        "steps": [{"id": "s1", "action": "fix paginate", "kind": "write", "serves": ["o1"]}],
+                        "assumptions": [{"text": "pager.py is the file", "confidence": 0.5, "consequential": True}]},
+                       [], request="fix paginate() and email raj the diff")
+    assert ic.gate(dict(spec), "fix paginate() and email raj the diff").decision == "clarify"  # first time: ask
+    g = ic.gate(dict(spec), "fix paginate() and email raj the diff", after_answer=True)
+    assert g.decision == "approval" and any("email raj" in y for y in g.yours_to_do)  # never ready, never dropped
