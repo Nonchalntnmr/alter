@@ -370,13 +370,14 @@ class ClaudeCLIAdapter:
         except Exception:
             shutil.rmtree(cfg, ignore_errors=True)
             raise
-        # the login stays where it is: the parent's config dir, or the default (keychain, ~/.claude)
-        if "CLAUDE_SECURESTORAGE_CONFIG_DIR" in parent:
-            env["CLAUDE_SECURESTORAGE_CONFIG_DIR"] = parent["CLAUDE_SECURESTORAGE_CONFIG_DIR"]
-        elif parent.get("CLAUDE_CONFIG_DIR"):
-            env["CLAUDE_SECURESTORAGE_CONFIG_DIR"] = parent["CLAUDE_CONFIG_DIR"]
-        else:
-            env.pop("CLAUDE_SECURESTORAGE_CONFIG_DIR", None)
+        # The login stays where it was. The CLI names its secure-storage item (the keychain on macOS,
+        # ~/.claude/.credentials.json elsewhere) after CLAUDE_CONFIG_DIR unless
+        # CLAUDE_SECURESTORAGE_CONFIG_DIR is set, and an empty value selects the default item
+        # (CLI 2.1.316: `n !== undefined ? !n : !CLAUDE_CONFIG_DIR`). Leaving it unset while pointing
+        # CLAUDE_CONFIG_DIR at the per-call dir made every call "Not logged in" (measured 2026-11-16).
+        # So: the parent's value, else the parent's own config dir, else "" (the default login).
+        env["CLAUDE_SECURESTORAGE_CONFIG_DIR"] = parent.get("CLAUDE_SECURESTORAGE_CONFIG_DIR",
+                                                            parent.get("CLAUDE_CONFIG_DIR") or "")
         env["CLAUDE_CONFIG_DIR"] = str(cfg)
         return env, cfg
 
