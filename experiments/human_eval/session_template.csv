@@ -1,0 +1,1 @@
+participant,task,label,m1_success,m2_verified,m3_needless_questions,m3_missing_questions,m4_not_understood,m4_out_of_scope_changes,m5_recall,m6_surprises,m6_model_input_identifiers,m7_latency_s,m8_person_s,m9_cost_usd,m10_tlx,m10_unattended
