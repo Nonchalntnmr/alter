@@ -6,16 +6,17 @@
 
 | Check | Result | Scope / Notes |
 |---|---|---|
-| Full `pytest` suite (`alter-rc`) | **503 passed, 1 skipped, 1 xfailed** | Opt-in live CLI probe skipped (`PCIM_LIVE_CLI_PROBE!=1`); `M10` xfailed |
+| Full `pytest` suite (`alter-rc`) | **506 passed, 1 skipped, 1 xfailed** | Opt-in live CLI probe skipped (`PCIM_LIVE_CLI_PROBE!=1`); `M10` xfailed |
+| `main`'s tests against `alter-rc/src` | **343 passed, 1 failed, 1 xfailed** | 1 expected failure: `test_modes_never_change_autonomy_permissions_or_routing_filters` (`plan` is command-only) |
 | `scripts/e2e_terminal.py` (`alter-rc`) | **32/32 passed** | Offline mock provider in temporary `PCIM_HOME` |
 | Full `pytest` suite (`ci-integration`) | **499 passed, 1 skipped, 1 xfailed** | Same skip/xfail |
 | `scripts/e2e_terminal.py` (`ci-integration`) | **32/32 passed** | Same |
-| Wheel build (`pip wheel . --no-deps`) | **Passed** | `contextual_intelligence-0.2.0rc1-py3-none-any.whl` (331,047 bytes); PyPI venv install not run (requires network) |
-| Upgrade check (`main` -> `0.2.0rc1`) | **Passed** | `pcim init` on `ci-main-baseline`, then `ci --version`, `doctor`, `status`, `audit`, `twin` on `0.2.0rc1` |
+| Clean `[test]` wheel install + E2E | **Passed (32/32)** | Built `contextual_intelligence-0.2.0rc1-py3-none-any.whl` (331,005 bytes, 73 files, `Requires-Python: >=3.11`, `pytest>=8` in `[test]` extra only); installed in `/tmp/alter-venv`; ran `ci --version`, `ci doctor`, `e2e_terminal.py` |
+| Upgrade & rollback (`main` <-> `0.2.0rc1`) | **Passed** | `pcim init` on `ci-main-baseline`, `ci doctor` on `0.2.0rc1`, `ci status` on `ci-main-baseline` |
 | `ci doctor` & `ci --version` | **Passed** | Tested uninitialized (`exit 1`), healthy (`exit 0`), halted (`exit 1`) |
 | Cross-process `flock` (`Agent._lock`) | **Passed** | Subprocess blocked with `RuntimeError` while parent held session lock; in-process concurrency test also passes |
 | HF Hub offline auto-mode | **Passed** | `SentenceEmbedder._load` sets `HF_HUB_OFFLINE=1` when model cache exists |
-| Prompt-injection & delimiter tests | **Passed** | Governor/authorization block outside writes, self-approve, shell, and forged CLI turn delimiters |
+| Prompt-injection & adversarial tests | **Passed (7/7)** | Outside writes, self-approve, shell, forged CLI turn delimiters, unauthorized external actions, secret scrubbing/withholding, interrupted contracts, corrupted audit/invalid plans |
 | V3 paired eval (`experiments/eval_v3/paired/`) | **48/48 arms scored** | A: 16/16 ($2.62, 102 calls); B3: 14/16 ($3.56, 126 calls); B21: 7/16 ($7.21, 179 calls); B3 vs B21 McNemar `p=0.0156` |
 | Identity grep (`diff origin/main`) | **0 hits** | Checked after redacting one `tmp_path` username in `raw.jsonl` |
 
