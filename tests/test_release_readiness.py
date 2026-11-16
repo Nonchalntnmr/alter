@@ -274,3 +274,30 @@ def test_interrupted_contract_and_corrupted_state(tmp_path, monkeypatch):
     ci.store.close()
     assert terminal.main(["doctor", "--json"]) == 1
 
+
+
+def test_a_store_embedded_semantically_fails_clearly_where_the_semantic_extra_is_missing(tmp_path, monkeypatch, capsys):
+    """Found by the 0.2.0rc1 upgrade test: a store written with the semantic embedder, opened by an install
+    without the `semantic` extra, crashed `ci plan` with a traceback. Now doctor fails the check and every
+    command says what to install."""
+    from pcim import cli, embed
+    home = tmp_path / "pcim"
+    monkeypatch.setenv("PCIM_HOME", str(home))
+    monkeypatch.setenv("PCIM_EMBEDDER", "hashing-512")
+    assert cli.main(["init", "--user", "Pat", "--providers", "mock"]) == 0
+    ci = PersonalCI(home)
+    ci.store.set_meta("embedder", "st:" + embed.DEFAULT_SEMANTIC_MODEL)  # as a store written with the extra records it
+    ci.store.close()
+    monkeypatch.delenv("PCIM_EMBEDDER")
+    monkeypatch.setattr(embed, "semantic_available", lambda: False)
+
+    def missing(self):
+        raise embed.EmbedderUnavailable("this store's memory is embedded with st:x, which needs the `semantic` extra")
+    monkeypatch.setattr(embed.SentenceEmbedder, "_load", missing)
+    capsys.readouterr()
+    assert terminal.main(["doctor", "--json"]) == 1
+    checks = {c["name"]: c for c in json.loads(capsys.readouterr().out)["checks"]}
+    assert checks["embedder"]["status"] == "fail" and "[semantic]" in checks["embedder"]["detail"]
+    assert terminal.main(["plan", "summarise my notes"]) == 2
+    err = capsys.readouterr().err
+    assert "semantic" in err and "Traceback" not in err

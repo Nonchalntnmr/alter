@@ -903,10 +903,17 @@ def cmd_doctor(argv: list[str]) -> int:
     else:
         add("hf_cache", "warn", f"not cached ({DEFAULT_SEMANTIC_MODEL}); HF_HUB_OFFLINE={offline_env or 'unset'}")
 
-    # 5-7. Audit chain, authorized workspaces, Stop-all (only if initialized)
+    # 5-8. Embedder, audit chain, authorized workspaces, Stop-all (only if initialized)
     if state_ok:
         ci, uid = _open()
         try:
+            from .embed import semantic_available
+            emb = ci.embedder.name
+            if emb.startswith("st:") and not semantic_available():
+                add("embedder", "fail", f"this store's memory is embedded with {emb}, but sentence-transformers is not "
+                                        "installed: pip install 'contextual-intelligence[semantic]'")
+            else:
+                add("embedder", "ok", emb)
             audit_ok, audit_err = ci.audit.verify()
             add("audit_chain", "ok" if audit_ok else "fail",
                 "verified" if audit_ok else f"verification failed: {audit_err}")
@@ -956,9 +963,14 @@ def main(argv: list[str] | None = None) -> int:
              "mesh": cmd_mesh, "twin": cmd_twin, "audit": cmd_audit, "learn": cmd_learn,
              "execute": cmd_execute, "approve": cmd_approve, "deny": cmd_deny, "halt": cmd_halt,
              "resume": cmd_resume, "doctor": cmd_doctor}
-    if cmd in table:
-        return table[cmd](argv[1:])
-    return cmd_ask(argv)
+    from .embed import EmbedderUnavailable
+    try:
+        if cmd in table:
+            return table[cmd](argv[1:])
+        return cmd_ask(argv)
+    except EmbedderUnavailable as e:  # a setup problem, said plainly rather than as a traceback
+        print(f"ci: {e}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":
