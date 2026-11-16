@@ -376,3 +376,34 @@ def test_d4_contract_mode_requires_passing_tests_after_write(setup):
     r = px.execute(ci, "u", rec["id"], p.id, {"mock"}, provider="mock", agent=agent)
     assert r["outcome"] == "incomplete"
     assert r["outcome_success"]["status"] == "unmet"
+
+
+def test_contract_a_session_that_changes_nothing_does_not_meet_a_plan_that_changes_files(setup):
+    ci, ws, agent, p, repo = setup
+    rec = approved_plan(ci, [{"id": "s1", "action": "update calc.py", "kind": "write", "depends_on": [], "serves": ["o1"]}],
+                        p.id, outcomes=[{"id": "o1", "text": "calc.py updated", "kind": "deliverable"}])
+    rec["execution_mode"] = "contract"
+    ic._save(ci, "u", rec)
+    agent.set_adapter("mock", None, MockAgentAdapter(script=[{"text": "I can't do this one, sorry."}]))
+    r = px.execute(ci, "u", rec["id"], p.id, {"mock"}, provider="mock", agent=agent)
+    assert r["outcome"] == "incomplete" and r["outcome_success"]["status"] == "unmet"
+    assert any("no file was changed" in x for x in r["plan"]["contract_state"]["problems"])
+
+
+def test_contract_tests_are_required_after_a_change_even_if_the_plan_lists_no_run_step(setup):
+    ci, ws, agent, p, repo = setup
+    ws.grant_autonomy("u", p.id, ["write_file"])
+    rec = approved_plan(ci, [{"id": "s1", "action": "update calc.py", "kind": "write", "depends_on": [], "serves": ["o1"]}],
+                        p.id, outcomes=[{"id": "o1", "text": "calc.py updated", "kind": "deliverable"}])
+    rec["execution_mode"] = "contract"
+    ic._save(ci, "u", rec)
+    agent.set_adapter("mock", None, MockAgentAdapter(script=[
+        {"text": "Wrote.", "tool_uses": [{"id": "t1", "name": "write_file",
+                                          "input": {"path": "calc.py", "content": "x = 3\n", "reason": "fix"}}]},
+        {"text": "Done!"}]))
+    r = px.execute(ci, "u", rec["id"], p.id, {"mock"}, provider="mock", agent=agent)
+    while r["outcome"] == "waiting":
+        for tid in r["plan"]["contract_state"]["pending"]:
+            agent.resolve("u", tid, approve=True)
+        r = px.execute(ci, "u", rec["id"], p.id, {"mock"}, provider="mock", agent=agent)
+    assert r["outcome"] == "incomplete" and r["outcome_success"]["status"] == "unmet"

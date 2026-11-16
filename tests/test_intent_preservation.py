@@ -163,3 +163,33 @@ def test_an_external_step_the_plan_did_not_link_gets_an_outcome_that_is_yours():
     o = next(o for o in spec["outcomes"] if o["id"] == "oSs2")
     assert o["kind"] == "external_action" and o["by"] == "you"
     assert "oSs2" in next(s for s in spec["steps"] if s["id"] == "s2")["serves"]
+
+
+@pytest.mark.parametrize("request_,lemma", [
+    ("send that to priya", "send"),          # "that" after a base-form verb is its object
+    ("post that on twitter tonight", "post"),
+    ("delete that folder", "delete"),
+    ("send when ready", "send"),
+])
+def test_a_demonstrative_or_when_after_an_imperative_does_not_hide_the_request(request_, lemma):
+    assert lemma in [a["lemma"] for a in ic.requested_actions(request_)]
+
+
+@pytest.mark.parametrize("request_", [
+    "Calls that don't pass holidays must behave exactly as they do now",  # paired v1 p02
+    "reserve raises OutOfStock if qty is more than what's available",     # paired v1 p05
+    "posts that mention the outage get pinned",
+])
+def test_a_subject_noun_or_identifier_is_not_a_request(request_):
+    assert ic.requested_actions(request_) == []
+
+
+def test_an_answer_withdraws_only_the_action_it_explicitly_negates_and_says_so():
+    req = "draft the abstract and send it to priya"
+    kept = ic.validate(drafting_only(), [], request=req, answers="use the march numbers, don't include the appendix")
+    assert any(o.get("restored") and o["kind"] == "external_action" for o in kept["outcomes"])
+    assert not kept.get("withdrawn")
+    gone = ic.validate(drafting_only(), [], request=req, answers="dont send it, i'll send it myself")
+    assert not any(o.get("restored") for o in gone["outcomes"])
+    assert gone["withdrawn"] and "send" in gone["withdrawn"][0]["text"]  # recorded, never silent
+    assert any("withdrawn by your answer" in f for f in gone["flags"])

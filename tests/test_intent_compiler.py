@@ -298,3 +298,19 @@ def test_d5_answer_preserves_parent_external_outcome_unless_withdrawn(env, tmp_p
     canned(ci, p2)
     child2 = ic.answer(ci, "u", parent["id"], "in parser.py, and don't create the Jira ticket")
     assert not any(o["kind"] == "external_action" for o in child2["spec"]["outcomes"])
+
+
+def test_a_parent_action_is_not_hidden_by_a_different_action_that_shares_a_word(env, tmp_path):
+    ci, _ = make(tmp_path)
+    parent_spec = {"goal": "share the report", "interpretations": [{"goal": "a", "p": 0.5}, {"goal": "b", "p": 0.5}],
+                   "outcomes": [{"id": "o1", "text": "email the report to raj", "kind": "external_action"}],
+                   "steps": [{"id": "s1", "action": "draft", "kind": "think", "serves": ["o1"]}], "questions": ["which report?"]}
+    child_spec = {"goal": "share the march report", "interpretations": [{"goal": "a", "p": 0.95}],
+                  "outcomes": [{"id": "o1", "text": "post the report in #eng", "kind": "external_action"}],
+                  "steps": [{"id": "s1", "action": "draft", "kind": "think", "serves": ["o1"]}]}
+    canned(ci, parent_spec)
+    parent = ic.compile_intent(ci, "u", "get the report out")
+    canned(ci, child_spec)
+    child = ic.answer(ci, "u", parent["id"], "the march report, don't include the appendix")
+    texts = [o["text"] for o in child["spec"]["outcomes"] if o["kind"] == "external_action"]
+    assert "email the report to raj" in texts and not child["spec"].get("withdrawn")

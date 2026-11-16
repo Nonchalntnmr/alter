@@ -132,7 +132,7 @@ def _model(vendors: set[str], provider: str | None, model: str | None) -> tuple[
     return r.entry.provider, r.entry.model or None
 
 
-def _analyze_tasks(tasks: list[dict], *, require_tests_after_write: bool = True) -> dict:
+def _analyze_tasks(tasks: list[dict], *, require_tests_after_write: bool = True, require_change: bool = False) -> dict:
     """Analyze task records into work problems, denials, bookkeeping failures, and evidence."""
     problems, denials, bookkeeping = [], [], []
     last_write_idx, last_pass_test_idx = None, None
@@ -164,6 +164,10 @@ def _analyze_tasks(tasks: list[dict], *, require_tests_after_write: bool = True)
         evidence_ok = tests_after_write and not non_denied_work_problem
     else:
         evidence_ok = (not problems) or (tests_after_write and not non_denied_work_problem)
+    if require_change and last_write_idx is None:
+        # a plan that changes files is not achieved by a session that changed nothing ("I can't do this")
+        problems.append("no file was changed, though the plan changes files")
+        evidence_ok = False
     return {"achieved": not problems, "evidence_ok": evidence_ok, "problems": problems,
             "denials": denials, "bookkeeping_failures": bookkeeping, "tests_after_write": tests_after_write}
 
@@ -410,7 +414,9 @@ def _contract_outcomes(rec: dict, evidence_ok: bool, attempted: bool) -> dict:
             out[o["id"]] = {"status": "yours_pending"}
             continue
         met = attempted and evidence_ok
-        out[o["id"]] = {"status": "met" if met else "unmet", "judged_by": "contract tool evidence"}
+        # what "met" rests on, said plainly: the session's evidence, not a check of this outcome
+        out[o["id"]] = {"status": "met" if met else "unmet",
+                        "judged_by": rec.get("_evidence_basis") or "the session's task records"}
     return out
 
 
@@ -422,7 +428,10 @@ def _execute_contract(ci, uid: str, rec: dict, project_id: str, vendors: set[str
     order = [sid for level in rec["spec"]["levels"] for sid in level]
     steps = {s["id"]: s for s in rec["spec"]["steps"]}
     ws_info = ws.briefing(uid, project_id).get("workspace") or {}
-    require_tests = bool(ws_info.get("can_run_tests")) and any(s["kind"] == "run" for s in steps.values())
+    # tests are required after any change whenever the workspace can run them, whether or not the plan
+    # happened to list a "run" step; a plan that changes files needs at least one change
+    require_tests = bool(ws_info.get("can_run_tests"))
+    require_change = any(s["kind"] == "write" for s in steps.values())
 
     status = cs.get("status", "not_started")
     halt = None
@@ -444,7 +453,7 @@ def _execute_contract(ci, uid: str, rec: dict, project_id: str, vendors: set[str
                 halt = "waiting"
             else:
                 tasks = _session_tasks(queue, uid, project_id, cs.get("session"), cs["started"])
-                info = _analyze_tasks(tasks, require_tests_after_write=require_tests)
+                info = _analyze_tasks(tasks, require_tests_after_write=require_tests, require_change=require_change)
                 verdict = "done" if info["evidence_ok"] else ("halted" if ws.is_halted(uid) else "incomplete")
                 cs = dict(cs, status=verdict, problems=info["problems"], denials=info["denials"],
                           bookkeeping_failures=info["bookkeeping_failures"],
@@ -481,7 +490,7 @@ def _execute_contract(ci, uid: str, rec: dict, project_id: str, vendors: set[str
                     cs = entry | {"status": stopped, "why": f"{turn.status}: {turn.stop_reason or ''}".strip(": ")}
                     halt = stopped
                 else:
-                    info = _analyze_tasks(tasks, require_tests_after_write=require_tests)
+                    info = _analyze_tasks(tasks, require_tests_after_write=require_tests, require_change=require_change)
                     cs = entry | {"status": "done" if info["evidence_ok"] else "incomplete",
                                   "problems": info["problems"], "denials": info["denials"],
                                   "bookkeeping_failures": info["bookkeeping_failures"]}
@@ -490,6 +499,9 @@ def _execute_contract(ci, uid: str, rec: dict, project_id: str, vendors: set[str
 
     rec["contract_state"] = cs
     evidence_ok = cs.get("status") == "done"
+    rec["_evidence_basis"] = ("tests passed after the last change (the suite, not a check of each outcome)"
+                              if require_tests else "the session finished without a failed or denied change "
+                              "(no test command, so nothing was run)")
     for sid in order:
         if (state.get(sid) or {}).get("status") in DONE:
             continue
