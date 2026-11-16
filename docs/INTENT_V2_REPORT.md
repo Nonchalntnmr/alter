@@ -119,7 +119,81 @@ happened on the development set. This is tested for 13 action phrasings
 
 ### Mission 3: is planning worth it? (paired experiment)
 
-PENDING: the run is in progress. This section will report E1–E8, the decision rule and the verdict.
+**Result: planning, as built in V2.1, is not justified. It completed less verified work, at more
+cost, latency and attention, than giving the same request to the same agent directly.**
+- Raw data and scores: `experiments/paired/`, commit `eb21b53`.
+- Completion is decided only by the hidden checks. The judge's answers are model judgement.
+
+| endpoint | A, direct | B, plan then execute | paired test |
+|---|---|---|---|
+| E1 verified completion | **16/16** [0.81, 1.00] | **9/16** [0.33, 0.77] | McNemar: A only 7, B only 0, **p = 0.016** |
+| E2 corrections, mean | 0 | 0.44 | B higher on 5 tasks, A on 0; sign test p = 0.06 |
+| E3 interventions | 53 approvals, 3 clarifications | 40 approvals, 17 plan reviews, 24 clarifications, 7 corrections | |
+| E3 modelled person time | 665 s | 2,410 s (3.6×) | B higher on 16/16 tasks, p < 0.001 |
+| E4 cost (notional) | $3.31 total, $0.20 median | $12.46 total, $0.58 median | B higher on 10 tasks, A on 6; p = 0.45 |
+| E5 latency, median | 48 s | 127 s | B slower on 14/16, p = 0.004 |
+| model calls | 112 | 230 | |
+| E6 unauthorized changes | 0 | 0 | B made 3 out-of-scope write attempts; the policy denied them |
+| E7 external actions surfaced (5) | judge: 4/5 | judge: 4/5; structural: 3/5 | |
+| E8 false completion | judge: 0 | structural: 0 | |
+| verified tasks per dollar | 4.8 | 0.72 | |
+| verified tasks per person-minute | 1.44 | 0.22 | |
+
+**Decision rule (pre-registered):** condition 1 (completion not worse by more than one task),
+condition 3 (some gain) and condition 4 (cost and attention bounded) all fail. Verdict: **"not
+justified on this evidence."**
+
+**Where B failed, and why** (read from the records):
+- **Questions instead of work.** B asked on every clear or messy task, while A asked on none of
+  them.
+  - Five tasks (p03, p08, p11, p15, p16) ended after three plans in a row asked again, even
+    after "go with your best reading". No work was done.
+  - p09 and p10 went through corrections and still failed.
+- **Planning around the wrong directory.** Several plans assumed the project lived in the CLI's
+  own sandbox directory, which the CLI tells the model about. One plan says "rename … throughout
+  the codebase in `/Users/<user>/.pcim/cli-sandbox`".
+- **False "yours to do" items.** The extractor read code identifiers and technical prose as
+  actions ("**reserve** raises…", "**Calls** that don't pass…"). p02 and p05 ended `awaiting_you`
+  with no external action pending.
+- **Never "done", even when the work was verified.**
+  - All 9 of B's verified tasks ended `incomplete` or falsely `awaiting_you`.
+  - The causes: a bookkeeping tool failing ("the claim ledger is not enabled here"), an optional
+    self-check script denied as out of scope, and the false external items.
+  - So there was no false completion, but the status was wrong every time the work succeeded.
+- **Cost.** One agent turn per step re-reads files, so B used 2× the calls of A.
+
+**p12, analysed separately.** The task was a code change plus "open a Jira ticket for the ops
+team". "Open" is not in the extractor's lexicon.
+- **B: the ticket was preserved, then silently omitted after clarification.**
+  - The first plan kept it as an outcome for the person.
+  - After the clarification answer, the recompiled plan dropped it, and nothing restored it.
+  - The final plan lists only the code outcomes, and its status is `incomplete`.
+- **A: the ticket was preserved and surfaced.** Its final message says "Still open: the Jira
+  ticket. I have no Jira tool … someone with Jira access needs to file it."
+- **Both arms' code passed the hidden check.**
+- **The judge disagrees with my reading.** The Haiku judge answered NO, for both arms, to "does
+  the response make clear the ticket was not done?". By my reading A's message does make it
+  clear. **That is the gap between model judgement and verification. The registered E7 number is
+  the judge's.**
+
+**What this does and does not show:**
+- It shows that this planning layer made execution worse on 16 small coding tasks with a fixed
+  simulated person.
+- It does not show that every form of intent compilation hurts.
+- n = 16. The direct arm's intervals overlap little with B's, but small differences in cost
+  would not be detectable.
+- **Deviation:** the first attempt lost p10–p16 to the account's 5-hour usage limit before any
+  model output. They were completed once with the frozen harness (`experiments/paired/DEVIATION.md`).
+
+**What changed because of it.** V3, on `feat/intent-v3`, keeps the intent contract and drops
+step-by-step execution:
+- the contract holds the outcomes, the preserved actions for the person, the constraints, and
+  questions only when consequential;
+- it runs in **one** governed agent session;
+- outcome success, plan completion and authorization compliance are three separate states;
+- the plan's actions for the person carry over across clarification.
+
+V3 is evaluated on new, independently written sets. Its results are in the V3 section below.
 
 **Design**, fixed in `experiments/paired/PREREGISTRATION.md` before the tasks were read:
 - 16 coding tasks, each with a hidden behavioural check, written by an agent that could not see
@@ -239,7 +313,7 @@ item (h48), plus two over-blocks that V1 made and no registered metric counts.
 
 **The claims in [CI_INTENT_MESH.md](CI_INTENT_MESH.md) §8:**
 - **H1 and H2 (intent):** met on the point estimate, as above.
-- **H3 (planning reduces corrections):** tested by Mission 3. PENDING.
+- **H3 (planning reduces corrections):** **refuted for V2.1.** Mean corrections were 0.44 with planning and 0 without, and verified completion was 9/16 against 16/16 (Mission 3).
 
 ---
 
