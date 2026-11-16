@@ -169,6 +169,22 @@ def test_a_reply_that_is_not_a_plan_is_recorded_as_invalid_not_guessed(env, tmp_
     assert rec["status"] == "invalid" and rec["spec"] is None and "did not return" in rec["error"]
 
 
+def test_invalid_json_plan_gets_one_bounded_reask(env, tmp_path):
+    ci, _ = make(tmp_path)
+    replies = ["I'd be happy to help!", json.dumps(spec())]
+
+    class TwoStep:
+        provider, model = "claude-cli", "sonnet"
+        def generate(self, prompt, max_tokens=None):
+            return ModelResponse(text=replies.pop(0), usage=Usage(1, 1), cost_usd=0.0, latency_ms=1.0,
+                                 stop_reason="end_turn", model="sonnet", provider="claude-cli")
+
+    for m in ("haiku", "sonnet", "opus"):
+        ci.set_adapter("claude-cli", m, TwoStep())
+    rec = ic.compile_intent(ci, "u", "summarise the backtests")
+    assert rec["status"] == "blocked" and rec["spec"] is not None and replies == []
+
+
 def test_plan_is_a_command_not_a_default_mode(env, tmp_path):
     ci, _ = make(tmp_path)
     with pytest.raises(ValueError, match="command"):

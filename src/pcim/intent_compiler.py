@@ -643,6 +643,15 @@ def compile_intent(ci, uid: str, text: str, *, answers: str | None = None, paren
                       project_vendors=project_vendors)
     sent_notes = [s["id"] for s in r.receipt.get("sent", []) if s.get("where") == "notes"]
     raw = parse(r.text)
+    if raw is None:
+        reask = (f"{request}\n\nYour previous reply was not a valid JSON object. "
+                 "Reply with ONE JSON object matching the plan schema and nothing else.")
+        r2 = ci.ask_routed(uid, reask, mode="plan", pinned=pinned, project_id=project_id,
+                           project_vendors=project_vendors)
+        raw2 = parse(r2.text)
+        if raw2 is not None:
+            r, raw = r2, raw2
+            sent_notes = [s["id"] for s in r.receipt.get("sent", []) if s.get("where") == "notes"]
     rec = {"id": new_id("plan"), "ts": utcnow().isoformat(), "text": text, "answers": answers, "parent": parent,
            "interaction": r.interaction_id, "served_by": r.receipt.get("route", {}).get("served_by"),
            "project_id": project_id, "context_items": sent_notes, "execution_mode": "contract",
