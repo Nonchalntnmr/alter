@@ -28,6 +28,15 @@ To provision `pytest` for running `scripts/e2e_terminal.py` or the test suite wi
 /tmp/alter-venv/bin/pip install "dist/contextual_intelligence-0.2.0rc1-py3-none-any.whl[test]"
 ```
 
+**Existing data.** If your `PCIM_HOME` was created where `sentence-transformers` was installed,
+its memory is embedded semantically. Install the `semantic` extra as well:
+
+```sh
+/tmp/alter-venv/bin/pip install "dist/contextual_intelligence-0.2.0rc1-py3-none-any.whl[semantic]"
+```
+
+Without it, `ci doctor` fails its `embedder` check, and requests stop with that instruction.
+
 ## Initialize and verify
 
 ```sh
@@ -37,8 +46,14 @@ ci --version
 ci doctor
 ```
 
-If using the `claude` CLI with identity isolation enforced (`PCIM_CLI_REQUIRE_ISOLATION=1`), probe and record the installed CLI version first:
+**The identity probe.** Isolation counts as verified only for a CLI version recorded clean in
+**this** `PCIM_HOME`, so record it once per home and again after every `claude` update. Each
+trial is one Haiku call, well under a cent.
 
 ```sh
-PYTHONPATH=src $PY -m pcim.adapters.cli_probe --trials 4 --record
+python -m pcim.adapters.cli_probe --trials 4 --record   # from the installed package; refuses to record without a positive control
+ci doctor                                                # claude_cli should now read isolation=verified
 ```
+
+Set `PCIM_CLI_REQUIRE_ISOLATION=1` for any work that must not carry your identity. Calls are
+then refused unless the probe has verified the installed CLI.

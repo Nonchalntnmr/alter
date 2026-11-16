@@ -18,12 +18,20 @@
   - `ci --version`: prints `ci 0.2.0rc1`.
   - Per-session `flock` in `Agent._lock` alongside in-process `threading.Lock`.
   - Automatic `HF_HUB_OFFLINE=1` in `SentenceEmbedder._load` when the default embedding model is already cached locally.
+- **Fixed:**
+  - **M10.** Deleting a project now deletes the `ci` requests made inside it. Their per-row keys are destroyed, in the same transaction.
+  - **Planner reply that is not JSON.** One bounded re-ask before the plan is recorded `invalid`. It addresses paired r10, and is unmeasured on unseen data. The failed first call stays on the plan record (`reask_of`), so its cost is not lost.
+  - **A store embedded semantically, opened without the `semantic` extra.** It now fails with an instruction (exit 2), not a traceback, and `ci doctor` fails an `embedder` check.
 - **Stop-all (`ci halt` / `ci resume`) and recovery:**
   - `ci halt` cancels pending/running actions and blocks model calls; `Agent.send` flushes terminal pending tasks on resume.
 
 ## Known limitations and blockers
 
 - Identity isolation is verified only for CLI `2.1.316`; the CLI refetches the account profile during calls (measured clean on 2.1.316, not guaranteed across updates); account id remains in API metadata.
-- V3 compiler quality: missed H2 (18/21) and H3 (11/23) on the V3 intent set, and 1/16 paired arms (`r10`) failed on non-JSON planner output.
-- Pre-existing `M10` on `main`: deleting a project retains `ci` requests (strict xfail).
+- **V3 compiler quality** on the V3 intent set:
+  - **H3 is missed.** It asks on 11/23 clear requests that include an outside action; the target is ≤ 0.25.
+  - **H2 is met but regressed.** 18/21: it no longer asks on 3 genuinely vague requests.
+  - Planning stays opt-in for this reason, among others: direct execution verified 16/16 against V3 planning's 14/16 on new tasks.
+- **Isolation is per `PCIM_HOME`.** A store's `cli_identity_probe.json` records which CLI versions were measured clean, so a new `PCIM_HOME` reports isolation `unverified` until a probe is recorded (RUNBOOK).
+- **A store created where `sentence-transformers` was installed needs the `semantic` extra.** Install `contextual-intelligence[semantic]`.
 - No human evaluation yet (all labellers/judges so far are models).

@@ -4,7 +4,7 @@
 
 1. Stop any running sessions with `ci halt`.
 2. Reinstall the previous package version or switch `PYTHONPATH` back to the `main` checkout (`1f9bd08`).
-3. Verify `PCIM_HOME` compatibility with `ci status` and `ci audit`.
+3. Verify the data with `main`'s commands: `ci status`, `pcim memory`, and `pcim audit` (expect `"chain_ok": true`). `main` has no `ci audit`.
 
 ## Git branch rollback
 
@@ -13,5 +13,6 @@
 
 ## Data considerations
 
-- `PCIM_HOME/pcim.db` schema is backwards-compatible with `main` (`1f9bd08`) for `ci status`, `ci audit`, and `ci twin`.
+- **Verified on 2026-11-16:** after this release had written to a store (an audit entry, a compiled plan), `main` (`1f9bd08`) still reads it with `ci status` and `pcim memory`, and `pcim audit` verifies the chain.
+- **The embedder is pinned per store and never changes on rollback.** A store embedded semantically needs `sentence-transformers` under either version.
 - Plans compiled under `0.2.0rc1` are stored in policy state (`pcim-plans`) and do not affect direct `ci ask` sessions on `main`.
