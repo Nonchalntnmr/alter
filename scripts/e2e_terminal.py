@@ -10,7 +10,7 @@ and a scripted sequence of tool calls to agent calls (read, write, run tests, fi
 switched with files in its state directory, make it sleep (to be killed mid-step) or fail like an
 API error.
 
-Checks: plan / approve / execute / approve-task / deny / --done / --retry / --cancel; restart
+Checks: ci do (direct, clarify, plan); plan / approve / execute / approve-task / deny / --done / --retry / --cancel; restart
 recovery after a killed execute; Stop-all (halt, resume); permission boundaries (a write outside the
 folder, a plan run from another project, reading outside an authorized folder); a provider failure;
 and that mesh, twin, audit and learn run and say what they document. Prints PASS/FAIL per check and
@@ -307,6 +307,35 @@ def main() -> int:
         e.mode("fail", False)
         check("a provider failure leaves the plan failed (exit 4) and retryable", r.returncode == 4
               and e.plan(pid7)["status"] in ("failed", "halted"), f"rc={r.returncode} {e.plan(pid7)['status']}")
+
+        # --- ci do: routed work in the folder (direct, clarify, plan)
+        (e.repo / "calc.py").write_text("def add(a, b):\n    return a - b\n")
+        e.script(SESSION)
+        r = e.ci("do", "fix add() in calc.py, it subtracts")
+        waiting = [ln.split()[3] for ln in r.stdout.splitlines() if "waiting for you:" in ln]
+        check("ci do routes a clear request direct and waits for approval before writing (exit 6)",
+              r.returncode == 6 and "─ direct:" in r.stdout and waiting and "a - b" in (e.repo / "calc.py").read_text(),
+              f"rc={r.returncode} {r.stdout[-300:]} {r.stderr[-300:]}")
+        for _ in range(4):
+            if not waiting:
+                break
+            r = e.ci("approve", waiting[0])
+            waiting = [ln.split()[3] for ln in r.stdout.splitlines() if "waiting for you:" in ln]
+        check("ci approve continues the ci do session to the end; the fix is written",
+              (e.repo / "calc.py").read_text() == FIX and "Fixed add()" in r.stdout, r.stdout[-300:] + r.stderr[-300:])
+        e.script(SESSION)
+        r = e.ci("do", "redo the cleanup we talked about")
+        check("ci do asks first, without a model call, when the request rests on what CI was not given",
+              r.returncode == 6 and "ci do answer" in r.stdout and not (e.state / "n").exists(),
+              f"rc={r.returncode} {r.stdout[-300:]}")
+        before = (e.repo / "calc.py").read_text()
+        r = e.ci("do", "remove all the unused helpers from calc.py")
+        check("ci do shows a plan for a broad removal and changes nothing",
+              r.returncode in (0, 6) and "─ plan:" in r.stdout and (e.repo / "calc.py").read_text() == before
+              and not (e.state / "n").exists(), f"rc={r.returncode} {r.stdout[-300:]} {r.stderr[-300:]}")
+        r = e.ci("do", "list")
+        check("ci do list shows each request with its route", r.returncode == 0 and
+              all(w in r.stdout for w in ("direct", "clarify", "plan")), r.stdout[-400:])
 
         # --- the other commands
         r = e.ci("mesh")

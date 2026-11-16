@@ -24,7 +24,10 @@
     ci execute <plan> [--done ID] [--retry contract|STEP] [--cancel]
                                                               run an approved plan in one governed agent session,
                                                               its steps as the checklist (inside its project folder)
-    ci approve <task> · ci deny <task> ["why"]                resolve an action a plan step is waiting on
+    ci do "fix the flaky date test"                           work in this project folder: CI routes it
+                                                              (direct, clarify or plan) and says why
+    ci do answer <id> "…" · ci do list [--json]               answer its question, or continue the session
+    ci approve <task> · ci deny <task> ["why"]                resolve an action the agent is waiting on
     ci halt · ci resume                                       Stop-all: cancel every pending or running action
     ci learn "…"                                              same as ci -l
     ci twin                                                   the Cognitive Twin's picture, labelled by evidence
@@ -61,7 +64,7 @@ from .workspace import Workspace
 
 SUBCOMMANDS = ("ask", "route", "mode", "prefer", "models", "outcome", "practice", "skills", "scorecard",
                "weekly", "status", "challenge", "plan", "mesh", "twin", "audit", "learn", "execute", "approve", "deny", "halt",
-               "resume", "help")
+               "resume", "help", "do", "doctor")
 # Explicit words only: "…should I say yes" is a question, not a recorded correct attempt.
 RIGHT = {"right", "correct"}
 WRONG = {"wrong", "incorrect"}
@@ -808,12 +811,159 @@ def cmd_approve(argv: list[str], approve: bool = True) -> int:
         return 2
     d = out.as_dict() if hasattr(out, "as_dict") else out
     if "status" in d:
-        print(terminal_safe(f"{'Approved' if approve else 'Denied'}. Session {d['status']}" + (f": {d['text'][:300]}" if d.get("text") else "")))
+        print(f"{'Approved' if approve else 'Denied'}. Session {d['status']}.")
+        if not pid:  # a plan's turn is reported by `ci execute`; a `ci do` session is reported here
+            _print_turn(out)
+        elif d.get("text"):
+            print(terminal_safe(d["text"][:300]))
     else:
         print(f"{'Approved' if approve else 'Denied'}: task {d['task']['status']}")
     if pid:
         print(f"Plan {pid}: run `ci execute {pid}` to record the step and continue.")
     return 0
+
+
+DO_STATE = "pcim-do"
+# "ci do you think …", "ci do we have …": a yes/no question, not work to do
+_QUESTION_SUBJECTS = frozenset({"i", "you", "u", "we", "they", "he", "she"})
+DO_LOG_MAX = 200
+
+
+def _do_log(ci, uid: str) -> tuple[int | None, list]:
+    return ci._state_json(uid, DO_STATE, [])
+
+
+def _do_save(ci, uid: str, rec: dict) -> None:
+    version, log = _do_log(ci, uid)
+    log = [r for r in log if r["id"] != rec["id"]] + [rec]
+    blob = json.dumps(log[-DO_LOG_MAX:]).encode()
+    if version is None:
+        ci.store.save_policy_state(uid, DO_STATE, blob, note="ci do: routed requests")
+    else:
+        ci.store.overwrite_policy_state(uid, DO_STATE, version, blob)
+
+
+def _print_turn(turn) -> None:
+    """An agent turn: its text, then every action waiting on the person, with the commands for it."""
+    d = turn.as_dict() if hasattr(turn, "as_dict") else turn
+    if d.get("text"):
+        print(terminal_safe(d["text"].rstrip()))
+    by_id = {t.get("id"): t for t in d.get("tasks") or []}
+    for tid in d.get("pending") or []:
+        t = by_id.get(tid, {})
+        args = t.get("args") or {}
+        what = args.get("path") or " ".join(str(x) for x in (args.get("argv") or [])) or ""
+        print(terminal_safe(f"  waiting for you: {tid}  {t.get('tool', '?')} {what}".rstrip()))
+    if d.get("pending"):
+        print("  approve with: ci approve <task>   ·   refuse with: ci deny <task> \"why\"")
+
+
+def _do_act(ci, uid: str, here, rec: dict, r, text: str, model: str | None) -> int:
+    """Carry out a route: ask, plan, or hand the request to the governed agent."""
+    from . import intent_compiler as ic
+    from . import plan_exec as px
+    from .router import CLARIFY, PLAN
+    rec["route"] = r.as_dict()
+    ci.audit.append(uid, "do.route", request=rec["id"], decision=r.decision, project=here.project_id,
+                    answered=bool(rec.get("answers")))
+    if r.decision == CLARIFY:
+        rec["status"] = "needs_answer"
+        _do_save(ci, uid, rec)
+        print(terminal_safe(r.question or "What should the result be?"))
+        print(f"─ clarify: {terminal_safe('; '.join(r.reasons))}")
+        print(f'  answer with: ci do answer {rec["id"]} "…"')
+        return 6
+    if r.decision == PLAN:
+        plan = ic.compile_intent(ci, uid, rec["text"], answers=rec.get("answers"), pinned=model,
+                                 project_id=here.project_id, project_vendors=here.vendors)
+        rec["status"], rec["plan_id"] = "planned", plan["id"]
+        _do_save(ci, uid, rec)
+        print(terminal_safe(ic.render(plan)))
+        print(f"─ plan: {terminal_safe('; '.join(r.reasons))}")
+        return 0 if plan["status"] in ("ready", "awaiting_approval") else 6 if plan["status"] == "needs_answers" else 1
+    prov, _, mdl = (model or rec.get("model") or "").partition(":")
+    try:
+        prov, mdl = px._model(here.vendors, prov or None, mdl or None)
+        turn = _workspace_agent(ci).send(uid, here.project_id, text, prov, mdl, new_session=not rec.get("session_id"))
+    except (px.ExecError, RuntimeError, ValueError, PermissionError) as e:
+        _do_save(ci, uid, rec)
+        print(terminal_safe(f"Not run: {e}"), file=sys.stderr)
+        return 2
+    rec["status"], rec["session_id"] = turn.status, turn.session_id
+    _do_save(ci, uid, rec)
+    _print_turn(turn)
+    print()
+    print(f"─ direct: {terminal_safe('; '.join(r.reasons))}")
+    if r.yours:
+        print("  yours to do (CI cannot act outside the computer): " + terminal_safe("; ".join(r.yours)))
+    print(f'  continue with: ci do answer {rec["id"]} "…"')
+    return 0 if turn.status == "done" else 6 if turn.status == "awaiting_approval" else 4
+
+
+def cmd_do(argv: list[str]) -> int:
+    from .router import DIRECT, PLAN, Route, route
+    from .types import new_id, utcnow
+    if not argv or argv[0] in ("-h", "--help"):
+        print('usage: ci do "<request>" [--route direct|plan] [--model provider:model] [--explain]\n'
+              '       ci do answer <id> "<answer>"\n       ci do list [--json]', file=sys.stderr)
+        return 2
+    if argv[0].lower() in _QUESTION_SUBJECTS and len(argv) > 1:  # "ci do you think …" is a question
+        return cmd_ask(["do", *argv])
+    ci, uid = _open()
+    if argv[0] == "list":
+        log = _do_log(ci, uid)[1]
+        if "--json" in argv:
+            _print_json(log)
+        for r in log[-20:]:
+            print(terminal_safe(f"{r['id']}  {r['route']['decision']:7} {r['status']:17} {r['text'][:60]}"))
+        return 0
+    try:
+        here = _here(ci, uid)
+    except AmbiguousWorkspace as e:
+        print(f"Not run: {e}", file=sys.stderr)
+        return 2
+    if here is None:
+        print("Run this inside a directory a project has authorized: `ci do` works on that folder only. "
+              "For a question with no folder, use ci \"…\".", file=sys.stderr)
+        return 2
+    if argv[0] == "answer":
+        if len(argv) < 3:
+            print('usage: ci do answer <id> "<answer>"', file=sys.stderr)
+            return 2
+        log = _do_log(ci, uid)[1]
+        rec = next((r for r in log if r["id"] == argv[1] or r["id"].endswith(argv[1])), None)
+        if rec is None:
+            print(f"no request {argv[1]}", file=sys.stderr)
+            return 2
+        if rec["project_id"] != here.project_id:
+            print("that request belongs to another project folder", file=sys.stderr)
+            return 2
+        answer = " ".join(" ".join(argv[2:]).split())
+        if rec.get("session_id"):  # a running conversation with the agent: the answer is the next message
+            return _do_act(ci, uid, here, rec, Route(**rec["route"]), answer, None)
+        if rec["status"] != "needs_answer":
+            print(f"{rec['id']} is {rec['status']}; see ci plan show {rec.get('plan_id')}", file=sys.stderr)
+            return 2
+        rec["answers"] = answer
+        r = route(rec["text"], answered=True, answers=answer)
+        return _do_act(ci, uid, here, rec, r, f"{rec['text']}\n\nAnswer to your question: {answer}", None)
+    ap = argparse.ArgumentParser(prog="ci do")
+    ap.add_argument("--route", choices=(DIRECT, PLAN), help="override the routing decision")
+    ap.add_argument("--model", help="pin provider:model for the agent")
+    ap.add_argument("--explain", action="store_true", help="print the signals behind the routing decision")
+    ap.add_argument("request", nargs="+")
+    a = ap.parse_args(argv)
+    text = " ".join(" ".join(a.request).split())
+    r = route(text)
+    if a.route and a.route != r.decision:
+        r = Route(a.route, [f"you chose {a.route} (CI would have chosen {r.decision})"], None, r.yours, r.signals)
+    if a.explain:
+        from .router import MEASURED
+        _print_json({"decision": r.decision, "reasons": r.reasons, "signals": r.signals, "measured": MEASURED})
+    rec = {"id": new_id("do"), "ts": utcnow().isoformat(), "text": text, "project_id": here.project_id,
+           "answers": None, "status": "new", "session_id": None, "plan_id": None, "route": r.as_dict(),
+           "model": a.model}
+    return _do_act(ci, uid, here, rec, r, text, a.model)
 
 
 def cmd_halt(argv: list[str]) -> int:
@@ -962,7 +1112,7 @@ def main(argv: list[str] | None = None) -> int:
              "weekly": cmd_weekly, "status": cmd_status, "challenge": cmd_challenge, "plan": cmd_plan,
              "mesh": cmd_mesh, "twin": cmd_twin, "audit": cmd_audit, "learn": cmd_learn,
              "execute": cmd_execute, "approve": cmd_approve, "deny": cmd_deny, "halt": cmd_halt,
-             "resume": cmd_resume, "doctor": cmd_doctor}
+             "resume": cmd_resume, "doctor": cmd_doctor, "do": cmd_do}
     from .embed import EmbedderUnavailable
     try:
         if cmd in table:

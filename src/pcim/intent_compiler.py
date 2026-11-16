@@ -479,8 +479,10 @@ def validate(d: dict, sent_notes: list[str], request: str | None = None, answers
     assumptions = []
     for a in d.get("assumptions") or []:
         if isinstance(a, dict) and _str(a.get("text")):
+            about = [_str(x, 20) for x in (a.get("about") or []) if isinstance(x, (str, int)) and _str(x, 20)]
             assumptions.append({"text": _str(a["text"]), "confidence": _clip01(a.get("confidence")),
-                                "consequential": bool(a.get("consequential"))})
+                                "consequential": bool(a.get("consequential")),
+                                "about": [x for x in about if x in outcome_ids or x.startswith("oS")]})
     spec = {
         "goal": goal,
         "interpretations": interps[:5],
@@ -529,6 +531,9 @@ class Gate:
     auto_resolved: list[str]
     yours_to_do: list[str]
     needs_approval: list[str]
+    # V3.3: open details of the person's own actions. They are shown with "yours to do", and are
+    # never a reason to ask, because only the person acts on them.
+    for_your_part: list[str] = dataclasses.field(default_factory=list)
 
     def as_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -565,8 +570,30 @@ def gate(spec: dict, request: str | None = None, *, after_answer: bool = False) 
             questions.append("Did you mean: " + " — or — ".join(i["goal"] for i in interps[:3]) + "?")
     risky = [a for a in spec.get("assumptions", []) if a["consequential"]
              and (a["confidence"] is None or a["confidence"] < ASSUMPTION_MIN_CONF)]
+    # V3.3 (held-out v2, H3): an assumption that touches only outcomes the person carries out
+    # themselves is theirs to settle when they act, not a reason for CI to ask. It must name those
+    # outcomes (`about`); an assumption that names none, or names any outcome CI carries out,
+    # still asks.
+    mine = {o["id"] for o in spec["outcomes"] if o.get("by") == "you"}
+    theirs = [a for a in risky if a.get("about") and set(a["about"]) <= mine]
+    risky = [a for a in risky if a not in theirs]
     if defer_to_assumed:
         risky = []
+    # V3.3 (held-out v2, H2): on a first compile, a request that rests on context CI was not given,
+    # has a placeholder for its object, or asks for nothing specific is asked about, however sure
+    # the model's reading is. The same signals route `ci do` (router.py).
+    if request and not after_answer:
+        from .router import signals as _signals
+        sig = _signals(request)
+        if sig["dangling_reference"]:
+            reasons.append(f"refers to something CI was not given: “{sig['dangling_reference']}”")
+            questions.insert(0, f"You mentioned “{sig['dangling_reference']}”: what is it, or which file has it?")
+        elif sig["no_task"]:
+            reasons.append("there is nothing specific to do yet")
+            questions.insert(0, "What would you like done? Name the file, the change, or the result you want.")
+        elif sig["placeholder"]:
+            reasons.append(f"a placeholder stands where the object should be: “{sig['placeholder']}”")
+            questions.insert(0, f"What do you mean by “{sig['placeholder']}”?")
     for a in risky:
         reasons.append(f"consequential assumption at confidence "
                        f"{'unknown' if a['confidence'] is None else format(a['confidence'], '.2f')}: {a['text']}")
@@ -580,14 +607,15 @@ def gate(spec: dict, request: str | None = None, *, after_answer: bool = False) 
         reasons.append("the plan has no steps")
         if not questions:
             questions.append("What should the result be?")
-    auto = [a["text"] for a in spec.get("assumptions", []) if a not in risky]
+    auto = [a["text"] for a in spec.get("assumptions", []) if a not in risky and a not in theirs]
+    for_yours = [a["text"] for a in theirs]
     yours = [f"{o['id']}: {o['text']}" + (" (restored from your request)" if o.get("restored") else "")
              for o in spec["outcomes"] if o.get("by") == "you"]
     approval = [f"{s['id']}: {s['action']}" for s in spec.get("steps", []) if s["kind"] in CONSEQUENTIAL_KINDS]
     if reasons:
-        return Gate("clarify", reasons, questions[:6], auto, yours, approval)
+        return Gate("clarify", reasons, questions[:6], auto, yours, approval, for_yours)
     if spec["missing_permissions"]:
-        return Gate("blocked", list(spec["missing_permissions"]), [], auto, yours, approval)
+        return Gate("blocked", list(spec["missing_permissions"]), [], auto, yours, approval, for_yours)
     if approval or yours or any(o["kind"] == "destructive_change" for o in spec["outcomes"]):
         why = []
         if approval:
@@ -597,8 +625,8 @@ def gate(spec: dict, request: str | None = None, *, after_answer: bool = False) 
                        "submit, deploy, contact) and are yours to complete")
         if any(o["kind"] == "destructive_change" for o in spec["outcomes"]):
             why.append("the request deletes, overwrites or resets something")
-        return Gate("approval", why, [], auto, yours, approval)
-    return Gate("ready", ["only thinking and reading"], [], auto, yours, approval)
+        return Gate("approval", why, [], auto, yours, approval, for_yours)
+    return Gate("ready", ["only thinking and reading"], [], auto, yours, approval, for_yours)
 
 
 # ---------------------------------------------------------------------- records
@@ -759,6 +787,9 @@ def render(rec: dict) -> str:
     if g["yours_to_do"]:
         L.append("Yours to complete (the plan is not done until you mark them):\n"
                  + "\n".join(f"  - {x}" for x in g["yours_to_do"]))
+    if g.get("for_your_part"):
+        L.append("Check when you do your part (CI assumed these, and did not ask):\n"
+                 + "\n".join(f"  - {x}" for x in g["for_your_part"]))
     if g["decision"] in ("ready", "approval") and rec["status"] != "approved":
         L.append(f"Approve with: ci plan approve {rec['id']}")
     return "\n".join(L)
