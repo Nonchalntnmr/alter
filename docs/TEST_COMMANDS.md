@@ -168,3 +168,39 @@ $PY scripts/eval_v3_paired.py score
 Re-scoring from the committed raw files needs the sets. They are released into
 `experiments/eval_v3/` after scoring. Copy them back to `~/projects/ci-sealed/` first; the hash
 check guarantees they are the same sets.
+
+## 8. rc2 (`release/alter-0.2.0rc2`)
+
+Run from `~/projects/alter-rc2`, with `PY=~/projects/contextual-intelligence/.venv/bin/python`
+and `export HF_HUB_OFFLINE=1`.
+
+```sh
+# the suite and the end-to-end check, no model calls
+PYTHONPATH=src $PY -m pytest -q -p no:cacheprovider tests    # see READINESS.md §1 for the count
+PYTHONPATH=src $PY scripts/e2e_terminal.py                    # expected: 37 of 37 checks passed
+
+# identifiers: the final diff, then every commit, message and blob new to the branch
+PYTHONPATH=src $PY scripts/scan_identity.py
+PYTHONPATH=src $PY scripts/scan_identity.py --history [--head <branch>]
+
+# the history rewrite, rehearsed on a mirror; the real repository is untouched (HISTORY_REWRITE.md)
+FILTER_REPO=<path to git-filter-repo> PYTHONPATH=src $PY scripts/rewrite_history.py plan
+FILTER_REPO=<path to git-filter-repo> PYTHONPATH=src $PY scripts/rewrite_history.py dry-run --work /tmp/ci-rewrite
+FILTER_REPO=<path to git-filter-repo> PYTHONPATH=src $PY -m pytest -q tests/test_rewrite_history.py   # 3 tests; skipped without filter-repo
+
+# what leaves the machine on a claude CLI call (3 Haiku calls, well under a cent)
+PYTHONPATH=src $PY scripts/audit_egress.py --out /tmp/egress.json
+
+# the rc2 evaluation (live; pre-registered in experiments/eval_v4/)
+export PCIM_CLI_REQUIRE_ISOLATION=1
+PYTHONPATH=~/projects/alter-rc/src  $PY scripts/eval_v4_intent.py run v32
+PYTHONPATH=~/projects/alter-rc2/src $PY scripts/eval_v4_intent.py run v33
+PYTHONPATH=~/projects/alter-rc2/src $PY scripts/eval_v4_intent.py score
+PYTHONPATH=~/projects/alter-rc2/src $PY scripts/eval_v4_paired.py run A,R
+PYTHONPATH=~/projects/alter-rc2/src $PY scripts/eval_v4_paired.py judge
+PYTHONPATH=~/projects/alter-rc2/src $PY scripts/eval_v4_paired.py score
+
+# the human evaluation's tooling (people do every judgement; docs/release/HUMAN_EVAL.md)
+$PY scripts/human_eval.py assign --participants 12 --tasks t1,t2,t3,t4,t5,t6,t7,t8 --seed <S> --out <dir>
+$PY -m pytest -q tests/test_human_eval.py
+```
