@@ -1,0 +1,15 @@
+frozen_at_utc=2026-11-16T21:58:28Z  (before either set is read)
+intent_set_sha256=9461ee612110d9b0ec9caeeb6c92241ae7bd8a6b9b8d0d4218bf28c5b535bd2c  (~/projects/ci-sealed/v4/intent_heldout_v3.json)
+paired_set_sha256=523eb1c69458b603a2b84c7270837ca198946857dd46c5b20a2f03914a137bf8  (~/projects/ci-sealed/v4/paired_v3/tasks.json)
+references_sha256=3df650ac5158b0d00659fa003079af248dd8998dede0cd0f47fefa72be8ec6c6  (paired_v3/references.json; the harness never reads it)
+validation_sha256=e71aca8347688309e6cffa021b7df137704e5155f5d7c80d987e72879c141bef  (paired_v3/validation.json: 16/16 rows, every check true, per the writer)
+rubric_sha256=e301504c53311030f38b77d862fac440abe86e8d47521dba36fb997bc20a7272
+prereg_sha256=9263339882581a6bc3d1b31b623ee57eab1a595278868164da41ac982c393700
+intent_harness_sha256=12431e9c58c20e51a75eafbb6942a06d9deecf6e66c692ba6ce17b75f63c189c
+paired_harness_sha256=6781ccb4f3d32c650dd79db93b4f5199fbe04121c8f61c8f8f539458ab401886
+code_v32=dd3dcda  (0.2.0rc1: V3.2 compiler)
+tree_v32=~/projects/alter-rc
+code_v33=a46b960  (rc2: V3.3 gate, router.py, ci do)
+tree_v33=~/projects/alter-rc2
+cli_version=2.1.316  (isolation recorded clean in ~/.pcim on 2026-11-16T03:17:18Z)
+writer_aggregates=intent routes 25 direct / 21 clarify / 4 plan; must_clarify 23 true / 21 false / 6 null  (reported by the writer after the code froze at a46b960)
