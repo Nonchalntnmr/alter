@@ -1,0 +1,12 @@
+frozen_at_utc=2026-11-16T03:31:03Z  (before either set is read)
+intent_set_sha256=beb01a64fafbecdb858822ec5b27026c4126c2c958a18a99556fb3eb2b6be802  (~/projects/ci-sealed/intent_heldout_v2.json)
+paired_set_sha256=9ae7c3124bdb61e884e21902831c378f2289c629adcf616f380878c474bb9a70  (~/projects/ci-sealed/paired_v2/tasks.json)
+rubric_sha256=81a8d4ce2999db77dc8bc4e5ea6a198d8968c617baa2b8791d9124e3ff245907
+prereg_sha256=d1feb0548693bf7299e0cd8ed53f44abbe59595f8dd6486145d689a6b4ee386f
+intent_harness_sha256=c7eee31a5fb1b77dbd7ed900470191f771b3fba53190d58dbc3adb06419ff251
+paired_harness_sha256=da802453055d1d190e22787fe0b2cb77a943662cd23f0332a9009a125ddf9e4e
+code_v3=9efe636  (V3: compiler, contract execution, agent fixes, review fixes, the identity-isolated adapter)
+tree_v3=~/projects/ci-intent-v3
+code_v21=53306b3  (V2.1+: a9ddcfa with sec/cli-identity 0f68403 merged)
+tree_v21=~/projects/ci-v21-isolated
+cli_version=2.1.316  (identity isolation recorded clean 2026-11-16T03:17:18Z; every call refuses unless verified)

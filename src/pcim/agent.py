@@ -231,7 +231,14 @@ class Agent:
         with self._lock(sid):
             st = self._load(user_id, project_id, sid)  # again under the lock: a concurrent turn may have advanced it
             if st["pending"]:
-                raise RuntimeError("this session is waiting on an approval; approve or deny it first")
+                p = st["pending"]
+                tasks = {tu: self.queue.get(user_id, tid) for tu, tid in p["tasks"].items()}
+                if any(x.status not in TERMINAL and x.status != "succeeded" for x in tasks.values()):
+                    raise RuntimeError("this session is waiting on an approval; approve or deny it first")
+                results = dict(p["results"])
+                results.update({tu: self._result_block(x) for tu, x in tasks.items()})
+                st["messages"].append({"role": "user", "content": [results[tu] for tu in p["order"]]})
+                st["pending"] = None
             ad = self.adapter(provider, model)
             parts = []
             disclosure = {"at": utcnow().isoformat(), "session": sid, "provider": provider, "vendor": vendor,
@@ -310,6 +317,21 @@ class Agent:
         return {"type": "tool_result", "tool_use_id": t.tool_use_id, "is_error": True,
                 "content": f"{t.status}: {(t.reason or '')[:1900]} [{t.id}]"}
 
+    def _tools(self, user_id: str, project_id: str) -> list[dict]:
+        """Tools enabled for this project and ledger configuration."""
+        disabled = set()
+        if self.ledger is None:
+            disabled.add("record_claim")
+        ws_info = self.ws.briefing(user_id, project_id).get("workspace")
+        if ws_info is None:
+            disabled.update(("read_file", "list_files", "search_code", "git_status", "write_file", "run_tests"))
+        else:
+            if not ws_info.get("can_write"):
+                disabled.add("write_file")
+            if not ws_info.get("can_run_tests"):
+                disabled.add("run_tests")
+        return [t for t in TOOLS if t["name"] not in disabled]
+
     def _run(self, user_id: str, project_id: str, sid: str, st: dict) -> AgentTurn:
         ad = self.adapter(st["provider"], st["model"])
         touched: list[str] = []
@@ -327,7 +349,7 @@ class Agent:
             if why:
                 return self._stop(user_id, project_id, sid, st, touched, turn, "stopped", why, _STOP_NOTES[why])
             try:
-                step = ad.agent_step(st["system"], st["messages"], TOOLS)
+                step = ad.agent_step(st["system"], st["messages"], self._tools(user_id, project_id))
             except Exception as e:  # recorded and re-raised, never swallowed; the transcript so far is saved
                 self.audit.append(user_id, "model.error", project=project_id, session=sid, provider=st["provider"],
                                   error=type(e).__name__)

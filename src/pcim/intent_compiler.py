@@ -139,6 +139,18 @@ def _osa(a: str, b: str) -> int:
     return d[len(a)][len(b)]
 
 
+# A clause-initial word followed by a finite verb is a subject ("reserve raises OutOfStock", "email is the
+# best way"), not an imperative. Relative words ("that", "when") mark a subject only after an inflected
+# word ("Calls that don't pass…"): after a base-form verb they are its object ("send that to priya",
+# "post that", "send when ready"), and skipping those would drop a real request.
+_FINITE_FOLLOW = re.compile(
+    r"^(?:raises|returns|is|are|was|were|has|have|had|does|doesn't|doesnt|do|don't|dont|can|can't|cant|could|"
+    r"should|must|will|won't|wont|would|may|might|takes|accepts|needs|requires|"
+    r"fails|succeeds|throws|yields|gives|checks|validates|handles)\b", re.I)
+_RELATIVE_FOLLOW = re.compile(r"^(?:that|which|who|whose|when|where)\b", re.I)
+_NOUN_PREP_FOLLOW = re.compile(r"^(?:from|of|in|on|at|by|for|with|about|between|into|onto|without)\b", re.I)
+
+
 def _verb(word: str) -> tuple[str, str] | None:
     """(kind, lemma) for a clause-initial word, tolerating inflection and one-edit typos."""
     w = word.lower().strip("'\"`*_-")
@@ -170,6 +182,16 @@ def requested_actions(text: str) -> list[dict]:
         if not c or _INFORMATIONAL.match(c):
             continue
         first, _, rest = c.partition(" ")
+        r = rest.strip()
+        fl = first.lower().strip("'\"`*_-")
+        if "`" in first or "(" in first or r.startswith("(") or _FINITE_FOLLOW.match(r):
+            continue
+        if _RELATIVE_FOLLOW.match(r) and fl.endswith("s") and fl not in ACTION_VERBS and fl not in DESTRUCTIVE_VERBS:
+            continue
+        if fl.endswith("ing") and len(fl) > 5:
+            continue
+        if fl.endswith(("s", "es")) and _NOUN_PREP_FOLLOW.match(r):
+            continue
         hit = _verb(first)
         other = _OTHER_SENSE.get(first.lower())
         if hit and other and other.search(rest):
@@ -247,14 +269,41 @@ def _matches(outcome: dict, action: dict) -> bool:
     return any((_verb(w) or (None, None))[1] == action["lemma"] for w in words)
 
 
-def preserve(spec: dict, request: str | None) -> dict:
-    """Make every action the request asks for an outcome of the plan. Idempotent."""
+_NEGATOR = re.compile(r"\b(?:don'?t|do not|no need to|not going to|skip|never ?mind|forget about|forget|hold off on|"
+                      r"hold off|not)\s+((?:[\w'-]+\s+){0,3}[\w'-]+)", re.I)
+
+
+def withdrawn_lemmas(answers: str | None) -> set[str]:
+    """Action lemmas the person's answer explicitly takes back: an action verb (or its noun, "the email")
+    within four words after a negation ("don't send it", "skip the email", "no need to post"). Nothing
+    looser counts, so an answer like "don't include the appendix" withdraws nothing."""
+    out = set()
+    for m in _NEGATOR.finditer(answers or ""):
+        for w in re.findall(r"[a-z][a-z'-]*", m.group(1).lower()):
+            hit = _verb(w)
+            if hit:
+                out.add(hit[1])
+    return out
+
+
+def _record_withdrawn(spec: dict, text: str, answers: str) -> None:
+    spec.setdefault("withdrawn", []).append({"text": text[:200], "because": answers[:200]})
+    spec["flags"].append(f"withdrawn by your answer, so CI does not list it: \"{text[:80]}\"")
+
+
+def preserve(spec: dict, request: str | None, answers: str | None = None) -> dict:
+    """Make every action the request asks for an outcome of the plan, unless the person's answer
+    explicitly took it back; a withdrawal is recorded in spec["withdrawn"], never silent. Idempotent."""
     if not request or spec.get("_preserved_for") == request:
         return spec
     asked = requested_actions(request)
     spec["requested_actions"] = asked
+    taken_back = withdrawn_lemmas(answers)
     for a in asked:
         if any(_matches(o, a) for o in spec["outcomes"]):
+            continue
+        if a["lemma"] in taken_back:
+            _record_withdrawn(spec, a["clause"], answers or "")
             continue
         oid = f"oR{sum(1 for o in spec['outcomes'] if o.get('restored')) + 1}"
         spec["outcomes"].append({"id": oid, "text": a["clause"], "kind": a["kind"], "quote": a["clause"],
@@ -264,6 +313,80 @@ def preserve(spec: dict, request: str | None) -> dict:
     _annotate_outcomes(spec)
     spec["_preserved_for"] = request
     return spec
+
+
+_STOP = frozenset({"the", "and", "for", "with", "that", "this", "from", "into", "about", "your", "some", "also"})
+
+
+def _content_words(text: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z0-9]{4,}", (text or "").lower()) if w not in _STOP}
+
+
+def _head_lemma(text: str) -> str | None:
+    """The first action verb in an outcome's text: the action it stands for."""
+    for w in re.findall(r"[a-z][a-z'-]*", (text or "").lower()):
+        hit = _verb(w)
+        if hit:
+            return hit[1]
+    return None
+
+
+def _outcome_matches_parent(outcome: dict, parent_outcome: dict) -> bool:
+    """Does a new outcome stand for the parent's action? Same kind and the same action verb; sharing a
+    word is not enough ("post the report" does not stand for "email the report")."""
+    if outcome.get("kind") != parent_outcome.get("kind"):
+        return False
+    head = _head_lemma(parent_outcome.get("text", ""))
+    words = re.findall(r"[a-z][a-z'-]*", (outcome.get("text", "") + " " + outcome.get("quote", "")).lower())
+    if head:
+        return any((_verb(w) or (None, None))[1] == head for w in words)
+    pw = _content_words(parent_outcome.get("text", "") + " " + parent_outcome.get("quote", ""))
+    return len(pw & _content_words(" ".join(words))) >= 2
+
+
+def _withdrawn(parent_outcome: dict, answers: str | None) -> bool:
+    """Only an explicit negation of the parent's action withdraws it:
+    - an action with a known verb: that verb (or its noun) negated ("don't send it", "skip the email");
+    - otherwise ("create a Jira ticket"): the negated phrase must contain the action's first content
+      word and at least one more of its words ("don't create the Jira ticket"). "Don't mention the
+      flaky test" does not withdraw "create a Jira ticket for the flaky test"."""
+    text = parent_outcome.get("text", "")
+    head = _head_lemma(text)
+    if head:
+        return head in withdrawn_lemmas(answers)
+    order = [w for w in re.findall(r"[a-z0-9]{4,}", text.lower()) if w not in _STOP]
+    if not order:
+        return False
+    first, rest = order[0], set(order[1:])
+    for m in _NEGATOR.finditer(answers or ""):
+        span = set(re.findall(r"[a-z0-9]{4,}", m.group(1).lower()))
+        if first in span and span & rest:
+            return True
+    return False
+
+
+def _preserve_parent(spec: dict, parent_spec: dict | None, answers: str | None) -> None:
+    """Carry over external_action and destructive_change outcomes from the parent plan unless
+    explicitly withdrawn in `answers`."""
+    if not parent_spec:
+        return
+    restored = False
+    for po in parent_spec.get("outcomes") or []:
+        if po.get("kind") not in ("external_action", "destructive_change"):
+            continue
+        if any(_outcome_matches_parent(o, po) for o in spec["outcomes"]):
+            continue
+        if _withdrawn(po, answers):
+            _record_withdrawn(spec, po.get("text", ""), answers or "")
+            continue
+        oid = f"oR{sum(1 for o in spec['outcomes'] if o.get('restored')) + 1}"
+        spec["outcomes"].append({"id": oid, "text": po["text"], "kind": po["kind"],
+                                 "quote": po.get("quote", ""), "done_when": po.get("done_when", ""),
+                                 "restored": True, "from_parent": True})
+        spec["flags"].append(f"intent preserved from parent plan: \"{po['text'][:80]}\" ({oid})")
+        restored = True
+    if restored:
+        _annotate_outcomes(spec)
 
 
 def _annotate_outcomes(spec: dict) -> None:
@@ -285,7 +408,7 @@ def _annotate_outcomes(spec: dict) -> None:
     spec["unsupported"] = unsupported
 
 
-def validate(d: dict, sent_notes: list[str], request: str | None = None) -> dict:
+def validate(d: dict, sent_notes: list[str], request: str | None = None, answers: str | None = None) -> dict:
     """Normalize the model's object into a TaskSpec. `sent_notes` = ids of the notes the model saw,
     in the order they were numbered. With `request`, intent preservation runs too. Raises
     SpecError if the object is not a usable plan."""
@@ -377,7 +500,7 @@ def validate(d: dict, sent_notes: list[str], request: str | None = None) -> dict
     spec["levels"] = topo_levels(steps) if steps else []
     _annotate_outcomes(spec)
     if request:
-        preserve(spec, request)
+        preserve(spec, request, answers)
     return spec
 
 
@@ -411,7 +534,7 @@ class Gate:
         return dataclasses.asdict(self)
 
 
-def gate(spec: dict, request: str | None = None) -> Gate:
+def gate(spec: dict, request: str | None = None, *, after_answer: bool = False) -> Gate:
     spec.setdefault("outcomes", [])
     spec.setdefault("flags", [])
     spec.setdefault("conflicts", [])
@@ -419,19 +542,31 @@ def gate(spec: dict, request: str | None = None) -> Gate:
     if request:
         preserve(spec, request)
     reasons, questions = [], list(spec.get("questions") or [])
+    # After an answer, low-stakes ambiguity stays open only for consequences CI itself would carry out, or
+    # when the request is nothing but the person's own action (who to email, what to post): then there is no
+    # CI work to get on with. An action that is the person's, beside CI work, is never performed by CI and
+    # already keeps the plan from being ready; asking again about the code is what loops (paired v1, p10/p11).
+    ci_work = any(o.get("by") != "you" and o["kind"] == "deliverable" for o in spec["outcomes"])
+    has_consequential_outcome = any(o["kind"] in ("external_action", "destructive_change")
+                                    and (o.get("by") != "you" or not ci_work) for o in spec["outcomes"])
+    defer_to_assumed = after_answer and not has_consequential_outcome and not spec["conflicts"] and bool(
+        spec.get("steps") or spec["outcomes"])
     interps = spec.get("interpretations") or []
     top = interps[0]["p"] if interps and interps[0]["p"] is not None else None
     second = interps[1]["p"] if len(interps) > 1 and interps[1]["p"] is not None else 0.0
-    if top is None and len(interps) > 1:
-        reasons.append("several readings of the request, none with a probability")
-    elif top is not None and top < GOAL_MIN_P:
-        reasons.append(f"the most likely reading has p={top:.2f} (< {GOAL_MIN_P})")
-    elif top is not None and len(interps) > 1 and top - second < GOAL_MIN_MARGIN:
-        reasons.append(f"two readings are close (p={top:.2f} vs {second:.2f})")
-    if reasons and not questions and len(interps) > 1:
-        questions.append("Did you mean: " + " — or — ".join(i["goal"] for i in interps[:3]) + "?")
+    if not defer_to_assumed:
+        if top is None and len(interps) > 1:
+            reasons.append("several readings of the request, none with a probability")
+        elif top is not None and top < GOAL_MIN_P:
+            reasons.append(f"the most likely reading has p={top:.2f} (< {GOAL_MIN_P})")
+        elif top is not None and len(interps) > 1 and top - second < GOAL_MIN_MARGIN:
+            reasons.append(f"two readings are close (p={top:.2f} vs {second:.2f})")
+        if reasons and not questions and len(interps) > 1:
+            questions.append("Did you mean: " + " — or — ".join(i["goal"] for i in interps[:3]) + "?")
     risky = [a for a in spec.get("assumptions", []) if a["consequential"]
              and (a["confidence"] is None or a["confidence"] < ASSUMPTION_MIN_CONF)]
+    if defer_to_assumed:
+        risky = []
     for a in risky:
         reasons.append(f"consequential assumption at confidence "
                        f"{'unknown' if a['confidence'] is None else format(a['confidence'], '.2f')}: {a['text']}")
@@ -510,19 +645,24 @@ def compile_intent(ci, uid: str, text: str, *, answers: str | None = None, paren
     raw = parse(r.text)
     rec = {"id": new_id("plan"), "ts": utcnow().isoformat(), "text": text, "answers": answers, "parent": parent,
            "interaction": r.interaction_id, "served_by": r.receipt.get("route", {}).get("served_by"),
-           "project_id": project_id, "context_items": sent_notes, "spec": None, "gate": None, "error": None,
-           "status": "invalid", "steps_state": {}, "outcomes_state": {}}
+           "project_id": project_id, "context_items": sent_notes, "execution_mode": "contract",
+           "spec": None, "gate": None, "error": None, "status": "invalid", "steps_state": {}, "outcomes_state": {}}
     if raw is None:
         rec["error"] = "the model did not return a JSON plan"
     else:
         try:
-            rec["spec"] = validate(raw, sent_notes, request=text)  # preservation reads the person's words only
+            rec["spec"] = validate(raw, sent_notes, request=text, answers=answers)  # the person's words only
+            if parent:
+                try:
+                    _preserve_parent(rec["spec"], get(ci, uid, parent).get("spec"), answers)
+                except KeyError:
+                    pass
             ws = None
             if project_id is not None:
                 from .workspace import Workspace
                 ws = Workspace(ci).briefing(uid, project_id).get("workspace")
             rec["spec"]["missing_permissions"] = missing_permissions(rec["spec"], ws)
-            g = gate(rec["spec"], text)
+            g = gate(rec["spec"], text, after_answer=bool(answers))
             rec["gate"] = g.as_dict()
             rec["status"] = {"clarify": "needs_answers", "approval": "awaiting_approval", "ready": "ready",
                              "blocked": "blocked"}[g.decision]

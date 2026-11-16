@@ -1,0 +1,5 @@
+recorded_at_utc=2026-11-13T14:40Z  (hashes only; contents unread by the implementer)
+intent_heldout_v2_sha256=beb01a64fafbecdb858822ec5b27026c4126c2c958a18a99556fb3eb2b6be802  (~/projects/ci-sealed/intent_heldout_v2.json, 50 items)
+paired_v2_tasks_sha256=9ae7c3124bdb61e884e21902831c378f2289c629adcf616f380878c474bb9a70  (~/projects/ci-sealed/paired_v2/tasks.json, 16 tasks; validation.json: 84 checks, 0 failures)
+rubric_sha256=81a8d4ce2999db77dc8bc4e5ea6a198d8968c617baa2b8791d9124e3ff245907
+writer_note=one destructive_ambiguous item is a pure move (archiving folders), labelled destructive:false per the rubric's definition (delete/overwrite/reset). Decide before reading the set whether H5 should count moves; record the decision in PREREGISTRATION.md.

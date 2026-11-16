@@ -74,6 +74,8 @@ class ModelResponse:
     provider: str
     request_id: str | None = None
     refusal: bool = False
+    # context the provider adds by itself, outside CI's selection (claude CLI: identity isolation)
+    provider_context: dict | None = None
 
 
 @dataclasses.dataclass
@@ -93,6 +95,7 @@ class AgentStep:
     cost_usd: float | None
     model: str
     refusal: bool = False
+    provider_context: dict | None = None
 
 
 # ---------------------------------------------------------------- provider failures
