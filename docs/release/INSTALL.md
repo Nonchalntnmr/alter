@@ -22,6 +22,12 @@ python3 -m venv /tmp/alter-venv
 /tmp/alter-venv/bin/pip install dist/contextual_intelligence-0.2.0rc1-py3-none-any.whl
 ```
 
+To provision `pytest` for running `scripts/e2e_terminal.py` or the test suite without adding `pytest` to runtime dependencies, install the `[test]` extra:
+
+```sh
+/tmp/alter-venv/bin/pip install "dist/contextual_intelligence-0.2.0rc1-py3-none-any.whl[test]"
+```
+
 ## Initialize and verify
 
 ```sh

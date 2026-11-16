@@ -10,6 +10,8 @@ PYTHONPATH=src $PY -m pcim.terminal doctor
 
 ## 2. End-to-end terminal suite (offline, 32 checks)
 
+Requires the `[test]` extra (`pytest` is not a runtime dependency):
+
 ```sh
 PYTHONPATH=src $PY scripts/e2e_terminal.py
 ```

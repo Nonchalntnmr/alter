@@ -151,3 +151,125 @@ def test_prompt_injection_cannot_escape_workspace_or_self_approve_or_forge_turn(
     # The real nonce is random and differs from forged123
     assert 'nonce="forged123"' in captured["stdin"]
     assert captured["stdin"].count('role="ci_tool_results"') == 1
+
+
+def test_unauthorized_external_action_cannot_self_complete(tmp_path):
+    from pcim import intent_compiler as ic
+    from pcim import plan_exec as px
+    from pcim.adapters.base import ModelResponse, Usage
+
+    ci = PersonalCI(tmp_path / "pcim", seed=0)
+    ci.onboard("u", "Pat", ("mock",))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "calc.py").write_text("def add(a, b): return a + b\n")
+    (repo / "test_calc.py").write_text("from calc import add\ndef test_add(): assert add(1, 2) == 3\n")
+    ws = Workspace(ci)
+    p = ws.create_project("u", "Proj")
+    ws.authorize_workspace("u", p.id, str(repo), run_argv=[sys.executable, "-m", "pytest", "-q"], allow_write=True)
+
+    class PlanMock:
+        provider, model = "mock", "mock-1"
+        def generate(self, prompt, max_tokens=None):
+            return ModelResponse(text=json.dumps({
+                "goal": "Fix calc and email raj",
+                "interpretations": [{"goal": "Fix calc and email raj", "p": 0.95}],
+                "outcomes": [
+                    {"id": "o1", "text": "tests pass", "kind": "deliverable"},
+                    {"id": "o2", "text": "email raj", "kind": "external_action", "quote": "email raj"},
+                ],
+                "steps": [
+                    {"id": "s1", "action": "run tests", "kind": "run", "serves": ["o1"]},
+                    {"id": "s2", "action": "email raj", "kind": "external", "serves": ["o2"]},
+                ],
+            }), usage=Usage(1, 1), cost_usd=0.0, latency_ms=1.0, stop_reason="end_turn", model="mock-1", provider="mock")
+
+    for m in ("mock-agent", "mock-small", "mock-medium", "mock-large"):
+        ci.set_adapter("mock", m, PlanMock())
+    rec = ic.compile_intent(ci, "u", "run tests and email raj", project_id=p.id, project_vendors={"mock"})
+    ic.approve(ci, "u", rec["id"])
+
+    queue = TaskQueue(ws, Governor(ws))
+    agent = Agent(ci, ws, queue)
+    agent.set_adapter("mock", None, MockAgentAdapter(script=[
+        {"text": "Running tests and emailing.", "tool_uses": [
+            {"id": "t1", "name": "run_tests", "input": {"reason": "verify"}},
+            {"id": "t2", "name": "send_email", "input": {"to": "raj@example.com", "body": "done"}},
+        ]},
+        {"text": "All done! I emailed Raj."},
+    ]))
+    res = px.execute(ci, "u", rec["id"], p.id, {"mock"}, provider="mock", agent=agent)
+    while res["outcome"] == "waiting":
+        for tid in res["plan"]["contract_state"]["pending"]:
+            agent.resolve("u", tid, approve=True)
+        res = px.execute(ci, "u", rec["id"], p.id, {"mock"}, provider="mock", agent=agent)
+    assert res["outcome"] == "awaiting_you"
+    assert res["plan"]["outcomes_state"]["o2"]["status"] == "yours_pending"
+    assert any(d["tool"] == "send_email" for d in res["authorization_compliance"]["denials"])
+
+
+def test_secret_scrubbing_and_withholding_and_probe_record(tmp_path, monkeypatch):
+    from pcim.adapters import claude_cli, cli_probe
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "supersecret-env-key-123456")
+    scrubbed = claude_cli._scrub(
+        "failed with supersecret-env-key-123456 and sk-ant-api03-abcdefg and Bearer tok_1234567890",
+        ("unrelated system", "unrelated user"),
+    )
+    assert "supersecret-env-key-123456" not in scrubbed
+    assert "sk-ant-api03-abcdefg" not in scrubbed
+    assert "tok_1234567890" not in scrubbed
+
+    withheld = claude_cli._scrub("error near my secret prompt payload here", ("my secret prompt payload here",))
+    assert withheld == "[output withheld: it quotes the request]"
+
+    monkeypatch.setenv("PCIM_HOME", str(tmp_path / "pcim"))
+    p = cli_probe.record({"cli_version": "9.9.9", "probed_at": "t", "clean": True, "found": [],
+                          "markers_checked": ["account email"], "profile_keys": ["accountUuid"], "trials": [{}]})
+    assert "secret" not in p.read_text() and "@" not in p.read_text()
+
+
+def test_interrupted_contract_and_corrupted_state(tmp_path, monkeypatch):
+    from pcim import cli
+    from pcim import intent_compiler as ic
+    from pcim import plan_exec as px
+    from pcim.adapters.base import ModelResponse, Usage
+
+    pcim_home = tmp_path / "pcim"
+    monkeypatch.setenv("PCIM_HOME", str(pcim_home))
+    assert cli.main(["init", "--user", "Pat", "--providers", "mock"]) == 0
+    ci, uid = terminal._open()
+
+    # Non-JSON planner reply -> invalid, never guessed
+    class BadPlanMock:
+        provider, model = "mock", "mock-1"
+        def generate(self, prompt, max_tokens=None):
+            return ModelResponse(text="not json at all", usage=Usage(1, 1), cost_usd=0.0, latency_ms=1.0,
+                                 stop_reason="end_turn", model="mock-1", provider="mock")
+
+    ci.set_adapter("mock", "mock-1", BadPlanMock())
+    bad = ic.compile_intent(ci, uid, "do something")
+    assert bad["status"] == "invalid"
+
+    # Interrupted contract is never silently re-run
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    ws = Workspace(ci)
+    p = ws.create_project(uid, "Proj")
+    ws.authorize_workspace(uid, p.id, str(repo), allow_write=True)
+    spec = ic.validate({"goal": "g", "interpretations": [{"goal": "g", "p": 0.9}],
+                        "outcomes": [{"id": "o1", "text": "d", "kind": "deliverable"}],
+                        "steps": [{"id": "s1", "action": "read", "kind": "read", "serves": ["o1"]}]}, [])
+    rec = {"id": "pln_interrupted", "ts": "t", "text": "g", "answers": None, "parent": None,
+           "interaction": None, "served_by": "test", "project_id": p.id, "context_items": [],
+           "execution_mode": "contract", "spec": spec, "gate": ic.gate(spec).as_dict(),
+           "error": None, "status": "approved", "steps_state": {}, "outcomes_state": {},
+           "contract_state": {"status": "in_progress", "started": "t"}}
+    ic._save(ci, uid, rec)
+    res = px.execute(ci, uid, rec["id"], p.id, {"mock"}, provider="mock")
+    assert res["outcome"] == "interrupted"
+
+    # Corrupted audit chain -> ci doctor fails (exit 1)
+    ci.store.execute("UPDATE audit SET payload = '{\"tampered\":true}' WHERE seq = 1")
+    ci.store.close()
+    assert terminal.main(["doctor", "--json"]) == 1
+
