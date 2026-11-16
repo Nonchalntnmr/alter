@@ -353,8 +353,12 @@ preserved parent external/destructive outcomes across clarification unless withd
   zero false incompletes; zero clear-task clarifications), but direct execution remains faster,
   cheaper, and at least as reliable (16/16 vs 14/16, 645 s vs 1380 s person time).
 - **Blockers / open items:**
-  1. **Compiler quality (H2/H3, r10):** V3 missed H2 (18/21) and H3 (11/23) on the new intent set,
-     and r10 failed on non-JSON planner output (bounded re-ask proposed for V3.2).
+  1. **Compiler quality (H2/H3, r10).**
+     - **H3 is missed:** V3 asks on 11/23 clear requests (target ≤ 0.25).
+     - **H2 is met at 18/21, but regressed by 3 items:** q29, q39 and q45 are genuinely vague requests
+       it no longer asks about.
+     - r10 failed on non-JSON planner output. The bounded re-ask is implemented on
+       `release/alter-0.2.0`, and is unmeasured on unseen data.
   2. **Identity isolation (`sec/cli-identity`):** verified on CLI 2.1.316 only; CLI profile refetch
      during calls is measured clean rather than guaranteed; account id remains in API metadata.
   3. **In-process session lock (`agent.py`):** `threading.Lock` does not serialize across processes.
