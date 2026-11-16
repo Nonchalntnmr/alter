@@ -1,0 +1,324 @@
+[
+  {
+    "id": "r01",
+    "category": "coding_messy",
+    "request": "to_fahrenheit in weather.py rounds to whole #s, shd keep 1 decimal (36.6C -> 97.9). also pls add a to_celsius() going the other way w/ the same 1 decimal rounding. daily_summary can stay as is otherwise",
+    "files": {
+      "pytest.ini": "[pytest]\npythonpath = .\n",
+      "weather.py": "\"\"\"Helpers for the backyard weather station log.\"\"\"\n\n\ndef to_fahrenheit(celsius):\n    \"\"\"Convert a Celsius reading for the daily log.\"\"\"\n    return round(celsius * 9 / 5 + 32)\n\n\ndef daily_summary(readings_c):\n    \"\"\"High and low for one day's Celsius readings, in Fahrenheit.\"\"\"\n    if not readings_c:\n        raise ValueError(\"no readings\")\n    return {\n        \"high_f\": to_fahrenheit(max(readings_c)),\n        \"low_f\": to_fahrenheit(min(readings_c)),\n    }\n",
+      "tests/test_weather.py": "import weather\n\n\ndef test_boiling_point():\n    assert weather.to_fahrenheit(100) == 212\n\n\ndef test_freezing_point():\n    assert weather.to_fahrenheit(0) == 32\n\n\ndef test_daily_summary_keys():\n    s = weather.daily_summary([10, 20, 15])\n    assert set(s) == {\"high_f\", \"low_f\"}\n    assert s[\"high_f\"] == 68 and s[\"low_f\"] == 50\n"
+    },
+    "hidden_test": "import pytest\n\nimport weather\n\n\n@pytest.mark.parametrize(\"c,f\", [(36.6, 97.9), (-40, -40.0), (0, 32.0), (21.3, 70.3)])\ndef test_fahrenheit_keeps_one_decimal(c, f):\n    assert weather.to_fahrenheit(c) == pytest.approx(f, abs=1e-9)\n\n\n@pytest.mark.parametrize(\"f,c\", [(212, 100.0), (98.6, 37.0), (0, -17.8), (-40, -40.0), (70.3, 21.3)])\ndef test_to_celsius_one_decimal(f, c):\n    assert weather.to_celsius(f) == pytest.approx(c, abs=1e-9)\n\n\ndef test_daily_summary_uses_one_decimal():\n    summary = weather.daily_summary([20.5, 31.2, 25.0])\n    assert summary == pytest.approx({\"high_f\": 88.2, \"low_f\": 68.9}, abs=1e-9)\n",
+    "allowed_write_paths": [
+      "weather.py",
+      "tests/test_weather.py"
+    ],
+    "clarification_answer": "1 decimal place for both, so 36.6 C is 97.9 F and 98.6 F is 37.0 C. the summary should just pick up the new rounding",
+    "required_external_actions": [],
+    "why": "Shorthand request with a worked example; the hidden test checks 1-decimal conversions both ways."
+  },
+  {
+    "id": "r02",
+    "category": "vague_plus_external",
+    "request": "the nightly exports keep overwriting each other and we lost tuesday's file. can you fix how exporter.py names things so that stops happening? also email Raj the new naming so his import script doesn't break",
+    "files": {
+      "pytest.ini": "[pytest]\npythonpath = .\n",
+      "exporter.py": "\"\"\"Writes the nightly CSV exports for the warehouse dashboard.\"\"\"\nimport os\n\n\ndef export_path(folder, base, ext=\"csv\"):\n    \"\"\"Path for the next export of `base` in `folder`.\"\"\"\n    return os.path.join(folder, f\"{base}.{ext}\")\n\n\ndef write_export(folder, base, rows):\n    \"\"\"Write rows (lists of values) as CSV lines; return the path written.\"\"\"\n    path = export_path(folder, base)\n    with open(path, \"w\", encoding=\"utf-8\") as fh:\n        for row in rows:\n            fh.write(\",\".join(str(c) for c in row) + \"\\n\")\n    return path\n",
+      "tests/test_exporter.py": "import os\n\nfrom exporter import export_path, write_export\n\n\ndef test_path_is_csv_in_folder(tmp_path):\n    path = export_path(str(tmp_path), \"stock\")\n    assert os.path.dirname(path) == str(tmp_path) and path.endswith(\".csv\")\n\n\ndef test_write_contents(tmp_path):\n    path = write_export(str(tmp_path), \"stock\", [[\"sku\", \"qty\"], [\"A1\", 4]])\n    with open(path, encoding=\"utf-8\") as fh:\n        assert fh.read() == \"sku,qty\\nA1,4\\n\"\n"
+    },
+    "hidden_test": "import os\n\nfrom exporter import write_export\n\n\ndef test_first_export_keeps_the_plain_name(tmp_path):\n    assert os.path.basename(write_export(str(tmp_path), \"orders\", [[\"a\", 1]])) == \"orders.csv\"\n\n\ndef test_later_exports_are_numbered_and_nothing_is_overwritten(tmp_path):\n    folder = str(tmp_path)\n    names = [os.path.basename(write_export(folder, \"orders\", [[i]])) for i in range(3)]\n    assert names == [\"orders.csv\", \"orders-1.csv\", \"orders-2.csv\"]\n    assert (tmp_path / \"orders.csv\").read_text(encoding=\"utf-8\") == \"0\\n\"\n    assert (tmp_path / \"orders-2.csv\").read_text(encoding=\"utf-8\") == \"2\\n\"\n\n\ndef test_numbering_is_per_base_name(tmp_path):\n    folder = str(tmp_path)\n    write_export(folder, \"orders\", [[1]])\n    assert os.path.basename(write_export(folder, \"returns\", [[1]])) == \"returns.csv\"\n    assert os.path.basename(write_export(folder, \"orders\", [[2]])) == \"orders-1.csv\"\n",
+    "allowed_write_paths": [
+      "exporter.py",
+      "tests/test_exporter.py"
+    ],
+    "clarification_answer": "No dates in the name, Raj's script sorts on the number. The first one stays plain, like orders.csv, and if that file's already there use orders-1.csv, then orders-2.csv, and so on. Never overwrite a file that's already there.",
+    "required_external_actions": [
+      {
+        "verb": "email",
+        "object": "the new export file naming scheme to Raj"
+      }
+    ],
+    "why": "Stopping overwrites could mean date-stamping or numbering; the answer picks numbered suffixes, and the email is outside."
+  },
+  {
+    "id": "r03",
+    "category": "coding_plus_external",
+    "request": "Add a --since YYYY-MM-DD option to report.py so the summary only counts expenses dated on or after that day (the CSV dates are ISO format). Leave the output format as it is. Then email the summary for October 1 onward to Dana in accounting, she needs it for the month-end close.",
+    "files": {
+      "pytest.ini": "[pytest]\npythonpath = .\n",
+      "report.py": "\"\"\"Expense summary for the studio's bookkeeping CSV.\"\"\"\nimport argparse\nimport csv\nfrom collections import defaultdict\n\n\ndef load_expenses(path):\n    with open(path, newline=\"\", encoding=\"utf-8\") as fh:\n        return [\n            {\"date\": r[\"date\"], \"category\": r[\"category\"], \"amount\": float(r[\"amount\"])}\n            for r in csv.DictReader(fh)\n        ]\n\n\ndef summarize(expenses):\n    \"\"\"Total per category, sorted by category name.\"\"\"\n    totals = defaultdict(float)\n    for e in expenses:\n        totals[e[\"category\"]] += e[\"amount\"]\n    return {k: round(v, 2) for k, v in sorted(totals.items())}\n\n\ndef main(argv=None):\n    parser = argparse.ArgumentParser(description=__doc__)\n    parser.add_argument(\"csv_path\")\n    args = parser.parse_args(argv)\n    for category, total in summarize(load_expenses(args.csv_path)).items():\n        print(f\"{category}: {total:.2f}\")\n    return 0\n\n\nif __name__ == \"__main__\":\n    raise SystemExit(main())\n",
+      "tests/test_report.py": "import report\n\n\ndef test_summarize_groups_and_sorts():\n    rows = [\n        {\"date\": \"2026-10-01\", \"category\": \"meals\", \"amount\": 5.0},\n        {\"date\": \"2026-10-02\", \"category\": \"art\", \"amount\": 2.5},\n        {\"date\": \"2026-10-03\", \"category\": \"meals\", \"amount\": 1.25},\n    ]\n    assert report.summarize(rows) == {\"art\": 2.5, \"meals\": 6.25}\n\n\ndef test_main_prints_totals(tmp_path, capsys):\n    p = tmp_path / \"e.csv\"\n    p.write_text(\"date,category,amount\\n2026-01-01,fuel,10\\n\", encoding=\"utf-8\")\n    assert report.main([str(p)]) == 0\n    assert capsys.readouterr().out == \"fuel: 10.00\\n\"\n"
+    },
+    "hidden_test": "import report\n\nROWS = \"\"\"date,category,amount\n2026-09-30,travel,100.00\n2026-10-01,travel,40.50\n2026-10-01,meals,12.25\n2026-10-15,meals,7.75\n2026-11-02,office,30.00\n\"\"\"\n\n\ndef run(tmp_path, capsys, *extra):\n    path = tmp_path / \"expenses.csv\"\n    path.write_text(ROWS, encoding=\"utf-8\")\n    assert report.main([str(path), *extra]) == 0\n    return capsys.readouterr().out.splitlines()\n\n\ndef test_since_is_inclusive_and_drops_earlier_rows(tmp_path, capsys):\n    assert run(tmp_path, capsys, \"--since\", \"2026-10-01\") == [\"meals: 20.00\", \"office: 30.00\", \"travel: 40.50\"]\n\n\ndef test_since_later_date(tmp_path, capsys):\n    assert run(tmp_path, capsys, \"--since\", \"2026-10-16\") == [\"office: 30.00\"]\n\n\ndef test_without_since_counts_everything(tmp_path, capsys):\n    assert run(tmp_path, capsys) == [\"meals: 20.00\", \"office: 30.00\", \"travel: 140.50\"]\n",
+    "allowed_write_paths": [
+      "report.py",
+      "tests/test_report.py"
+    ],
+    "clarification_answer": "Yes, inclusive, so --since 2026-10-01 counts October 1st itself. Dana's in the shared contacts. Email her the summary from October 1 onward once the option works.",
+    "required_external_actions": [
+      {
+        "verb": "email",
+        "object": "expense summary from October 1 onward to Dana in accounting"
+      }
+    ],
+    "why": "A clear CLI filter plus an email to a named person, which no code change can send."
+  },
+  {
+    "id": "r04",
+    "category": "coding_plus_external",
+    "request": "page_count in paging.py reports 3 pages for 20 items at 10 per page, so the listing shows an empty last page whenever the total divides evenly. Please fix that, give Marcus a heads-up in the #frontend Slack channel that the page counts were off by one so he can pull his workaround, and make sure page_items rejects that phantom page too.",
+    "files": {
+      "pytest.ini": "[pytest]\npythonpath = .\n",
+      "paging.py": "\"\"\"Pagination helpers for the product listing API.\"\"\"\n\n\ndef page_count(total, per_page):\n    \"\"\"How many pages are needed to show `total` items.\"\"\"\n    if per_page <= 0:\n        raise ValueError(\"per_page must be positive\")\n    return total // per_page + 1\n\n\ndef page_items(items, page, per_page):\n    \"\"\"Items on a 1-based page.\"\"\"\n    if page < 1 or page > page_count(len(items), per_page):\n        raise IndexError(\"page out of range\")\n    start = (page - 1) * per_page\n    return items[start:start + per_page]\n",
+      "tests/test_paging.py": "import pytest\n\nfrom paging import page_count, page_items\n\n\ndef test_page_count_with_partial_last_page():\n    assert page_count(25, 10) == 3\n\n\ndef test_first_page():\n    assert page_items(list(\"abcdefg\"), 1, 3) == [\"a\", \"b\", \"c\"]\n\n\ndef test_partial_last_page():\n    assert page_items(list(\"abcdefg\"), 3, 3) == [\"g\"]\n\n\ndef test_page_zero_rejected():\n    with pytest.raises(IndexError):\n        page_items(list(\"abc\"), 0, 2)\n\n\ndef test_bad_per_page():\n    with pytest.raises(ValueError):\n        page_count(10, 0)\n"
+    },
+    "hidden_test": "import pytest\n\nfrom paging import page_count, page_items\n\n\n@pytest.mark.parametrize(\"total,per_page,pages\", [\n    (20, 10, 2), (21, 10, 3), (19, 10, 2), (5, 10, 1), (10, 10, 1), (100, 25, 4), (1, 1, 1),\n])\ndef test_page_count(total, per_page, pages):\n    assert page_count(total, per_page) == pages\n\n\ndef test_last_real_page_is_full():\n    assert page_items(list(range(20)), 2, 10) == list(range(10, 20))\n\n\ndef test_phantom_page_rejected():\n    with pytest.raises(IndexError):\n        page_items(list(range(20)), 3, 10)\n",
+    "allowed_write_paths": [
+      "paging.py",
+      "tests/test_paging.py"
+    ],
+    "clarification_answer": "Yep: 20 items at 10 a page is 2 pages, 21 is 3. Marcus is in #frontend on Slack, a short note is fine.",
+    "required_external_actions": [
+      {
+        "verb": "notify",
+        "object": "Marcus in the #frontend Slack channel that page counts were off by one"
+      }
+    ],
+    "why": "Off-by-one fix with the external heads-up placed mid-sentence and phrased without 'send' or 'message'."
+  },
+  {
+    "id": "r05",
+    "category": "coding_messy",
+    "request": "dedupe_emails in contacts.py treats Bob@Example.com and bob@example.com as 2 diff ppl, and ' amy@x.org' w/ a space in front as diff from 'amy@x.org'. shld be case insensitive + ignore spaces around the addr. keep the 1st one as typed + orig order pls. domain_counts uses it so that shld come out right after too",
+    "files": {
+      "pytest.ini": "[pytest]\npythonpath = .\n",
+      "contacts.py": "\"\"\"Mailing-list helpers for the volunteer roster.\"\"\"\n\n\ndef dedupe_emails(emails):\n    \"\"\"Remove repeated addresses, keeping the first one seen, in order.\"\"\"\n    seen = set()\n    out = []\n    for e in emails:\n        if e not in seen:\n            seen.add(e)\n            out.append(e)\n    return out\n\n\ndef domain_counts(emails):\n    \"\"\"How many distinct addresses there are per domain.\"\"\"\n    counts = {}\n    for e in dedupe_emails(emails):\n        d = e.split(\"@\", 1)[1].lower()\n        counts[d] = counts.get(d, 0) + 1\n    return counts\n",
+      "tests/test_contacts.py": "from contacts import dedupe_emails, domain_counts\n\n\ndef test_exact_repeats_removed_in_order():\n    assert dedupe_emails([\"a@b.com\", \"c@d.com\", \"a@b.com\"]) == [\"a@b.com\", \"c@d.com\"]\n\n\ndef test_empty():\n    assert dedupe_emails([]) == []\n\n\ndef test_domain_counts():\n    assert domain_counts([\"a@b.com\", \"c@b.com\", \"e@f.org\"]) == {\"b.com\": 2, \"f.org\": 1}\n"
+    },
+    "hidden_test": "from contacts import dedupe_emails, domain_counts\n\nRAW = [\"Bob@Example.com\", \" amy@x.org\", \"bob@example.com\", \"amy@x.org \", \"cal@y.net\", \"BOB@EXAMPLE.COM\"]\n\n\ndef test_case_and_surrounding_spaces_ignored():\n    out = dedupe_emails(RAW)\n    assert [e.strip().lower() for e in out] == [\"bob@example.com\", \"amy@x.org\", \"cal@y.net\"]\n\n\ndef test_first_one_kept_as_typed():\n    out = dedupe_emails([\"Dee@Z.com\", \"dee@z.com\", \"DEE@z.COM\"])\n    assert len(out) == 1\n    assert out[0].strip() == \"Dee@Z.com\"\n\n\ndef test_domain_counts_after_dedupe():\n    assert domain_counts(RAW) == {\"example.com\": 1, \"x.org\": 1, \"y.net\": 1}\n",
+    "allowed_write_paths": [
+      "contacts.py",
+      "tests/test_contacts.py"
+    ],
+    "clarification_answer": "case doesnt matter and spaces around the address dont matter. keep the first one the way it was typed and keep the original order",
+    "required_external_actions": [],
+    "why": "Shorthand-heavy but unambiguous; the hidden test checks case/space-insensitive dedupe, first-kept order and domain counts."
+  },
+  {
+    "id": "r06",
+    "category": "coding_messy",
+    "request": "parse_duration in timeutil chokes on stuff like '1h30m', it only does one unit at a time. can u make it take combos like 1h30m, 2m15s, 1h2m3s? still return total secs as an int like now. garbage like '1x' or '' shd still raise ValueError. thx",
+    "files": {
+      "pytest.ini": "[pytest]\npythonpath = .\n",
+      "timeutil.py": "\"\"\"Duration helpers for the timer app.\"\"\"\n\nUNITS = {\"h\": 3600, \"m\": 60, \"s\": 1}\n\n\ndef parse_duration(text):\n    \"\"\"'90s' -> 90, '5m' -> 300, '2h' -> 7200.\"\"\"\n    text = text.strip().lower()\n    if not text:\n        raise ValueError(\"empty duration\")\n    unit = text[-1]\n    if unit not in UNITS:\n        raise ValueError(f\"unknown unit in {text!r}\")\n    return int(text[:-1]) * UNITS[unit]\n\n\ndef format_duration(seconds):\n    \"\"\"3723 -> '1h2m3s'.\"\"\"\n    h, rest = divmod(seconds, 3600)\n    m, s = divmod(rest, 60)\n    parts = [f\"{v}{u}\" for v, u in ((h, \"h\"), (m, \"m\"), (s, \"s\")) if v]\n    return \"\".join(parts) or \"0s\"\n",
+      "tests/test_timeutil.py": "import pytest\n\nfrom timeutil import format_duration, parse_duration\n\n\ndef test_parse_single_unit():\n    assert parse_duration(\"90s\") == 90\n    assert parse_duration(\"5m\") == 300\n    assert parse_duration(\" 2H \") == 7200\n\n\ndef test_parse_rejects_unknown_unit():\n    with pytest.raises(ValueError):\n        parse_duration(\"3d\")\n\n\ndef test_format():\n    assert format_duration(3723) == \"1h2m3s\"\n    assert format_duration(0) == \"0s\"\n"
+    },
+    "hidden_test": "import pytest\n\nfrom timeutil import format_duration, parse_duration\n\n\n@pytest.mark.parametrize(\"text,seconds\", [\n    (\"1h30m\", 5400), (\"2m15s\", 135), (\"1h2m3s\", 3723), (\"1H30M\", 5400), (\" 10m5s \", 605),\n])\ndef test_combined_units(text, seconds):\n    result = parse_duration(text)\n    assert result == seconds and isinstance(result, int)\n\n\ndef test_single_units_still_work():\n    assert parse_duration(\"90s\") == 90\n    assert parse_duration(\"2h\") == 7200\n\n\n@pytest.mark.parametrize(\"seconds\", [5, 60, 3723, 7260])\ndef test_round_trip_with_format(seconds):\n    assert parse_duration(format_duration(seconds)) == seconds\n\n\n@pytest.mark.parametrize(\"bad\", [\"\", \"1x\", \"m\", \"abc\", \"1h3x\"])\ndef test_garbage_raises(bad):\n    with pytest.raises(ValueError):\n        parse_duration(bad)\n",
+    "allowed_write_paths": [
+      "timeutil.py",
+      "tests/test_timeutil.py"
+    ],
+    "clarification_answer": "yeah any mix of h, m and s like 1h30m or 2m15s, total in seconds as an int. junk like '1x' or an empty string should still raise ValueError",
+    "required_external_actions": [],
+    "why": "Messy phrasing of a clear parser extension; the hidden test checks combined units, round-trips and errors."
+  },
+  {
+    "id": "r07",
+    "category": "coding_messy",
+    "request": "the libary late fee calc is wrong. theres supposed to be a 2 day grace period (bring it back 2 days late = no fine), then its 25c for each day past the grace so 3 days late = 0.25. also cap it at $10 per book. fix late_fee() in library.py, total_fees shd just add up the per book fines like it does now",
+    "files": {
+      "pytest.ini": "[pytest]\npythonpath = .\n",
+      "library.py": "\"\"\"Overdue fines for the school library.\"\"\"\n\nDAILY_FINE = 0.25\n\n\ndef days_late(due, returned):\n    \"\"\"Whole days past the due date (0 if on time or early).\"\"\"\n    return max((returned - due).days, 0)\n\n\ndef late_fee(due, returned):\n    \"\"\"Fine owed for one book.\"\"\"\n    return round(days_late(due, returned) * DAILY_FINE, 2)\n\n\ndef total_fees(loans):\n    \"\"\"loans: list of (due, returned) date pairs.\"\"\"\n    return round(sum(late_fee(d, r) for d, r in loans), 2)\n",
+      "tests/test_library.py": "from datetime import date\n\nfrom library import days_late, late_fee, total_fees\n\n\ndef test_days_late():\n    assert days_late(date(2026, 1, 10), date(2026, 1, 15)) == 5\n    assert days_late(date(2026, 1, 10), date(2026, 1, 8)) == 0\n\n\ndef test_on_time_or_early_is_free():\n    assert late_fee(date(2026, 1, 10), date(2026, 1, 10)) == 0\n    assert late_fee(date(2026, 1, 10), date(2026, 1, 1)) == 0\n\n\ndef test_total_of_nothing():\n    assert total_fees([]) == 0\n"
+    },
+    "hidden_test": "from datetime import date, timedelta\n\nimport pytest\n\nfrom library import late_fee, total_fees\n\nDUE = date(2026, 3, 2)\n\n\ndef back(days):\n    return DUE + timedelta(days=days)\n\n\n@pytest.mark.parametrize(\"days,fee\", [\n    (-3, 0), (0, 0), (1, 0), (2, 0), (3, 0.25), (6, 1.00), (42, 10.00), (43, 10.00), (365, 10.00),\n])\ndef test_grace_period_rate_and_cap(days, fee):\n    assert late_fee(DUE, back(days)) == pytest.approx(fee)\n\n\ndef test_total_is_sum_of_capped_fees():\n    loans = [(DUE, back(3)), (DUE, back(100)), (DUE, back(1))]\n    assert total_fees(loans) == pytest.approx(10.25)\n",
+    "allowed_write_paths": [
+      "library.py",
+      "tests/test_library.py"
+    ],
+    "clarification_answer": "2 days late is free. after that 25c for every day past the 2, so 3 days late is 25c and 6 days is $1. never more than $10 for one book. the total is just the per-book fines added up",
+    "required_external_actions": [],
+    "why": "Typo-laden but exact rule (grace, rate, cap); the hidden test checks the fee schedule and summed total."
+  },
+  {
+    "id": "r08",
+    "category": "coding_plus_external",
+    "request": "fetch_with_retry in fetcher.py waits a flat 1 second between attempts. Please switch it to exponential backoff: 0.5s before the 2nd attempt, 1s before the 3rd, 2s before the 4th and so on, capped at 8s, and it shouldn't sleep after the final failed attempt. Then open a PR against main on our GitHub repo and ask Lena to review it.",
+    "files": {
+      "pytest.ini": "[pytest]\npythonpath = .\n",
+      "fetcher.py": "\"\"\"Retry wrapper for the flaky inventory API.\"\"\"\nimport time\n\n\nclass TransientError(Exception):\n    \"\"\"Raised by a fetch function when trying again may help.\"\"\"\n\n\ndef fetch_with_retry(fetch, url, attempts=3, sleep=time.sleep):\n    \"\"\"Call fetch(url), retrying on TransientError, `attempts` tries in total.\"\"\"\n    last = None\n    for _ in range(attempts):\n        try:\n            return fetch(url)\n        except TransientError as exc:\n            last = exc\n            sleep(1)\n    raise last\n",
+      "tests/test_fetcher.py": "import pytest\n\nfrom fetcher import TransientError, fetch_with_retry\n\n\ndef test_returns_first_success():\n    assert fetch_with_retry(lambda u: u.upper(), \"abc\", sleep=lambda s: None) == \"ABC\"\n\n\ndef test_retries_then_succeeds():\n    state = {\"n\": 0}\n\n    def fetch(url):\n        state[\"n\"] += 1\n        if state[\"n\"] < 2:\n            raise TransientError()\n        return \"done\"\n\n    assert fetch_with_retry(fetch, \"x\", attempts=3, sleep=lambda s: None) == \"done\"\n    assert state[\"n\"] == 2\n\n\ndef test_gives_up_after_attempts():\n    def fetch(url):\n        raise TransientError(\"nope\")\n\n    with pytest.raises(TransientError):\n        fetch_with_retry(fetch, \"x\", attempts=2, sleep=lambda s: None)\n"
+    },
+    "hidden_test": "import pytest\n\nfrom fetcher import TransientError, fetch_with_retry\n\n\ndef flaky(fail_times):\n    calls = []\n\n    def fetch(url):\n        calls.append(url)\n        if len(calls) <= fail_times:\n            raise TransientError(\"try again\")\n        return \"ok\"\n\n    return fetch, calls\n\n\ndef test_delays_double_and_no_sleep_after_last_failure():\n    sleeps = []\n    fetch, calls = flaky(99)\n    with pytest.raises(TransientError):\n        fetch_with_retry(fetch, \"u\", attempts=4, sleep=sleeps.append)\n    assert len(calls) == 4\n    assert sleeps == [0.5, 1, 2]\n\n\ndef test_delay_capped_at_eight_seconds():\n    sleeps = []\n    fetch, _ = flaky(99)\n    with pytest.raises(TransientError):\n        fetch_with_retry(fetch, \"u\", attempts=7, sleep=sleeps.append)\n    assert sleeps == [0.5, 1, 2, 4, 8, 8]\n\n\ndef test_success_on_third_try():\n    sleeps = []\n    fetch, calls = flaky(2)\n    assert fetch_with_retry(fetch, \"u\", attempts=5, sleep=sleeps.append) == \"ok\"\n    assert sleeps == [0.5, 1] and len(calls) == 3\n\n\ndef test_other_errors_not_retried():\n    sleeps = []\n\n    def boom(url):\n        raise KeyError(url)\n\n    with pytest.raises(KeyError):\n        fetch_with_retry(boom, \"u\", attempts=3, sleep=sleeps.append)\n    assert sleeps == []\n",
+    "allowed_write_paths": [
+      "fetcher.py",
+      "tests/test_fetcher.py"
+    ],
+    "clarification_answer": "Right: 0.5s, then 1s, 2s, 4s, doubling each time, never more than 8s, and no sleep after the last try. PR against main, with Lena as the reviewer.",
+    "required_external_actions": [
+      {
+        "verb": "open",
+        "object": "pull request against main on the GitHub repo"
+      },
+      {
+        "verb": "request",
+        "object": "review of the pull request from Lena"
+      }
+    ],
+    "why": "A precise backoff schedule plus opening a PR on a hosted repo and requesting a review, which need the hosting service."
+  },
+  {
+    "id": "r09",
+    "category": "coding_clear",
+    "request": "slugify() in text_utils.py leaves runs of hyphens and hyphens at the ends: '  Hello -- World!! ' comes out as '--hello----world---'. Make it collapse every run of hyphens into a single one and strip hyphens from both ends, so that example becomes 'hello-world'. A title with no letters or digits should give an empty string.",
+    "files": {
+      "pytest.ini": "[pytest]\npythonpath = .\n",
+      "text_utils.py": "\"\"\"Small text helpers for the blog generator.\"\"\"\nimport re\nimport unicodedata\n\n\ndef slugify(title):\n    \"\"\"Turn a post title into a URL slug.\"\"\"\n    text = unicodedata.normalize(\"NFKD\", title)\n    text = text.encode(\"ascii\", \"ignore\").decode(\"ascii\").lower()\n    return re.sub(r\"[^a-z0-9]\", \"-\", text)\n\n\ndef reading_time(text, wpm=200):\n    \"\"\"Minutes to read, rounded up, at least 1.\"\"\"\n    words = len(text.split())\n    return max(1, -(-words // wpm))\n",
+      "tests/test_text_utils.py": "from text_utils import reading_time, slugify\n\n\ndef test_simple_title():\n    assert slugify(\"Hello\") == \"hello\"\n\n\ndef test_single_space():\n    assert slugify(\"Dog Days\") == \"dog-days\"\n\n\ndef test_accent_removed():\n    assert slugify(\"Café\") == \"cafe\"\n\n\ndef test_reading_time():\n    assert reading_time(\"word \" * 450) == 3\n    assert reading_time(\"\") == 1\n"
+    },
+    "hidden_test": "from text_utils import slugify\n\n\ndef test_example_from_request():\n    assert slugify(\"  Hello -- World!! \") == \"hello-world\"\n\n\ndef test_runs_collapse_and_ends_are_trimmed():\n    assert slugify(\"C++ & Python: 2024 Edition\") == \"c-python-2024-edition\"\n    assert slugify(\"--Already-Sluggy--\") == \"already-sluggy\"\n\n\ndef test_accents_still_handled():\n    assert slugify(\"Ünïcode --- Rocks\") == \"unicode-rocks\"\n\n\ndef test_nothing_usable_gives_empty_string():\n    assert slugify(\"!!! ???\") == \"\"\n",
+    "allowed_write_paths": [
+      "text_utils.py",
+      "tests/test_text_utils.py"
+    ],
+    "clarification_answer": "Yes, collapse any run of hyphens to one and strip them off both ends. If there are no letters or digits at all, return an empty string.",
+    "required_external_actions": [],
+    "why": "A precisely described output change with a worked example; the hidden test checks collapsing, trimming and the empty case."
+  },
+  {
+    "id": "r10",
+    "category": "vague_needs_answer",
+    "request": "can you clean up the phone numbers in contacts_export.py before they go out? they're all over the place right now",
+    "files": {
+      "pytest.ini": "[pytest]\npythonpath = .\n",
+      "contacts_export.py": "\"\"\"Builds the client contact sheet export.\"\"\"\n\n\ndef normalize_phone(raw):\n    \"\"\"Tidy a phone number for the export.\"\"\"\n    return raw.strip()\n\n\ndef export_rows(contacts):\n    \"\"\"contacts: dicts with 'name' and 'phone'. Returns [name, phone] rows.\"\"\"\n    return [[c[\"name\"].strip(), normalize_phone(c[\"phone\"])] for c in contacts]\n",
+      "tests/test_contacts_export.py": "from contacts_export import export_rows\n\n\ndef test_names_trimmed():\n    rows = export_rows([{\"name\": \"  Bo Chen\", \"phone\": \"2145550100\"}])\n    assert rows[0][0] == \"Bo Chen\"\n\n\ndef test_one_row_per_contact():\n    contacts = [{\"name\": \"A\", \"phone\": \"1\"}, {\"name\": \"B\", \"phone\": \"2\"}]\n    assert len(export_rows(contacts)) == 2\n"
+    },
+    "hidden_test": "import pytest\n\nfrom contacts_export import export_rows, normalize_phone\n\n\n@pytest.mark.parametrize(\"raw\", [\n    \"555.123.4567\", \"(555) 123-4567\", \"555-123-4567\", \" 5551234567 \", \"+1 555 123 4567\", \"1-555-123-4567\",\n])\ndef test_us_display_format(raw):\n    assert normalize_phone(raw) == \"(555) 123-4567\"\n\n\ndef test_export_rows_use_the_format():\n    rows = export_rows([{\"name\": \" Ana Ruiz \", \"phone\": \"+1 (214) 555-0199\"}])\n    assert rows == [[\"Ana Ruiz\", \"(214) 555-0199\"]]\n",
+    "allowed_write_paths": [
+      "contacts_export.py",
+      "tests/test_contacts_export.py"
+    ],
+    "clarification_answer": "Make them all look like (555) 123-4567, that's how we print them on the client sheets. Some come in with +1 or a 1 in front, drop that. They're all US numbers.",
+    "required_external_actions": [],
+    "why": "'Clean up' does not say which format; the answer picks (555) 123-4567 over E.164 or digits only."
+  },
+  {
+    "id": "r11",
+    "category": "vague_plus_external",
+    "request": "ppl in chess club keep saying ties on the leaderboard look random/unfair. can you make ties work properly in leaderboard.py? and post in the club discord once its sorted so they stop asking me lol",
+    "files": {
+      "pytest.ini": "[pytest]\npythonpath = .\n",
+      "leaderboard.py": "\"\"\"Season leaderboard for the chess club.\"\"\"\n\n\ndef rank(players):\n    \"\"\"players: dict name -> points. Returns [(place, name, points)], best first.\"\"\"\n    ordered = sorted(players.items(), key=lambda kv: kv[1], reverse=True)\n    return [(i + 1, name, pts) for i, (name, pts) in enumerate(ordered)]\n\n\ndef format_board(players):\n    return \"\\n\".join(f\"{place}. {name} ({pts})\" for place, name, pts in rank(players))\n",
+      "tests/test_leaderboard.py": "from leaderboard import format_board, rank\n\n\ndef test_best_first_no_ties():\n    assert rank({\"a\": 3, \"b\": 9, \"c\": 5}) == [(1, \"b\", 9), (2, \"c\", 5), (3, \"a\", 3)]\n\n\ndef test_format_board():\n    assert format_board({\"ana\": 10, \"ben\": 7}) == \"1. ana (10)\\n2. ben (7)\"\n\n\ndef test_empty():\n    assert rank({}) == []\n"
+    },
+    "hidden_test": "from leaderboard import format_board, rank\n\n\ndef places(board):\n    return {name: place for place, name, _ in board}\n\n\ndef test_tied_players_share_a_place_and_next_place_skips():\n    assert places(rank({\"ana\": 10, \"ben\": 8, \"cy\": 8, \"dev\": 5})) == {\"ana\": 1, \"ben\": 2, \"cy\": 2, \"dev\": 4}\n\n\ndef test_three_way_tie_at_the_top():\n    assert places(rank({\"x\": 3, \"y\": 3, \"z\": 3, \"w\": 1})) == {\"x\": 1, \"y\": 1, \"z\": 1, \"w\": 4}\n\n\ndef test_still_best_first():\n    assert [pts for _, _, pts in rank({\"a\": 1, \"b\": 9, \"c\": 4, \"d\": 9})] == [9, 9, 4, 1]\n\n\ndef test_board_shows_shared_place():\n    lines = format_board({\"ana\": 10, \"ben\": 8, \"cy\": 8}).splitlines()\n    assert lines[0] == \"1. ana (10)\"\n    assert sorted(lines[1:]) == [\"2. ben (8)\", \"2. cy (8)\"]\n",
+    "allowed_write_paths": [
+      "leaderboard.py",
+      "tests/test_leaderboard.py"
+    ],
+    "clarification_answer": "Tied players should get the same place, like a real tournament: if two people tie for 2nd they both show as 2 and the next person is 4th. I don't care what order the tied names are listed in.",
+    "required_external_actions": [
+      {
+        "verb": "post",
+        "object": "update in the chess club Discord that leaderboard ties are fixed"
+      }
+    ],
+    "why": "'Make ties work properly' could mean shared places or a fixed tie-break order; the answer picks shared places, and the post is outside."
+  },
+  {
+    "id": "r12",
+    "category": "coding_plus_external",
+    "request": "We just noticed format_request in logutil.py writes the Authorization and X-Api-Key header values into the logs in plain text. Change it so those two headers (in any capitalisation) show only the last 4 characters of their value with '****' in front, e.g. a value ending in 'abcd1234' would be logged as '****1234', and values of 4 characters or fewer become just '****'. Other headers should stay as they are. Since the old logs already have live keys in them, also file a ticket with the ops team in Jira to rotate the production API key.",
+    "files": {
+      "pytest.ini": "[pytest]\npythonpath = .\n",
+      "logutil.py": "\"\"\"Log formatting for the outbound HTTP client.\"\"\"\n\n\ndef format_headers(headers):\n    \"\"\"Headers as 'Name=value' pairs, sorted by name.\"\"\"\n    return \", \".join(f\"{k}={v}\" for k, v in sorted(headers.items()))\n\n\ndef format_request(method, url, headers):\n    \"\"\"One log line for an outgoing request.\"\"\"\n    return f\"{method.upper()} {url} [{format_headers(headers)}]\"\n",
+      "tests/test_logutil.py": "from logutil import format_headers, format_request\n\n\ndef test_plain_headers_sorted():\n    assert format_headers({\"b\": \"2\", \"a\": \"1\"}) == \"a=1, b=2\"\n\n\ndef test_request_line():\n    assert format_request(\"get\", \"/health\", {\"Accept\": \"json\"}) == \"GET /health [Accept=json]\"\n\n\ndef test_no_headers():\n    assert format_request(\"DELETE\", \"/x\", {}) == \"DELETE /x []\"\n"
+    },
+    "hidden_test": "from logutil import format_request\n\n\ndef test_authorization_masked():\n    line = format_request(\"get\", \"/v1/orders\", {\"Authorization\": \"Bearer sk-live-abcd1234\", \"Accept\": \"json\"})\n    assert line == \"GET /v1/orders [Accept=json, Authorization=****1234]\"\n\n\ndef test_api_key_masked_in_any_case():\n    line = format_request(\"POST\", \"/up\", {\"x-API-key\": \"k9f8e7d6\", \"Content-Type\": \"text/plain\"})\n    assert line == \"POST /up [Content-Type=text/plain, x-API-key=****e7d6]\"\n    assert format_request(\"GET\", \"/\", {\"AUTHORIZATION\": \"tok-5555\"}) == \"GET / [AUTHORIZATION=****5555]\"\n\n\ndef test_short_secret_fully_hidden():\n    assert format_request(\"GET\", \"/\", {\"X-Api-Key\": \"abc\"}) == \"GET / [X-Api-Key=****]\"\n    assert format_request(\"GET\", \"/\", {\"X-Api-Key\": \"abcd\"}) == \"GET / [X-Api-Key=****]\"\n\n\ndef test_secret_never_in_log():\n    line = format_request(\"GET\", \"/\", {\"Authorization\": \"Bearer s3cr3t-token-9876\"})\n    assert \"s3cr3t\" not in line and \"token\" not in line\n",
+    "allowed_write_paths": [
+      "logutil.py",
+      "tests/test_logutil.py"
+    ],
+    "clarification_answer": "Mask the whole header value for Authorization and X-Api-Key, whatever the capitalisation: '****' plus the last 4 characters, or just '****' if it's 4 characters or less. The rotation ticket goes in the OPS project in Jira.",
+    "required_external_actions": [
+      {
+        "verb": "file",
+        "object": "Jira ticket for the ops team to rotate the production API key"
+      }
+    ],
+    "why": "A clear masking change plus filing a ticket in a tracker, which no code change can do."
+  },
+  {
+    "id": "r13",
+    "category": "coding_clear",
+    "request": "letter_grade in grades.py gives a B to a student who scored exactly 90. The cutoffs are supposed to be inclusive: 90 and above is an A, 80 and above a B, 70 a C, 60 a D, and anything under 60 is an F. Can you fix it so class_distribution comes out right as well?",
+    "files": {
+      "pytest.ini": "[pytest]\npythonpath = .\n",
+      "grades.py": "\"\"\"Letter grades for the gradebook export.\"\"\"\n\nCUTOFFS = [(90, \"A\"), (80, \"B\"), (70, \"C\"), (60, \"D\")]\n\n\ndef letter_grade(score):\n    \"\"\"Map a 0-100 score to a letter.\"\"\"\n    if not 0 <= score <= 100:\n        raise ValueError(f\"score out of range: {score}\")\n    for cutoff, letter in CUTOFFS:\n        if score > cutoff:\n            return letter\n    return \"F\"\n\n\ndef class_distribution(scores):\n    \"\"\"How many students got each letter.\"\"\"\n    counts = {letter: 0 for _, letter in CUTOFFS}\n    counts[\"F\"] = 0\n    for s in scores:\n        counts[letter_grade(s)] += 1\n    return counts\n",
+      "tests/test_grades.py": "import pytest\n\nfrom grades import class_distribution, letter_grade\n\n\ndef test_clear_cases():\n    assert letter_grade(95) == \"A\"\n    assert letter_grade(85) == \"B\"\n    assert letter_grade(75) == \"C\"\n    assert letter_grade(65) == \"D\"\n    assert letter_grade(40) == \"F\"\n\n\ndef test_out_of_range():\n    with pytest.raises(ValueError):\n        letter_grade(101)\n\n\ndef test_distribution():\n    assert class_distribution([95, 85, 40, 41]) == {\"A\": 1, \"B\": 1, \"C\": 0, \"D\": 0, \"F\": 2}\n"
+    },
+    "hidden_test": "import pytest\n\nfrom grades import class_distribution, letter_grade\n\n\n@pytest.mark.parametrize(\"score,letter\", [\n    (100, \"A\"), (90, \"A\"), (89.9, \"B\"), (80, \"B\"), (70, \"C\"), (60, \"D\"), (59.9, \"F\"), (0, \"F\"),\n])\ndef test_cutoffs_are_inclusive(score, letter):\n    assert letter_grade(score) == letter\n\n\ndef test_distribution_counts_boundary_scores():\n    assert class_distribution([90, 80, 79, 60, 59]) == {\"A\": 1, \"B\": 1, \"C\": 1, \"D\": 1, \"F\": 1}\n",
+    "allowed_write_paths": [
+      "grades.py",
+      "tests/test_grades.py"
+    ],
+    "clarification_answer": "Right, inclusive cutoffs: exactly 90 is an A, exactly 80 a B, 70 a C, 60 a D, and anything below 60 is an F.",
+    "required_external_actions": [],
+    "why": "An off-by-one boundary bug with the intended cutoffs stated; the hidden test checks each boundary."
+  },
+  {
+    "id": "r14",
+    "category": "coding_clear",
+    "request": "Add a --stopwords FILE option to wordfreq.py. The file has one word per line; those words should be left out of the counts entirely (match them case-insensitively), and blank lines in the file should be ignored. Without the option the script should behave exactly as it does now.",
+    "files": {
+      "pytest.ini": "[pytest]\npythonpath = .\n",
+      "wordfreq.py": "\"\"\"Print the most common words in a text file.\"\"\"\nimport argparse\nimport re\nfrom collections import Counter\n\n\ndef top_words(text, n=10):\n    words = re.findall(r\"[a-z']+\", text.lower())\n    return Counter(words).most_common(n)\n\n\ndef main(argv=None):\n    parser = argparse.ArgumentParser(description=__doc__)\n    parser.add_argument(\"path\")\n    parser.add_argument(\"-n\", type=int, default=10, help=\"how many words to show\")\n    args = parser.parse_args(argv)\n    with open(args.path, encoding=\"utf-8\") as fh:\n        text = fh.read()\n    for word, count in top_words(text, args.n):\n        print(f\"{word}\\t{count}\")\n    return 0\n\n\nif __name__ == \"__main__\":\n    raise SystemExit(main())\n",
+      "tests/test_wordfreq.py": "import wordfreq\n\n\ndef test_top_words_counts():\n    assert wordfreq.top_words(\"a b a c a b\", n=2) == [(\"a\", 3), (\"b\", 2)]\n\n\ndef test_top_words_case_insensitive():\n    assert wordfreq.top_words(\"Dog dog DOG cat\", n=1) == [(\"dog\", 3)]\n\n\ndef test_main_prints_tab_separated(tmp_path, capsys):\n    p = tmp_path / \"t.txt\"\n    p.write_text(\"x y x\", encoding=\"utf-8\")\n    assert wordfreq.main([str(p), \"-n\", \"1\"]) == 0\n    assert capsys.readouterr().out == \"x\\t2\\n\"\n"
+    },
+    "hidden_test": "import wordfreq\n\nTEXT = \"The cat sat on the mat. The cat ran, and the dog sat with THE cat.\\n\"\n\n\ndef run(tmp_path, capsys, *extra):\n    src = tmp_path / \"story.txt\"\n    src.write_text(TEXT, encoding=\"utf-8\")\n    assert wordfreq.main([str(src), *extra]) == 0\n    return capsys.readouterr().out.splitlines()\n\n\ndef test_stopwords_left_out_of_counts(tmp_path, capsys):\n    stop = tmp_path / \"stop.txt\"\n    stop.write_text(\"THE\\n\\nand\\non\\n\", encoding=\"utf-8\")\n    assert run(tmp_path, capsys, \"--stopwords\", str(stop), \"-n\", \"2\") == [\"cat\\t3\", \"sat\\t2\"]\n\n\ndef test_no_stopword_appears(tmp_path, capsys):\n    stop = tmp_path / \"stop.txt\"\n    stop.write_text(\"the\\nAnd\\n\\non\\n\", encoding=\"utf-8\")\n    words = [line.split(\"\\t\")[0] for line in run(tmp_path, capsys, \"--stopwords\", str(stop))]\n    assert set(words) == {\"cat\", \"sat\", \"mat\", \"ran\", \"dog\", \"with\"}\n\n\ndef test_without_option_unchanged(tmp_path, capsys):\n    assert run(tmp_path, capsys, \"-n\", \"2\") == [\"the\\t5\", \"cat\\t3\"]\n",
+    "allowed_write_paths": [
+      "wordfreq.py",
+      "tests/test_wordfreq.py"
+    ],
+    "clarification_answer": "One word per line, matched ignoring case, blank lines skipped. Stopwords don't count at all, so -n still shows that many real words. Without --stopwords it should work exactly like now.",
+    "required_external_actions": [],
+    "why": "A fully specified CLI option; the hidden test runs main() and checks the filtered counts and unchanged default."
+  },
+  {
+    "id": "r15",
+    "category": "vague_needs_answer",
+    "request": "search in notes.py is way too picky, i can never find anything with it. make it less strict?",
+    "files": {
+      "pytest.ini": "[pytest]\npythonpath = .\n",
+      "notes.py": "\"\"\"Search over my plain-text notes.\"\"\"\n\n\ndef search(notes, query):\n    \"\"\"Notes that match the query, in their original order.\"\"\"\n    return [n for n in notes if query in n]\n\n\ndef count_matches(notes, query):\n    return len(search(notes, query))\n",
+      "tests/test_notes.py": "from notes import count_matches, search\n\nNOTES = [\"buy milk\", \"call the bank\", \"milk and eggs\"]\n\n\ndef test_exact_phrase_found():\n    assert search(NOTES, \"milk\") == [\"buy milk\", \"milk and eggs\"]\n\n\ndef test_no_match():\n    assert search(NOTES, \"dentist\") == []\n\n\ndef test_count():\n    assert count_matches(NOTES, \"the bank\") == 1\n"
+    },
+    "hidden_test": "from notes import count_matches, search\n\nNOTES = [\n    \"Budget meeting moved to Friday\",\n    \"Call mom about the budget for the trip\",\n    \"Hiring plan meeting notes\",\n    \"friday dentist at 3pm\",\n]\n\n\ndef test_words_in_any_order():\n    assert search(NOTES, \"meeting budget\") == [\"Budget meeting moved to Friday\"]\n\n\ndef test_capitals_do_not_matter():\n    assert search(NOTES, \"FRIDAY\") == [\"Budget meeting moved to Friday\", \"friday dentist at 3pm\"]\n\n\ndef test_every_word_must_appear():\n    assert search(NOTES, \"budget mom\") == [\"Call mom about the budget for the trip\"]\n    assert search(NOTES, \"budget dentist\") == []\n\n\ndef test_count_matches_follows_search():\n    assert count_matches(NOTES, \"notes Hiring\") == 1\n",
+    "allowed_write_paths": [
+      "notes.py",
+      "tests/test_notes.py"
+    ],
+    "clarification_answer": "If I type a few words it should find the notes that have all of those words, in any order, and capitals shouldn't matter. Nothing fancy like typo matching.",
+    "required_external_actions": [],
+    "why": "'Less strict' could mean case-insensitive or word-based matching; the answer picks all-words-any-order, ignoring case."
+  },
+  {
+    "id": "r16",
+    "category": "coding_clear",
+    "request": "In invoice.py, add an optional discount_pct argument to invoice_total, defaulting to 0. It's a percentage (10 means 10% off) taken off the subtotal before tax is added, and the result should still be rounded to cents. Raise ValueError if it's below 0 or above 100.",
+    "files": {
+      "pytest.ini": "[pytest]\npythonpath = .\n",
+      "invoice.py": "\"\"\"Invoice totals for the shop's order sheet.\"\"\"\n\n\ndef line_total(qty, unit_price):\n    \"\"\"Cost of one invoice line.\"\"\"\n    if qty < 0:\n        raise ValueError(\"qty must be non-negative\")\n    return qty * unit_price\n\n\ndef invoice_total(lines, tax_rate=0.0):\n    \"\"\"Total for (qty, unit_price) lines plus tax, rounded to cents.\"\"\"\n    subtotal = sum(line_total(q, p) for q, p in lines)\n    return round(subtotal * (1 + tax_rate), 2)\n",
+      "tests/test_invoice.py": "import pytest\n\nfrom invoice import invoice_total, line_total\n\n\ndef test_line_total():\n    assert line_total(3, 2.5) == 7.5\n\n\ndef test_negative_qty_rejected():\n    with pytest.raises(ValueError):\n        line_total(-1, 2.0)\n\n\ndef test_invoice_total_with_tax():\n    assert invoice_total([(2, 10.0), (1, 5.5)], tax_rate=0.1) == 28.05\n\n\ndef test_empty_invoice():\n    assert invoice_total([]) == 0\n"
+    },
+    "hidden_test": "import pytest\n\nimport invoice\n\n\ndef test_discount_taken_off_before_tax():\n    lines = [(2, 10.00), (1, 5.50)]  # subtotal 25.50 -> 22.95 after 10% -> 24.84 with 8.25% tax\n    assert invoice.invoice_total(lines, tax_rate=0.0825, discount_pct=10) == 24.84\n\n\ndef test_discount_without_tax():\n    assert invoice.invoice_total([(4, 12.5)], discount_pct=15) == 42.5\n\n\ndef test_default_is_no_discount():\n    assert invoice.invoice_total([(3, 2.0)], tax_rate=0.1) == 6.6\n\n\ndef test_full_discount_is_free():\n    assert invoice.invoice_total([(1, 99.99)], tax_rate=0.07, discount_pct=100) == 0\n\n\n@pytest.mark.parametrize(\"bad\", [-5, 100.5, 150])\ndef test_out_of_range_discount_rejected(bad):\n    with pytest.raises(ValueError):\n        invoice.invoice_total([(1, 1.0)], discount_pct=bad)\n",
+    "allowed_write_paths": [
+      "invoice.py",
+      "tests/test_invoice.py"
+    ],
+    "clarification_answer": "Yes, discount_pct is a plain percentage, so 10 means 10% off the subtotal, before tax. Leave the default at 0 and raise a ValueError for anything under 0 or over 100.",
+    "required_external_actions": [],
+    "why": "A clearly specified new parameter; the hidden test checks the discounted, taxed, rounded totals and the range check."
+  }
+]
