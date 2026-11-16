@@ -67,7 +67,9 @@ def test_the_cli_runs_outside_home_with_a_sanitized_profile_and_no_identity_in_i
     assert profile["billingType"] == "stripe_subscription"  # enough for the CLI to treat the login as set up
     assert time.time() * 1000 - profile["profileFetchedAt"] < 60_000  # marked fresh, so not refetched first
     env = seen["env"]
-    assert "CLAUDE_SECURESTORAGE_CONFIG_DIR" not in env  # the login itself stays where it was
+    # "" selects the CLI's default login item; unset, the CLI looks for one named after the per-call
+    # config dir and finds none ("Not logged in", measured live). Only the live test checks the login works.
+    assert env["CLAUDE_SECURESTORAGE_CONFIG_DIR"] == ""
     assert env["GIT_CONFIG_GLOBAL"] == os.devnull and env["GIT_CONFIG_NOSYSTEM"] == "1"
     assert not set(IDENTITY_ENV) & set(env)
     assert seen["cfg_mode"] == 0o700 and seen["file_mode"] == 0o600

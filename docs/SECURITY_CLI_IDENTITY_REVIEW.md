@@ -2,8 +2,7 @@
 
 The reviewer was a separate agent. It read the diff and ran the offline tests and fake-runner
 experiments, with no network and no model calls. It found **4 medium defects, 4 low, and none
-high**. None is fixed yet. **Fix them before merging this branch, and before any evaluation
-relies on `PCIM_CLI_REQUIRE_ISOLATION=1`.**
+high**. **Resolution is at the end of this file.**
 
 ## Confirmed defects
 
@@ -86,3 +85,28 @@ For example, `mkstemp` fails on a read-only workdir.
 - **Per-call config:** created with `mkdtemp` (0700), and the file with `O_EXCL` (0600).
 - **Refusal path:** its messages carry no identity. Routing marks the provider dead and skips its
   other models.
+
+## Resolution (2026-11-16)
+
+- **M1–M4 and L1–L3 are fixed** in `55c6b77` and `0baddbb` (done by the next agent, then
+  checked).
+  - M1: a complete profile is required, and its key set must match the probe record.
+  - M2: the profile is read once, and a missing profile fails closed under `require_isolation`.
+  - M3: the version cache is keyed on the resolved path, inode and modification time, and the call
+    runs that resolved path.
+  - M4: the per-call config is created and cleaned up inside the `try`.
+  - L1: `ensure_ascii=False`, and `--record` requires a positive control.
+  - L2: malformed records are guarded.
+  - L3: the isolation status is returned per call.
+- **L4 was partly fixed, and wrongly at first.** The identity variables are dropped. But following
+  the suggestion to leave `CLAUDE_SECURESTORAGE_CONFIG_DIR` unset broke the login.
+  - With it unset, the CLI derives its login item's name from `CLAUDE_CONFIG_DIR`, which is the
+    per-call directory, so it finds no login.
+  - A live probe showed "Not logged in". The offline tests, which use fake runners, passed.
+  - Restored: the parent's value, else the parent's config dir, else `""` (the default login).
+    The CLI's own code treats `""` that way. The test asserts it, and says why.
+- **Not done.** `HOME`, `USER`, `LOGNAME` and `PWD` still reach the child. Measured on 2.1.316,
+  none of them reaches the model input, but that is a property of this version.
+- **The speculative items stay open.** The strongest of them is a per-request egress filter that
+  blocks any `/v1/messages` body containing a marker. It is worth building before relying on
+  isolation for anything beyond the evaluations.

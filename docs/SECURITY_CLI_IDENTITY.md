@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | **Mitigation in progress, not ready to merge.** It was measured clean on CLI 2.1.316 (10/10 trials). But an independent review found 4 medium defects through which `verified` can be reported while the email still leaks: an incomplete profile, a second profile read that fails open, a stale version cache, and config-dir cleanup. See [SECURITY_CLI_IDENTITY_REVIEW.md](SECURITY_CLI_IDENTITY_REVIEW.md). Until those are fixed, do not rely on `verified`. |
+| **Status** | **Mitigated for CLI 2.1.316, and enforced for identity-sensitive calls.** The 8 independent-review defects (M1–M4, L1–L4) are fixed in `55c6b77` and `0baddbb`. Fixing L4 introduced a regression: it broke the login, so every isolated call failed "Not logged in". That was caught by a live probe, not by the offline tests, and is fixed in the next commit. **14 of 14** isolated trials are clean across all runs, with a positive control showing the email when isolation is off. Other CLI versions are `unverified` until probed. |
 | **Affects** | `src/pcim/adapters/claude_cli.py` on `main` (1f9bd08) and every branch built on it |
 | **Found** | 2026-11-13, in the held-out intent evaluation |
 | **Kind** | Privacy: data reaches the model that CI's consent filter never approved and its receipts never listed |
@@ -85,6 +85,9 @@ working directory.
 | this branch, isolated (`--trials 4 --record`) | 4 | ≥ 4 | **none** (recorded clean) |
 | this branch, isolated (live test, opt-in) | 2 | ≥ 2 | **none** |
 | this branch, isolation off (baseline) | 2 | 2 | account email, email local part, git `user.email` |
+| after the review fixes (M1–L4), 2026-11-16 | 1 | 0 | **the login broke**: "Not logged in". `CLAUDE_SECURESTORAGE_CONFIG_DIR` was left unset, so the CLI looked for a login item named after the per-call config dir |
+| after restoring `CLAUDE_SECURESTORAGE_CONFIG_DIR=""` (`--trials 4 --record`), 2026-11-16 | 4 (2 plain, 2 agent path) | 6 | **none**; the baseline in the same run shows the email (positive control); recorded with the profile key set |
+| live test, 2026-11-16 | 2 | ≥ 2 | **none** |
 
 Markers checked: the account email and its local part, the display, full and organization names,
 the account and organization ids, `$USER`, the home path, and git's `user.name` and `user.email`.
