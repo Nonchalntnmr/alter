@@ -1,0 +1,394 @@
+"""`ci execute`: run an approved plan through the governed workspace agent, step by step.
+
+An approved plan is a dependency graph (intent_compiler.topo_levels). Execution walks it in
+order. Each step is one message to the workspace agent (agent.py), so every tool call it makes
+passes the governor with the current autonomy mode and grants. Approving the plan authorized
+no tool.
+
+Every step is always in exactly one observable state, recorded in the plan:
+
+    not_started → in_progress → done          every tool the step used succeeded (tests passed),
+                                              judged from the task records, never from the model
+                              → incomplete    the turn ended but a tool was denied, failed,
+                                              cancelled or expired, or tests failed
+                              → waiting       an action needs you (ci approve / ci deny)
+                              → failed        the agent could not take the step (provider, vendor)
+                              → halted        Stop-all (ci halt) stopped the turn
+    in_progress, found at the next run → interrupted   the process died mid-step; never re-run
+                                                        silently, because the step may have acted
+    external steps → yours → yours_done       CI cannot do them; you mark them (--done)
+    dependents of a step that is yours → blocked
+    --cancel → cancelled                      the session is closed first, then its pending
+                                              actions are cancelled, so nothing resumes
+
+`--retry STEP` re-runs a failed, interrupted, incomplete or halted step. Nothing else re-runs
+one. A step that is not done stops the plan; only an external step lets independent steps go on.
+
+Completion is about **outcomes**, not steps. A plan is `done` only when every outcome is met:
+- a deliverable or a destructive change by CI is met when every step serving it is `done`;
+- an external action (or a destructive change CI has no step for) is met only when you mark it.
+
+One run at a time: `execute`, and `ci approve` / `ci deny` on a plan's action, hold an OS lock
+on the plan (released if the process dies). Steps run one after another; nothing runs in the
+background, and nothing runs in parallel.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import fcntl
+import os
+from pathlib import Path
+
+from . import intent_compiler as ic
+from .agent import Agent
+from .governor import Governor
+from .registry import route
+from .tasks import TERMINAL, TaskQueue
+from .types import utcnow
+from .workspace import Workspace
+
+DONE = ("done", "yours_done")
+RETRYABLE = ("failed", "interrupted", "incomplete", "halted")
+STOPS = RETRYABLE + ("cancelled",)  # a step in one of these stops the plan until you act
+NOT_RUNNABLE = ("done", "cancelled")
+BAD_TASK = ("denied", "failed", "cancelled", "expired", "interrupted")
+STEP_STATES = ("not_started", "in_progress", "done", "incomplete", "waiting", "failed", "halted", "interrupted",
+               "yours", "yours_done", "blocked", "cancelled")
+
+
+class ExecError(ValueError):
+    pass
+
+
+# ---------------------------------------------------------------------- one run at a time
+@contextlib.contextmanager
+def plan_lock(ci, plan_id: str):
+    """Exclusive, non-blocking, released by the OS if the holder dies."""
+    d = Path(ci.store.path).parent if getattr(ci.store, "path", ":memory:") != ":memory:" else None
+    if d is None:
+        yield
+        return
+    path = d / f".plan-{plan_id}.lock"
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise ExecError("this plan is being run or resolved in another process; wait for it to finish") from None
+        yield
+    finally:
+        os.close(fd)
+
+
+def plan_for_task(ci, uid: str, task_id: str) -> str | None:
+    """The plan whose waiting step is waiting on this task, if any."""
+    for rec in ic.records(ci, uid):
+        for st in (rec.get("steps_state") or {}).values():
+            if st.get("status") == "waiting" and task_id in st.get("pending", []):
+                return rec["id"]
+    return None
+
+
+# ---------------------------------------------------------------------- helpers
+def _message(rec: dict, step: dict, n: int, total: int) -> str:
+    s = rec["spec"]
+    crit = "; ".join(s["success_criteria"][:4]) or "none stated"
+    return (f"Plan {rec['id']}, step {step['id']} ({n} of {total}): {step['action']}\n"
+            f"Overall goal: {s['goal']}\nSuccess criteria for the whole plan: {crit}\n"
+            "Do only this step. Use tools to check rather than assume, and end by saying what you verified "
+            "and what you did not.")
+
+
+def _model(vendors: set[str], provider: str | None, model: str | None) -> tuple[str, str | None]:
+    if provider:
+        return provider, model
+    r = route("chat", vendors)
+    if r.entry is None:
+        raise ExecError(f"no model may run this project's steps: {r.reason}")
+    return r.entry.provider, r.entry.model or None
+
+
+def _task_verdict(tasks: list[dict]) -> tuple[bool, list[str]]:
+    """(achieved, problems) from the step's task records alone."""
+    problems = []
+    for t in tasks:
+        if t["status"] in BAD_TASK:
+            problems.append(f"{t['tool']} {t['status']}" + (f": {t['reason']}" if t.get("reason") else ""))
+        elif t["status"] not in TERMINAL:
+            problems.append(f"{t['tool']} {t['status']}: never finished")
+        elif t["tool"] == "run_tests" and t.get("reason"):  # it ran, and the tests did not pass
+            problems.append(f"run_tests: {t['reason']}")
+    return not problems, problems
+
+
+def _session_tasks(queue: TaskQueue, uid: str, project_id: str, session: str | None, since: str) -> list[dict]:
+    """Every task the step's session created since the step started, including ones a resumed
+    turn ran after you approved something."""
+    return [t.public() for t in reversed(queue.list(uid, project_id, limit=10_000))
+            if t.session_id == session and t.created_at >= since]
+
+
+def _clear_stale_pending(ci, agent: Agent, queue: TaskQueue, uid: str, project_id: str) -> str | None:
+    """Stop-all cancels pending actions without resuming their session, and a cancelled action can
+    no longer be approved or denied, so the session would refuse every new message forever (a
+    defect in agent.py, reported, not fixed here). Before a step runs, close such a session; its
+    reflection is built from task records, so nothing in it reads as done that did not run."""
+    sid = agent.open_session(uid, project_id)
+    if not sid:
+        return None
+    pend = agent.transcript(uid, project_id, sid).get("pending") or []
+    if pend and all(queue.get(uid, t).status in TERMINAL for t in pend):
+        agent.close_session(uid, project_id, sid)
+        ci.audit.append(uid, "plan.close_stale_session", session=sid, pending=len(pend))
+        return sid
+    return None
+
+
+def _outcomes(rec: dict, state: dict) -> dict:
+    """Per outcome: met | unmet | yours_pending | yours_done, with the steps that decide it."""
+    spec, out = rec["spec"], {}
+    prev = rec.get("outcomes_state") or {}
+    non_external = [s for s in spec["steps"] if s["kind"] != "external"]
+    for o in spec.get("outcomes", []):
+        if (prev.get(o["id"]) or {}).get("status") == "yours_done":
+            out[o["id"]] = prev[o["id"]]
+            continue
+        if o.get("by") == "you":
+            out[o["id"]] = {"status": "yours_pending"}
+            continue
+        linked = [s for s in spec["steps"] if o["id"] in s.get("serves", [])]
+        serving = linked or non_external
+        statuses = {s["id"]: (state.get(s["id"]) or {}).get("status", "not_started") for s in serving}
+        met = bool(serving) and all(v in DONE for v in statuses.values())
+        out[o["id"]] = {"status": "met" if met else "unmet", "steps": statuses,
+                        "judged_by": "linked steps" if linked else "all CI steps (the plan linked none to this outcome)"}
+    return out
+
+
+def _now() -> str:
+    return utcnow().isoformat()
+
+
+# ---------------------------------------------------------------------- execute
+def execute(ci, uid: str, plan_id: str, project_id: str, vendors: set[str], *, provider: str | None = None,
+            model: str | None = None, agent: Agent | None = None, done: list[str] | None = None,
+            retry: list[str] | None = None, cancel: bool = False) -> dict:
+    with plan_lock(ci, plan_id):
+        return _execute(ci, uid, plan_id, project_id, vendors, provider=provider, model=model, agent=agent,
+                        done=done, retry=retry, cancel=cancel)
+
+
+def _execute(ci, uid, plan_id, project_id, vendors, *, provider, model, agent, done, retry, cancel) -> dict:
+    rec = ic.get(ci, uid, plan_id)
+    if rec["status"] in NOT_RUNNABLE:
+        raise ExecError(f"plan is {rec['status']}")
+    if rec["status"] in ("needs_answers", "awaiting_approval", "ready", "blocked", "invalid"):
+        raise ExecError(f"plan is {rec['status']}; only an approved plan runs (ci plan approve {rec['id']})")
+    if rec.get("project_id") and rec["project_id"] != project_id:
+        raise ExecError("this plan was compiled in another project's directory; run it from there")
+    ws = Workspace(ci)
+    queue = TaskQueue(ws, Governor(ws))
+    agent = agent or Agent(ci, ws, queue)
+    state: dict = rec.setdefault("steps_state", {})
+    ostate: dict = rec.setdefault("outcomes_state", {})
+    steps = {s["id"]: s for s in rec["spec"]["steps"]}
+    outcomes = {o["id"]: o for o in rec["spec"].get("outcomes", [])}
+    order = [sid for level in rec["spec"]["levels"] for sid in level]
+
+    if cancel:
+        return _cancel(ci, uid, rec, state, agent, project_id)
+
+    for x in done or []:
+        if x in outcomes:
+            if outcomes[x].get("by") != "you":
+                raise ExecError(f"{x} is CI's to complete; its steps' task records decide it, not a mark")
+            ostate[x] = {"status": "yours_done", "at": _now()}
+        elif x in steps and steps[x]["kind"] == "external":
+            state[x] = {"status": "yours_done", "at": _now()}
+            for oid in steps[x].get("serves", []):
+                if oid in outcomes and outcomes[oid].get("by") == "you":
+                    ostate[oid] = {"status": "yours_done", "at": _now(), "via": x}
+        else:
+            raise ExecError(f"only an external step or an outcome that is yours can be marked done; {x} is neither")
+    for x in retry or []:
+        if x not in steps:
+            raise ExecError(f"no step {x}")
+        cur = (state.get(x) or {}).get("status")
+        if cur not in RETRYABLE:
+            raise ExecError(f"step {x} is {cur or 'not_started'}; only {', '.join(RETRYABLE)} steps can be retried")
+        state[x] = {"status": "not_started", "previous": state.get(x), "at": _now()}
+
+    chosen: list = []  # the model is resolved only if a step actually needs one
+
+    def pick() -> tuple[str, str | None]:
+        if not chosen:
+            chosen.append(_model(vendors, provider, model))
+        return chosen[0]
+
+    rec["status"] = "executing"
+    halt = None
+    for n, sid in enumerate(order, 1):
+        step, st = steps[sid], state.get(sid) or {}
+        status = st.get("status", "not_started")
+        if status in DONE:
+            continue
+        if status == "in_progress":  # we hold the plan's lock, so the run that set this is gone
+            state[sid] = dict(st, status="interrupted", at=_now())
+            halt = "interrupted"
+            break
+        if status in STOPS:
+            halt = status
+            break
+        blocked_by = [d for d in step["depends_on"] if (state.get(d) or {}).get("status") not in DONE]
+        if blocked_by:
+            state[sid] = {"status": "blocked", "by": blocked_by, "at": _now()}
+            continue
+        if step["kind"] == "external":
+            state[sid] = {"status": "yours", "at": _now()}
+            continue
+        if status == "waiting":
+            if any(queue.get(uid, t).status not in TERMINAL for t in st.get("pending", [])):
+                halt = "waiting"
+                break
+            tr = agent.transcript(uid, project_id, st.get("session"))
+            live = [t for t in tr.get("pending", []) if queue.get(uid, t).status not in TERMINAL]
+            if live:  # approving one action led to another that needs you
+                state[sid] = dict(st, pending=live)
+                halt = "waiting"
+                break
+            if st.get("started"):
+                tasks = _session_tasks(queue, uid, project_id, st.get("session"), st["started"])
+            else:  # recorded before steps carried a start time: the turn's own task list
+                tasks = [queue.get(uid, t).public() for t in dict.fromkeys(st.get("tasks", []) + st.get("pending", []))]
+            ok, problems = _task_verdict(tasks)
+            verdict = "done" if ok else ("halted" if ws.is_halted(uid) else "incomplete")  # Stop-all cancelled it
+            state[sid] = dict(st, status=verdict, problems=problems,
+                              task_status={t["id"]: t["status"] for t in tasks}, at=_now())
+            if not ok:
+                halt = verdict
+                break
+            continue
+        if ws.is_halted(uid):  # Stop-all: leave the step untouched, so nothing reads as attempted
+            halt = "halted"
+            break
+        prov, mdl = pick()
+        carry = {"previous": st["previous"]} if st.get("previous") else {}  # a retry keeps the earlier attempt
+        # Runnable. Record in_progress first, so a crash during the step shows as interrupted
+        # instead of being repeated.
+        stale = _clear_stale_pending(ci, agent, queue, uid, project_id)
+        if stale:
+            carry = carry | {"closed_stale_session": stale}
+        started = _now()
+        state[sid] = carry | {"status": "in_progress", "started": started, "at": started,
+                              "model": f"{prov}:{mdl or ''}"}
+        rec["steps_state"] = state
+        ic._save(ci, uid, rec)
+        try:
+            turn = agent.send(uid, project_id, _message(rec, step, n, len(order)), prov, mdl)
+        except (RuntimeError, ValueError, PermissionError) as e:  # halted meanwhile, vendor not allowed, provider down
+            halted = ws.is_halted(uid)
+            state[sid] = carry | {"status": "halted" if halted else "failed", "why": str(e)[:300],
+                                  "started": started, "at": _now()}
+            halt = state[sid]["status"]
+            break
+        entry = carry | {"session": turn.session_id, "text": turn.text[:2000], "tasks": [t["id"] for t in turn.tasks],
+                 "task_status": {t["id"]: t["status"] for t in turn.tasks}, "model": f"{prov}:{mdl or ''}",
+                 "started": started, "at": _now()}
+        if turn.status == "awaiting_approval":
+            state[sid] = entry | {"status": "waiting", "pending": list(turn.pending)}
+            halt = "waiting"
+            break
+        if turn.status != "done":
+            stopped = "halted" if turn.stop_reason == "halted" or ws.is_halted(uid) else "failed"
+            state[sid] = entry | {"status": stopped, "why": f"{turn.status}: {turn.stop_reason or ''}".strip(": ")}
+            halt = stopped
+            break
+        ok, problems = _task_verdict(turn.tasks)
+        state[sid] = entry | {"status": "done" if ok else "incomplete", "problems": problems}
+        if not ok:
+            halt = "incomplete"
+            break
+
+    for sid in order:  # every step has a recorded state, including the ones not reached
+        state.setdefault(sid, {"status": "not_started"})
+    rec["steps_state"] = state
+    rec["outcomes_state"] = _outcomes(rec, state)
+    o_status = [v["status"] for v in rec["outcomes_state"].values()]
+    steps_ok = all(state[s]["status"] in DONE for s in order)
+    if halt:
+        rec["status"] = halt
+    elif steps_ok and all(s in ("met", "yours_done") for s in o_status):
+        rec["status"] = "done"
+    elif "yours_pending" in o_status or any(state[s]["status"] in ("yours", "blocked") for s in order):
+        rec["status"] = "awaiting_you"
+    else:
+        rec["status"] = "incomplete"
+    ic._save(ci, uid, rec)
+    ci.audit.append(uid, "plan.execute", plan=rec["id"], status=rec["status"],
+                    steps_done=sum(1 for s in order if state[s]["status"] in DONE), steps=len(order),
+                    outcomes_met=sum(1 for s in o_status if s in ("met", "yours_done")), outcomes=len(o_status))
+    return {"plan": rec, "outcome": rec["status"]}
+
+
+def _cancel(ci, uid: str, rec: dict, state: dict, agent: Agent, project_id: str) -> dict:
+    """Close each waiting step's session first, so cancelling its actions resumes nothing; then
+    cancel them. Steps not done are recorded as cancelled; done ones keep their evidence."""
+    n, sessions = 0, set()
+    for sid, st in list(state.items()):
+        if st.get("status") == "waiting":
+            if st.get("session") and st["session"] not in sessions:
+                with contextlib.suppress(KeyError):
+                    agent.close_session(uid, project_id, st["session"])
+                sessions.add(st["session"])
+            for t in st.get("pending", []):
+                try:
+                    agent.cancel(uid, t)
+                    n += 1
+                except Exception:  # noqa: BLE001 - already resolved; the plan is cancelled regardless
+                    pass
+    for s in rec["spec"]["steps"]:
+        cur = state.get(s["id"]) or {"status": "not_started"}
+        if cur["status"] not in DONE:
+            state[s["id"]] = dict(cur, status="cancelled", was=cur["status"], at=_now())
+    rec["status"] = "cancelled"
+    rec["outcomes_state"] = _outcomes(rec, state)
+    ic._save(ci, uid, rec)
+    ci.audit.append(uid, "plan.cancel", plan=rec["id"], pending_cancelled=n, sessions_closed=len(sessions))
+    return {"plan": rec, "outcome": "cancelled"}
+
+
+def render(res: dict) -> str:
+    rec = res["plan"]
+    L = [f"plan {rec['id']} · {rec['status']}"]
+    for level in rec["spec"]["levels"]:
+        for sid in level:
+            s = next(x for x in rec["spec"]["steps"] if x["id"] == sid)
+            st = rec["steps_state"].get(sid) or {"status": "not_started"}
+            extra = ""
+            if st.get("task_status"):
+                extra = " · tools: " + ", ".join(f"{t[-6:]}={v}" for t, v in st["task_status"].items())
+            if st.get("by"):
+                extra = f" · waiting on {', '.join(st['by'])}"
+            L.append(f"  {sid} [{s['kind']}] {st['status']:<12} {s['action'][:64]}{extra}")
+            for pr in st.get("problems") or []:
+                L.append(f"      ! {pr}")
+            if st.get("why"):
+                L.append(f"      ! {st['why'][:160]}")
+            if st.get("status") == "waiting":
+                L += [f"      approve: ci approve {t}   ·   deny: ci deny {t}" for t in st.get("pending", [])]
+            if st.get("status") == "yours":
+                L.append(f"      yours to do; then: ci execute {rec['id']} --done {sid}")
+            if st.get("status") in RETRYABLE:
+                L.append(f"      re-run deliberately: ci execute {rec['id']} --retry {sid}")
+            if st.get("status") == "halted":
+                L.append("      Stop-all is on: ci resume, then retry")
+    if rec.get("outcomes_state"):
+        L.append("Outcomes:")
+        for o in rec["spec"].get("outcomes", []):
+            os_ = rec["outcomes_state"].get(o["id"]) or {}
+            hint = f"  (when done: ci execute {rec['id']} --done {o['id']})" if os_.get("status") == "yours_pending" else ""
+            L.append(f"  {o['id']} {os_.get('status', '?'):<13} {o['text'][:70]}{hint}")
+    if rec["status"] != "done":
+        L.append(f"Not done: {rec['status']}. Nothing above is complete unless it says done, met or yours_done.")
+    return "\n".join(L)

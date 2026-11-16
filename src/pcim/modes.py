@@ -29,7 +29,9 @@ import dataclasses
 
 from .assist import GROWTH_MODES
 
-MODES = ("execute", "amplify", "learn", "challenge")
+MODES = ("execute", "amplify", "learn", "challenge", "plan")
+# Operations, not ways of helping: chosen by a command (`ci plan`), never as a default.
+INTERNAL_MODES = frozenset({"plan"})
 DEFAULT_MODE = "execute"
 ALIASES = {"e": "execute", "x": "execute", "exec": "execute", "a": "amplify", "amp": "amplify",
            "l": "learn", "teach": "learn", "c": "challenge", "adversarial": "challenge"}
@@ -50,6 +52,32 @@ CHALLENGE_FORMAT = (
     "\"what_would_change_my_mind\": string, \"verdict\": one or two sentences}. List at least two assumptions and "
     "one counterexample. Mark an assumption high only if the claim fails without it. Never invent facts about the "
     "person; work only from what the request and the provided context say.")
+
+
+# The task specification intent_compiler.py parses and gates. Confidences are the model's
+# estimates; the gate that decides what happens next is code, not the model.
+PLAN_FORMAT = (
+    "The request may be one word, shorthand or a rough idea. Do not do the work: reconstruct what the person most "
+    "likely wants and plan it. Reply with ONE JSON object and nothing else: {\"interpretations\": [{\"goal\": "
+    "string, \"p\": probability 0 to 1}] (the readings you considered, most likely first, p summing to at most 1), "
+    "\"goal\": the most likely goal in one sentence, \"outcomes\": [{\"id\": \"o1\", \"text\": what the person "
+    "asked to end up with or to have happened, \"kind\": \"deliverable\"|\"external_action\"|"
+    "\"destructive_change\", \"quote\": the words of the request it comes from, \"done_when\": a checkable "
+    "condition}] (an external_action is anything that sends, posts, publishes, books, buys, pays, schedules, "
+    "submits, deploys, shares or contacts someone; a destructive_change deletes, overwrites or resets something; "
+    "keep every action the person asked for as an outcome even if you can only prepare it), \"deliverables\": "
+    "[what the person ends up with], \"constraints\": [{\"text\", \"source\": \"request\"|\"notes\"|"
+    "\"profile\"|\"assumed\", \"notes\": [the numbers of the notes it comes from, only for source notes]}], "
+    "\"conflicts\": [constraints in the request that cannot both hold], \"success_criteria\": [checkable "
+    "statements], \"dependencies\": [what must exist or be true first], \"steps\": [{\"id\": \"s1\", "
+    "\"action\": string, \"kind\": \"think\"|\"read\"|\"run\"|\"write\"|\"external\", \"serves\": "
+    "[outcome ids], \"role\": \"preparatory\"|\"fulfilling\", \"depends_on\": [step ids]}], \"assumptions\": "
+    "[{\"text\", \"confidence\": 0 to 1, \"consequential\": true if acting on it wrongly would waste real "
+    "effort, spend money, change or delete something, or contact anyone}], \"questions\": [the fewest questions "
+    "that would settle the consequential assumptions and conflicts]}. Kinds: think = reasoning or writing an "
+    "answer; read = reading the person's files; run = running code or tests; write = creating or changing files; "
+    "external = doing an external_action. Drafting something is preparatory, never a replacement for sending or "
+    "posting it. Never invent facts about the person; cite a note only if it says what you claim.")
 
 
 def normalize(mode: str | None) -> str | None:
@@ -89,4 +117,6 @@ def resolve(requested: str | None, default: str | None, task_type: str, growth_t
         return ModeDecision(mode, source, why, "amplify", None, ())
     if mode == "challenge":
         return ModeDecision(mode, source, why, "challenge", None, (CHALLENGE_FORMAT,))
+    if mode == "plan":
+        return ModeDecision(mode, source, why, "plan", None, (PLAN_FORMAT,))
     return ModeDecision(mode, source, why, None, GROWTH_MODES, (LEARN_DIRECTIVE,))

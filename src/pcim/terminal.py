@@ -18,6 +18,18 @@
     ci scorecard [--days 7]                                   productivity / cognitive / orchestration
     ci weekly [--days 7] [--deep [--yes]] [--apply] [--dry-run] [--history] [--rollback N] [--forget] [--name N]
     ci status
+    ci plan "rough idea"                                      intent compiler: goal, steps, assumptions, the
+                                                              questions that matter; nothing runs
+    ci plan [list] | show <id> | answer <id> "…" | approve <id>
+    ci execute <plan> [--done ID] [--retry STEP] [--cancel]   run an approved plan, step by step, through the
+                                                              governed workspace agent (inside its project folder)
+    ci approve <task> · ci deny <task> ["why"]                resolve an action a plan step is waiting on
+    ci halt · ci resume                                       Stop-all: cancel every pending or running action
+    ci learn "…"                                              same as ci -l
+    ci twin                                                   the Cognitive Twin's picture, labelled by evidence
+    ci mesh [bench [--live] | place embed|generate|verify --sensitivity S]
+                                                              your compute, measured; where work may run
+    ci audit [--limit N]                                      verify the audit chain; what CI did
 
 Workspace-aware: inside a directory that a project has authorized, requests also use that
 project's memory, and only the vendors that project allows. Data and identity are the same as
@@ -28,6 +40,7 @@ subcommand name needs quotes, or `ci ask …`.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import dataclasses
 import json
 import sys
@@ -44,7 +57,8 @@ from .types import approx_tokens
 from .workspace import Workspace
 
 SUBCOMMANDS = ("ask", "route", "mode", "prefer", "models", "outcome", "practice", "skills", "scorecard",
-               "weekly", "status", "challenge", "help")
+               "weekly", "status", "challenge", "plan", "mesh", "twin", "audit", "learn", "execute", "approve", "deny", "halt",
+               "resume", "help")
 # Explicit words only: "…should I say yes" is a question, not a recorded correct attempt.
 RIGHT = {"right", "correct"}
 WRONG = {"wrong", "incorrect"}
@@ -526,6 +540,301 @@ def cmd_status(argv: list[str]) -> int:
     return 0
 
 
+
+# ---------------------------------------------------------------------- plan (intent compiler)
+def cmd_plan(argv: list[str]) -> int:
+    from . import intent_compiler as ic
+    actions = ("show", "answer", "approve", "list")
+    ci, uid = _open()
+    if not argv or argv[0] == "list":
+        recs = ic.records(ci, uid)[-15:]
+        if not recs:
+            print('No plans yet: ci plan "rough idea"')
+        for r in reversed(recs):
+            goal = (r.get("spec") or {}).get("goal") or r.get("error") or r["text"]
+            print(terminal_safe(f"{r['id']}  {r['status']:<18} {goal[:90]}"))
+        return 0
+    if argv[0] in actions[:3]:
+        if len(argv) < 2 or (argv[0] == "answer" and len(argv) < 3):
+            print(f"usage: ci plan {argv[0]} <id>" + (' "answers"' if argv[0] == "answer" else ""), file=sys.stderr)
+            return 2
+        try:
+            if argv[0] == "show":
+                rec = ic.get(ci, uid, argv[1])
+            elif argv[0] == "approve":
+                rec = ic.approve(ci, uid, argv[1])
+            else:
+                rec = ic.answer(ci, uid, argv[1], " ".join(argv[2:]))
+        except KeyError:
+            print(f"no plan {argv[1]}", file=sys.stderr)
+            return 2
+        except ValueError as e:
+            print(e, file=sys.stderr)
+            return 2
+        except RoutingError as e:
+            print("\n".join(e.plan.explain()), file=sys.stderr)
+            return 3
+        print(terminal_safe(ic.render(rec)))
+        return 0
+    ap = argparse.ArgumentParser(prog="ci plan", description="Turn a rough idea into a checked task specification.")
+    ap.add_argument("--model", help="pin provider:model (no fallback)")
+    ap.add_argument("--json", action="store_true")
+    ap.add_argument("idea", nargs="+")
+    a = ap.parse_args(argv)
+    try:
+        here = _here(ci, uid)
+    except AmbiguousWorkspace as e:
+        print(f"Not sent: {e}", file=sys.stderr)
+        return 2
+    try:
+        rec = ic.compile_intent(ci, uid, " ".join(a.idea), pinned=a.model,
+                                project_id=here.project_id if here else None,
+                                project_vendors=here.vendors if here else None)
+    except RoutingError as e:
+        print("\n".join(e.plan.explain()), file=sys.stderr)
+        for x in e.attempts:
+            print(f"  failed: {x['model']}: {x['error']}", file=sys.stderr)
+        return 3
+    if a.json:
+        _print_json(rec)
+    else:
+        print(terminal_safe(ic.render(rec)))
+    return 0 if rec["status"] != "invalid" else 4
+
+
+# ---------------------------------------------------------------------- mesh
+def cmd_mesh(argv: list[str]) -> int:
+    from . import mesh
+    from .types import Sensitivity
+    ap = argparse.ArgumentParser(prog="ci mesh", description="Your compute: what exists, measured, and where work may run.")
+    ap.add_argument("action", nargs="?", default="show", choices=("show", "bench", "place"))
+    ap.add_argument("workload", nargs="?", help="for place: embed | generate | verify")
+    ap.add_argument("--live", action="store_true", help="bench: also time one tiny call per cloud model (billed)")
+    ap.add_argument("--sensitivity", default="personal", choices=[x.value for x in Sensitivity])
+    ap.add_argument("--tier", type=int, choices=(1, 2, 3), help="place: minimum capability tier")
+    ap.add_argument("--json", action="store_true")
+    a = ap.parse_args(argv)
+    home = _home()
+    try:
+        res = mesh.discover(home)
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 2
+    if a.action == "bench":
+        ci, uid = _open() if a.live else (None, None)
+        if a.live:
+            n = sum(1 for r in res if r.kind == "llm" and r.available and r.location == "cloud")
+            print(f"Timing {n} cloud model(s) with one one-word call each; billed to those accounts.")
+        out = mesh.bench(home, res, live=a.live, ci=ci, uid=uid)
+        if a.json:
+            _print_json(out)
+            return 0
+        print(f"Measured {out['measured_at'][:19]} on {out['host']} (this device unless marked):")
+        for k, v in out["results"].items():
+            print(f"  {k:<34} " + (v.get("error") or f"{v['median']} {v['unit']}"
+                                    + (f" (min {v['min']}, max {v['max']}, {v['reps']} reps)" if "min" in v else "")))
+        return 0
+    if a.action == "place":
+        if not a.workload:
+            print("usage: ci mesh place embed|generate|verify [--sensitivity S] [--tier N]", file=sys.stderr)
+            return 2
+        vendors = None
+        try:
+            ci, uid = _open()
+            vendors = set(ci.authorized_vendors(uid))
+        except SystemExit:
+            pass
+        try:
+            pl = mesh.place(res, a.workload, Sensitivity(a.sensitivity), a.tier, mesh.last_bench(home), vendors)
+        except ValueError as e:
+            print(e, file=sys.stderr)
+            return 2
+        if a.json:
+            _print_json(pl.as_dict())
+            return 0
+        print(f"{a.workload} at {a.sensitivity}: {pl.chosen or 'nowhere'}" + (f"  (then {', '.join(pl.fallbacks)})" if pl.fallbacks else ""))
+        for r in pl.reasons:
+            print(f"  {r}")
+        for x in pl.excluded:
+            print(f"  not {x['resource']}: {x['why']}")
+        return 0 if pl.chosen else 1
+    if a.json:
+        _print_json({"resources": [r.as_dict() for r in res], "last_bench": mesh.last_bench(home)})
+        return 0
+    lb = mesh.last_bench(home) or {}
+    measured = lb.get("results", {})
+    print("Resources (nothing here is summed: your device, your machines and your cloud accounts are separate):")
+    for r in res:
+        m = measured.get(r.id)
+        mtxt = f" · measured {m['median']} {m['unit']}" if m and "median" in m else ""
+        state = "ok " if r.available else "-- "
+        print(terminal_safe(f"  {state}{r.id:<30} {r.location:<11} ≤{r.ceiling.value:<9} {r.detail}{mtxt}"))
+    print(f"\nLast benchmark: {lb.get('measured_at', 'never')[:19]}   ·   ci mesh bench   ·   ci mesh place generate --sensitivity sensitive")
+    return 0
+
+
+# ---------------------------------------------------------------------- twin, audit, learn
+def cmd_twin(argv: list[str]) -> int:
+    """The Cognitive Twin's current picture, each part labelled with what kind of evidence it is."""
+    from . import challenge as ch
+    from . import intent_compiler as ic
+    from .growth import independence_report
+    from .types import utcnow
+    ci, uid = _open()
+    twin = CognitiveTwin(ci)
+    dna = ci.dna(uid)
+    rep = independence_report(ci.store.list_skills(uid), ci.attempts(uid), utcnow())
+    print(f"{twin.name(uid)} — a model of how {uid} works, built from what you recorded. It is not you, and it says which parts are facts.")
+    stated = dna.get("stated", {})
+    print(f"\nStated by you (facts about your preferences): " + ", ".join(f"{len(v)} {k}" for k, v in stated.items()))
+    for k, v in stated.items():
+        for it in v[:3]:
+            print(terminal_safe(f"  [{k}] {it['content'][:100]}"))
+    inferred = dna.get("inferred", [])
+    print(f"Inferred by CI (hypotheses, with confidence): {len(inferred)}")
+    learned = dna.get("learned", {})
+    print(f"Learned from outcomes: {learned.get('status', '?')}; {len(learned.get('findings', []))} confident finding(s)")
+    skills = rep.get("skills", rep) if isinstance(rep, dict) else {}
+    if skills:
+        print("\nSkills (alone vs with help; only unassisted attempts count as yours):")
+        for name, s in list(skills.items())[:8]:
+            if isinstance(s, dict):
+                alone, helped = s.get("unassisted") or {}, s.get("assisted") or {}
+                flags = ", ".join(s.get("flags", [])) if isinstance(s.get("flags"), list) else ""
+                print(terminal_safe(f"  {name:<24} alone {alone.get('correct', 0)}/{alone.get('n', 0)} · "
+                                    f"with help {helped.get('correct', 0)}/{helped.get('n', 0)}" + (f" · {flags}" if flags else "")))
+    else:
+        print("\nSkills: none recorded yet (ci practice <skill> right|wrong).")
+    open_ch = [r for r in ch.records(ci, uid) if r["status"] == "open"]
+    plans = ic.records(ci, uid)
+    print(f"\nOpen challenges (experiments not yet run): {len(open_ch)}")
+    print(f"Plans: {sum(1 for p in plans if p['status'] == 'needs_answers')} waiting on your answers, "
+          f"{sum(1 for p in plans if p['status'] in ('awaiting_approval', 'ready'))} waiting on approval")
+    print("\nWeekly review: ci weekly   ·   evidence behind any of this: ci audit, pcim export")
+    return 0
+
+
+def cmd_audit(argv: list[str]) -> int:
+    ap = argparse.ArgumentParser(prog="ci audit", description="Verify the audit chain and show what CI did.")
+    ap.add_argument("--limit", type=int, default=20)
+    ap.add_argument("--json", action="store_true")
+    a = ap.parse_args(argv)
+    ci, uid = _open()
+    ok, bad = ci.audit.verify()
+    entries_ = ci.audit.entries(uid)
+    counts: dict[str, int] = {}
+    for e in entries_:
+        counts[e["event"]] = counts.get(e["event"], 0) + 1
+    if a.json:
+        _print_json({"chain_ok": ok, "first_bad_seq": bad, "head": ci.audit.head(), "counts": counts,
+                     "recent": entries_[-a.limit:]})
+        return 0 if ok else 5
+    print(f"Audit chain: {'verified' if ok else f'BROKEN at entry {bad}'} · {len(entries_)} entries · head {ci.audit.head()[:16]}…")
+    print("By event: " + ", ".join(f"{k} {v}" for k, v in sorted(counts.items(), key=lambda kv: -kv[1])[:12]))
+    for e in entries_[-a.limit:]:
+        print(terminal_safe(f"  {e['ts'][:19]}  {e['event']:<24} {json.dumps(e['payload'])[:110]}"))
+    return 0 if ok else 5
+
+
+def cmd_learn(argv: list[str]) -> int:
+    """`ci learn "…"` is `ci -l "…"`: learn mode for this request."""
+    return cmd_ask(["-l", *argv])
+
+
+
+# ---------------------------------------------------------------------- execute, approve, deny
+def _workspace_agent(ci):
+    from .agent import Agent
+    from .governor import Governor
+    from .tasks import TaskQueue
+    ws = Workspace(ci)
+    return Agent(ci, ws, TaskQueue(ws, Governor(ws)))
+
+
+def cmd_execute(argv: list[str]) -> int:
+    from . import plan_exec as px
+    ap = argparse.ArgumentParser(prog="ci execute", description="Run an approved plan through the governed workspace agent.")
+    ap.add_argument("plan")
+    ap.add_argument("--done", action="append", default=[], metavar="ID", help="mark an external step or outcome you did")
+    ap.add_argument("--retry", action="append", default=[], metavar="STEP",
+                    help="re-run a failed, interrupted, incomplete or halted step")
+    ap.add_argument("--cancel", action="store_true", help="cancel the plan and any action it is waiting on")
+    ap.add_argument("--model", help="pin provider:model for the agent")
+    a = ap.parse_args(argv)
+    ci, uid = _open()
+    try:
+        here = _here(ci, uid)
+    except AmbiguousWorkspace as e:
+        print(f"Not run: {e}", file=sys.stderr)
+        return 2
+    if here is None:
+        print("Run this inside a directory a project has authorized; steps act on that workspace only.", file=sys.stderr)
+        return 2
+    prov, _, mdl = (a.model or "").partition(":")
+    try:
+        res = px.execute(ci, uid, a.plan, here.project_id, here.vendors, provider=prov or None, model=mdl or None,
+                         agent=_workspace_agent(ci), done=a.done, retry=a.retry, cancel=a.cancel)
+    except KeyError:
+        print(f"no plan {a.plan}", file=sys.stderr)
+        return 2
+    except (px.ExecError, ValueError, RuntimeError) as e:
+        print(e, file=sys.stderr)
+        return 2
+    print(terminal_safe(px.render(res)))
+    # 0 finished (done, or cancelled as asked) · 6 needs you · 4 not achieved (incomplete, failed, interrupted, halted)
+    return {"done": 0, "cancelled": 0, "waiting": 6, "awaiting_you": 6}.get(res["outcome"], 4)
+
+
+def cmd_approve(argv: list[str], approve: bool = True) -> int:
+    if not argv:
+        print(f"usage: ci {'approve' if approve else 'deny'} <task id>" + ("" if approve else ' ["reason"]'), file=sys.stderr)
+        return 2
+    from . import plan_exec as px
+    ci, uid = _open()
+    pid = px.plan_for_task(ci, uid, argv[0])
+    try:
+        # a plan's action is resolved under the plan's lock, so `ci execute` never judges a step
+        # while the turn this resumes is still running
+        with px.plan_lock(ci, pid) if pid else contextlib.nullcontext():
+            out = _workspace_agent(ci).resolve(uid, argv[0], approve, " ".join(argv[1:]))
+    except KeyError:
+        print(f"no task {argv[0]}", file=sys.stderr)
+        return 2
+    except (ValueError, RuntimeError) as e:
+        print(e, file=sys.stderr)
+        return 2
+    d = out.as_dict() if hasattr(out, "as_dict") else out
+    if "status" in d:
+        print(terminal_safe(f"{'Approved' if approve else 'Denied'}. Session {d['status']}" + (f": {d['text'][:300]}" if d.get("text") else "")))
+    else:
+        print(f"{'Approved' if approve else 'Denied'}: task {d['task']['status']}")
+    if pid:
+        print(f"Plan {pid}: run `ci execute {pid}` to record the step and continue.")
+    return 0
+
+
+def cmd_halt(argv: list[str]) -> int:
+    """Stop-all: block new execution and model calls, cancel queued and running actions."""
+    from .governor import Governor
+    from .tasks import TaskQueue
+    ci, uid = _open()
+    ws = Workspace(ci)
+    r = TaskQueue(ws, Governor(ws)).halt(uid)
+    print(f"Halted. {r['cancelled']} pending or running action(s) cancelled. Nothing runs until `ci resume`.")
+    return 0
+
+
+def cmd_resume(argv: list[str]) -> int:
+    ci, uid = _open()
+    Workspace(ci).set_halted(uid, False)
+    print("Resumed. Halted plan steps stay halted until you retry them (ci execute <plan> --retry <step>).")
+    return 0
+
+
+def cmd_deny(argv: list[str]) -> int:
+    return cmd_approve(argv, approve=False)
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv or argv[0] in ("help", "-h", "--help"):
@@ -534,7 +843,10 @@ def main(argv: list[str] | None = None) -> int:
     cmd = argv[0]
     table = {"ask": cmd_ask, "route": cmd_route, "mode": cmd_mode, "prefer": cmd_prefer, "models": cmd_models,
              "outcome": cmd_outcome, "practice": cmd_practice, "skills": cmd_skills, "scorecard": cmd_scorecard,
-             "weekly": cmd_weekly, "status": cmd_status, "challenge": cmd_challenge}
+             "weekly": cmd_weekly, "status": cmd_status, "challenge": cmd_challenge, "plan": cmd_plan,
+             "mesh": cmd_mesh, "twin": cmd_twin, "audit": cmd_audit, "learn": cmd_learn,
+             "execute": cmd_execute, "approve": cmd_approve, "deny": cmd_deny, "halt": cmd_halt,
+             "resume": cmd_resume}
     if cmd in table:
         return table[cmd](argv[1:])
     return cmd_ask(argv)
