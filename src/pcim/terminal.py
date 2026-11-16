@@ -31,6 +31,8 @@
     ci mesh [bench [--live] | place embed|generate|verify --sensitivity S]
                                                               your compute, measured; where work may run
     ci audit [--limit N]                                      verify the audit chain; what CI did
+    ci doctor [--json]                                        read-only environment, identity, and store check
+    ci --version                                              print the installed version
 
 Workspace-aware: inside a directory that a project has authorized, requests also use that
 project's memory, and only the vendors that project allows. Data and identity are the same as
@@ -837,10 +839,114 @@ def cmd_deny(argv: list[str]) -> int:
     return cmd_approve(argv, approve=False)
 
 
+def cmd_doctor(argv: list[str]) -> int:
+    """Read-only diagnostic check for environment, identity, CLI isolation, cache, store, and Stop-all."""
+    import importlib
+    import importlib.util
+    import os
+    import shutil
+    from .adapters.claude_cli import ClaudeCLIAdapter, cli_version, sanitized_profile
+    from .embed import DEFAULT_SEMANTIC_MODEL
+
+    ap = argparse.ArgumentParser(prog="ci doctor", description="Read-only diagnostic check.")
+    ap.add_argument("--json", action="store_true", dest="as_json")
+    a = ap.parse_args(argv)
+
+    checks: list[dict] = []
+
+    def add(name: str, status: str, detail: str) -> None:
+        checks.append({"name": name, "status": status, "detail": detail})
+
+    # 1. Python & core dependencies
+    py_ok = sys.version_info >= (3, 11)
+    missing_deps = [pkg for pkg in ("numpy", "pydantic", "cryptography", "httpx")
+                    if importlib.util.find_spec(pkg) is None]
+    if py_ok and not missing_deps:
+        add("python_deps", "ok", f"Python {sys.version.split()[0]}, core deps importable")
+    else:
+        add("python_deps", "fail",
+            f"Python {sys.version.split()[0]} (need >=3.11); missing={missing_deps}")
+
+    # 2. PCIM_HOME identity
+    home = _home()
+    state_ok = (home / "token").is_file() and (home / "pcim.db").is_file()
+    if state_ok:
+        add("pcim_home", "ok", f"{home} initialized")
+    else:
+        add("pcim_home", "fail", f"{home} not initialized (run `pcim init`)")
+
+    # 3. claude CLI binary, version, login, and isolation
+    ad = ClaudeCLIAdapter()
+    bin_path = shutil.which(ad.binary)
+    ver = cli_version(ad.binary) if bin_path else None
+    has_login = sanitized_profile() is not None
+    iso = ad.identity_isolation()
+    if not bin_path:
+        st = "fail" if ad.require_isolation else "warn"
+        add("claude_cli", st, f"binary {ad.binary!r} not found")
+    elif not has_login:
+        st = "fail" if ad.require_isolation else "warn"
+        add("claude_cli", st, f"v{ver or '?'} at {bin_path}; no stored oauthAccount profile")
+    elif ad.require_isolation and iso["status"] != "verified":
+        add("claude_cli", "fail", f"v{ver or '?'} isolation={iso['status']}: {iso['why']}")
+    else:
+        st = "ok" if iso["status"] == "verified" else "warn"
+        add("claude_cli", st, f"v{ver or '?'} isolation={iso['status']} ({iso['why']})")
+
+    # 4. HF model cache & offline state
+    hf_dir = (Path.home() / ".cache" / "huggingface" / "hub" /
+              ("models--" + DEFAULT_SEMANTIC_MODEL.replace("/", "--")))
+    offline_env = os.environ.get("HF_HUB_OFFLINE", "")
+    if hf_dir.exists():
+        add("hf_cache", "ok", f"cached ({DEFAULT_SEMANTIC_MODEL}); HF_HUB_OFFLINE={offline_env or 'auto'}")
+    else:
+        add("hf_cache", "warn", f"not cached ({DEFAULT_SEMANTIC_MODEL}); HF_HUB_OFFLINE={offline_env or 'unset'}")
+
+    # 5-7. Audit chain, authorized workspaces, Stop-all (only if initialized)
+    if state_ok:
+        ci, uid = _open()
+        try:
+            audit_ok, audit_err = ci.audit.verify()
+            add("audit_chain", "ok" if audit_ok else "fail",
+                "verified" if audit_ok else f"verification failed: {audit_err}")
+            ws = Workspace(ci)
+            projects = ws.list_projects(uid)
+            bad_ws = []
+            ws_count = 0
+            for p in projects:
+                w = ws.briefing(uid, p.id).get("workspace")
+                if w:
+                    ws_count += 1
+                    if not Path(w["root"]).is_dir():
+                        bad_ws.append(w["root"])
+            if bad_ws:
+                add("workspaces", "warn", f"missing workspace dirs: {', '.join(bad_ws)}")
+            else:
+                add("workspaces", "ok", f"{ws_count} authorized workspace(s) present")
+            halted = ws.is_halted(uid)
+            add("stop_all", "fail" if halted else "ok",
+                "halted (run `ci resume` to clear)" if halted else "clear")
+        finally:
+            ci.store.close()
+
+    blocking = any(c["status"] == "fail" for c in checks)
+    if a.as_json:
+        print(json.dumps({"ok": not blocking, "checks": checks}, indent=1))
+    else:
+        for c in checks:
+            tag = {"ok": "OK  ", "warn": "WARN", "fail": "FAIL"}[c["status"]]
+            print(f"[{tag}] {c['name']}: {c['detail']}")
+    return 1 if blocking else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv or argv[0] in ("help", "-h", "--help"):
         print(__doc__)
+        return 0
+    if argv[0] in ("-V", "--version", "version"):
+        from . import __version__
+        print(f"ci {__version__}")
         return 0
     cmd = argv[0]
     table = {"ask": cmd_ask, "route": cmd_route, "mode": cmd_mode, "prefer": cmd_prefer, "models": cmd_models,
@@ -848,7 +954,7 @@ def main(argv: list[str] | None = None) -> int:
              "weekly": cmd_weekly, "status": cmd_status, "challenge": cmd_challenge, "plan": cmd_plan,
              "mesh": cmd_mesh, "twin": cmd_twin, "audit": cmd_audit, "learn": cmd_learn,
              "execute": cmd_execute, "approve": cmd_approve, "deny": cmd_deny, "halt": cmd_halt,
-             "resume": cmd_resume}
+             "resume": cmd_resume, "doctor": cmd_doctor}
     if cmd in table:
         return table[cmd](argv[1:])
     return cmd_ask(argv)

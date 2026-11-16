@@ -107,6 +107,12 @@ class SentenceEmbedder:
     def _load(self):
         with self._lock:
             if self._m is None:
+                import os
+                from pathlib import Path
+                cached = (Path.home() / ".cache" / "huggingface" / "hub" /
+                          ("models--" + self.model.replace("/", "--"))).exists()
+                if cached:
+                    os.environ.setdefault("HF_HUB_OFFLINE", "1")
                 try:
                     from sentence_transformers import SentenceTransformer
                 except ImportError as e:

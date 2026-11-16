@@ -22,14 +22,17 @@ briefing if it was included, and which memory items were sent or withheld.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import datetime as dt
+import fcntl
 import hashlib
 import json
 import os
 import secrets
 import threading
 import time
+from pathlib import Path
 
 from .adapters.mock_agent import MockAgentAdapter
 from .adapters.render import _clean, _label
@@ -140,8 +143,23 @@ class Agent:
         return self._adapters[key]
 
     # ------------------------------------------------------------------ session state
-    def _lock(self, sid: str) -> threading.Lock:
-        return self._locks.setdefault(sid, threading.Lock())
+    @contextlib.contextmanager
+    def _lock(self, sid: str):
+        with self._locks.setdefault(sid, threading.Lock()):
+            db_path = getattr(self.store, "path", ":memory:")
+            if db_path == ":memory:":
+                yield
+                return
+            lock_path = Path(db_path).parent / f".session-{sid}.lock"
+            fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+            try:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    raise RuntimeError("this session is being driven in another process; wait for it to finish") from None
+                yield
+            finally:
+                os.close(fd)
 
     def _load(self, user_id: str, project_id: str, sid: str) -> dict:
         rows = self.store.query("SELECT * FROM sessions WHERE id=? AND user_id=? AND project_id=?",
