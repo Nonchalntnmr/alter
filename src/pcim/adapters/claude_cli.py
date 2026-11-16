@@ -62,6 +62,12 @@ RETRY_NOTE = "Your previous reply was not a valid JSON object of that shape. Rep
 
 # Variables that would attach the child CLI to the parent's IDE or session.
 _DROP_ENV = ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SSE_PORT", "ENABLE_IDE_INTEGRATION")
+# The CLI's documented switches for traffic that is not the model request. By default CLI 2.1.316
+# sends operational telemetry to Datadog's log intake on every call (scripts/audit_egress.py,
+# docs/SECURITY_WHAT_LEAVES.md). With these set, the call goes only to Anthropic. A value the
+# person set themselves is kept.
+QUIET_ENV = {"DISABLE_TELEMETRY": "1", "DISABLE_ERROR_REPORTING": "1", "DISABLE_AUTOUPDATER": "1",
+             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
 
 
 def _reroutes(key: str) -> bool:
@@ -384,6 +390,8 @@ class ClaudeCLIAdapter:
     def _call(self, system: str, prompt: str) -> tuple[dict, float, dict]:
         resolved_bin = _resolve_binary(self.binary)
         env = {k: v for k, v in os.environ.items() if k not in _DROP_ENV and not _reroutes(k)}
+        for k, v in QUIET_ENV.items():
+            env.setdefault(k, v)
         profile = sanitized_profile(env) if self.isolate_identity else None
         iso = self.identity_isolation(profile=profile, binary=resolved_bin)
         if self.require_isolation and iso["status"] != "verified":

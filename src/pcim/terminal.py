@@ -49,6 +49,7 @@ import argparse
 import contextlib
 import dataclasses
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -823,6 +824,12 @@ def cmd_approve(argv: list[str], approve: bool = True) -> int:
     return 0
 
 
+def _routing_default(built_in: str) -> str:
+    """PCIM_DO_ROUTING=direct|adaptive overrides the built-in default (the human evaluation sets it)."""
+    v = os.environ.get("PCIM_DO_ROUTING", "").strip().lower()
+    return v if v in ("direct", "adaptive") else built_in
+
+
 DO_STATE = "pcim-do"
 # "ci do you think …", "ci do we have …": a yes/no question, not work to do
 _QUESTION_SUBJECTS = frozenset({"i", "you", "u", "we", "they", "he", "she"})
@@ -957,7 +964,7 @@ def cmd_do(argv: list[str]) -> int:
     r = route(text)
     if a.route and a.route != r.decision:
         r = Route(a.route, [f"you chose {a.route} (CI would have chosen {r.decision})"], None, r.yours, r.signals)
-    elif not a.route and ROUTING_DEFAULT == DIRECT and r.decision != DIRECT:
+    elif not a.route and _routing_default(ROUTING_DEFAULT) == DIRECT and r.decision != DIRECT:
         r = Route(DIRECT, [f"direct is the default; CI's router suggests {r.decision}: {'; '.join(r.reasons)} "
                            f"(ci do --route {r.decision if r.decision == PLAN else DIRECT} …)"], None, r.yours, r.signals)
     if a.explain:

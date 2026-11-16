@@ -208,9 +208,12 @@ def record(result: dict) -> Path:
     d[result["cli_version"] or "unknown"] = {
         k: result[k] for k in ("probed_at", "clean", "found", "markers_checked", "profile_keys")
     } | {"trials": len(result["trials"])}
-    fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    # written beside it and renamed over it, so a call that reads the record never sees it half-written
+    tmp = p.with_name(f".{p.name}.{os.getpid()}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as fh:
         json.dump(d, fh, indent=1)
+    os.replace(tmp, p)
     return p
 
 

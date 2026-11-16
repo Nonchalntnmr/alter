@@ -229,3 +229,14 @@ def test_with_direct_as_the_default_the_router_only_advises(term, capsys, monkey
     assert terminal.main(["do", "--model", "mock", "redo the cleanup we talked about"]) == 0
     out = capsys.readouterr().out
     assert "direct is the default" in out and "suggests clarify" in out and mock.calls == 1
+
+
+def test_pcim_do_routing_overrides_the_built_in_default(term, capsys, monkeypatch):
+    terminal, ci, ws, agent, p, repo = term
+    monkeypatch.setenv("PCIM_DO_ROUTING", "direct")
+    mock = Scripted([{"text": "Which cleanup?"}])
+    agent.set_adapter("mock", None, mock)
+    assert terminal.main(["do", "--model", "mock", "redo the cleanup we talked about"]) == 0
+    assert "direct is the default" in capsys.readouterr().out and mock.calls == 1
+    monkeypatch.setenv("PCIM_DO_ROUTING", "adaptive")
+    assert terminal.main(["do", "--model", "mock", "redo the cleanup we talked about"]) == 6

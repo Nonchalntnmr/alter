@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "contextual-intelligence"
-version = "0.2.0rc1"
+version = "0.2.0rc2"
 description = "Personal CI: a research prototype of a user-owned, outcome-learned context layer in front of foundation models"
 readme = "README.md"
 requires-python = ">=3.11"
