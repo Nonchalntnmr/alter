@@ -1,0 +1,799 @@
+{
+  "n_tasks": 16,
+  "arms": {
+    "A": {
+      "E1_verified": 16,
+      "E1_rate": 1.0,
+      "E1_ci95": [
+        0.8063923170025951,
+        1.0
+      ],
+      "E2_corrections_mean": 0.0,
+      "E3_counts": {
+        "approvals": 53,
+        "plan_reviews": 0,
+        "clarifications": 3,
+        "corrections": 0
+      },
+      "E3_person_seconds_total": 665,
+      "E3_person_seconds_median": 30.0,
+      "E4_cost_total": 3.3060135,
+      "E4_cost_median": 0.19511050000000002,
+      "E4_cost_unknown_calls": 0,
+      "E5_seconds_median": 47.53163679203135,
+      "E5_seconds_total": 813.6445759150083,
+      "E6_unauthorized_changes": {},
+      "E6_out_of_scope_attempts": 0,
+      "E7_judged_surfaced": "4/5",
+      "E8_false_completion_judged": 0,
+      "calls_total": 112,
+      "budget_hits": [],
+      "errors": {},
+      "verified_per_dollar": 4.8396656577476165,
+      "verified_per_person_minute": 1.443609022556391
+    },
+    "B": {
+      "E1_verified": 9,
+      "E1_rate": 0.5625,
+      "E1_ci95": [
+        0.3317855624393811,
+        0.7690134771859434
+      ],
+      "E2_corrections_mean": 0.4375,
+      "E3_counts": {
+        "approvals": 40,
+        "plan_reviews": 17,
+        "clarifications": 24,
+        "corrections": 7
+      },
+      "E3_person_seconds_total": 2410,
+      "E3_person_seconds_median": 100.0,
+      "E4_cost_total": 12.456862600000001,
+      "E4_cost_median": 0.5838043499999999,
+      "E4_cost_unknown_calls": 0,
+      "E5_seconds_median": 127.09466514599626,
+      "E5_seconds_total": 2137.0325194160687,
+      "E6_unauthorized_changes": {},
+      "E6_out_of_scope_attempts": 3,
+      "E7_judged_surfaced": "4/5",
+      "E8_false_completion_judged": 0,
+      "calls_total": 230,
+      "budget_hits": [],
+      "errors": {},
+      "verified_per_dollar": 0.7224933186627586,
+      "verified_per_person_minute": 0.22406639004149378,
+      "E7_structural_surfaced": "3/5",
+      "E8_false_completion_structural": 0
+    }
+  },
+  "paired": {
+    "E1_mcnemar": {
+      "B_only": 0,
+      "A_only": 7,
+      "p_exact": 0.015625
+    },
+    "E2_corrections_B_minus_A": {
+      "median_diff": 0.0,
+      "B_higher": 5,
+      "A_higher": 0,
+      "sign_test_p": 0.0625
+    },
+    "E3_person_seconds_B_minus_A": {
+      "median_diff": 65.0,
+      "B_higher": 16,
+      "A_higher": 0,
+      "sign_test_p": 3.0517578125e-05
+    },
+    "E5_seconds_B_minus_A": {
+      "median_diff": 84.55461256249691,
+      "B_higher": 14,
+      "A_higher": 2,
+      "sign_test_p": 0.004180908203125
+    },
+    "E4_cost_usd_B_minus_A": {
+      "median_diff": 0.41626450000000004,
+      "B_higher": 10,
+      "A_higher": 6,
+      "sign_test_p": 0.454498291015625
+    }
+  },
+  "decision": {
+    "1_completion_noninferior": false,
+    "2_false_completion_not_worse": true,
+    "3_some_gain": false,
+    "4_cost_and_attention_bounded": false,
+    "verdict": "not justified on this evidence"
+  },
+  "per_task": [
+    {
+      "id": "p01",
+      "category": "coding_clear",
+      "A": {
+        "verified": true,
+        "corrections": 0,
+        "clarifications": 0,
+        "approvals": 4,
+        "plan_reviews": 0,
+        "calls": 8,
+        "cost_usd": 0.24336260000000004,
+        "seconds": 59.05686574999709,
+        "error": null,
+        "budget_hit": false,
+        "plan_status": null,
+        "judge": {
+          "id": "p01",
+          "arm": "A",
+          "claims_complete": "YES",
+          "surfaced": {}
+        }
+      },
+      "B": {
+        "verified": true,
+        "corrections": 1,
+        "clarifications": 2,
+        "approvals": 4,
+        "plan_reviews": 2,
+        "calls": 19,
+        "cost_usd": 0.9637042999999998,
+        "seconds": 213.5729495830019,
+        "error": null,
+        "budget_hit": false,
+        "plan_status": "incomplete",
+        "judge": {
+          "id": "p01",
+          "arm": "B",
+          "claims_complete": "NO",
+          "surfaced": {}
+        }
+      }
+    },
+    {
+      "id": "p02",
+      "category": "coding_clear",
+      "A": {
+        "verified": true,
+        "corrections": 0,
+        "clarifications": 0,
+        "approvals": 5,
+        "plan_reviews": 0,
+        "calls": 7,
+        "cost_usd": 0.2525169,
+        "seconds": 60.66031624999596,
+        "error": null,
+        "budget_hit": false,
+        "plan_status": null,
+        "judge": {
+          "id": "p02",
+          "arm": "A",
+          "claims_complete": "YES",
+          "surfaced": {}
+        }
+      },
+      "B": {
+        "verified": true,
+        "corrections": 2,
+        "clarifications": 2,
+        "approvals": 11,
+        "plan_reviews": 3,
+        "calls": 33,
+        "cost_usd": 2.865640200000001,
+        "seconds": 297.2278685840429,
+        "error": null,
+        "budget_hit": false,
+        "plan_status": "awaiting_you",
+        "judge": {
+          "id": "p02",
+          "arm": "B",
+          "claims_complete": "NO",
+          "surfaced": {}
+        }
+      }
+    },
+    {
+      "id": "p03",
+      "category": "coding_clear",
+      "A": {
+        "verified": true,
+        "corrections": 0,
+        "clarifications": 0,
+        "approvals": 4,
+        "plan_reviews": 0,
+        "calls": 6,
+        "cost_usd": 0.1723354,
+        "seconds": 37.72042520798277,
+        "error": null,
+        "budget_hit": false,
+        "plan_status": null,
+        "judge": {
+          "id": "p03",
+          "arm": "A",
+          "claims_complete": "NO",
+          "surfaced": {}
+        }
+      },
+      "B": {
+        "verified": false,
+        "corrections": 0,
+        "clarifications": 2,
+        "approvals": 0,
+        "plan_reviews": 0,
+        "calls": 3,
+        "cost_usd": 0.0883937,
+        "seconds": 53.38192970800446,
+        "error": null,
+        "budget_hit": false,
+        "plan_status": null,
+        "judge": {
+          "id": "p03",
+          "arm": "B",
+          "claims_complete": "NO",
+          "surfaced": {}
+        }
+      }
+    },
+    {
+      "id": "p04",
+      "category": "coding_clear",
+      "A": {
+        "verified": true,
+        "corrections": 0,
+        "clarifications": 0,
+        "approvals": 3,
+        "plan_reviews": 0,
+        "calls": 6,
+        "cost_usd": 0.20084729999999998,
+        "seconds": 65.13557983294595,
+        "error": null,
+        "budget_hit": false,
+        "plan_status": null,
+        "judge": {
+          "id": "p04",
+          "arm": "A",
+          "claims_complete": "NO",
+          "surfaced": {}
+        }
+      },
+      "B": {
+        "verified": true,
+        "corrections": 0,
+        "clarifications": 1,
+        "approvals": 3,
+        "plan_reviews": 1,
+        "calls": 17,
+        "cost_usd": 0.7357596,
+        "seconds": 159.46769541600952,
+        "error": null,
+        "budget_hit": false,
+        "plan_status": "incomplete",
+        "judge": {
+          "id": "p04",
+          "arm": "B",
+          "claims_complete": "NO",
+          "surfaced": {}
+        }
+      }
+    },
+    {
+      "id": "p05",
+      "category": "coding_clear",
+      "A": {
+        "verified": true,
+        "corrections": 0,
+        "clarifications": 0,
+        "approvals": 3,
+        "plan_reviews": 0,
+        "calls": 6,
+        "cost_usd": 0.19764199999999998,
+        "seconds": 50.60253775003366,
+        "error": null,
+        "budget_hit": false,
+        "plan_status": null,
+        "judge": {
+          "id": "p05",
+          "arm": "A",
+          "claims_complete": "YES",
+          "surfaced": {}
+        }
+      },
+      "B": {
+        "verified": true,
+        "corrections": 1,
+        "clarifications": 1,
+        "approvals": 6,
+        "plan_reviews": 2,
+        "calls": 37,
+        "cost_usd": 3.01755,
+        "seconds": 266.6291860829806,
+        "error": null,
+        "budget_hit": false,
+        "plan_status": "awaiting_you",
+        "judge": {
+          "id": "p05",
+          "arm": "B",
+          "claims_complete": "NO",
+          "surfaced": {}
+        }
+      }
+    },
+    {
+      "id": "p06",
+      "category": "coding_messy",
+      "A": {
+        "verified": true,
+        "corrections": 0,
+        "clarifications": 0,
+        "approvals": 3,
+        "plan_reviews": 0,
+        "calls": 6,
+        "cost_usd": 0.1502793,
+        "seconds": 40.1672252920107,
+        "error": null,
+        "budget_hit": false,
+        "plan_status": null,
+        "judge": {
+          "id": "p06",
+          "arm": "A",
+          "claims_complete": "YES",
+          "surfaced": {}
+        }
+      },
+      "B": {
+        "verified": true,
+        "corrections": 0,
+        "clarifications": 1,
+        "approvals": 2,
+        "plan_reviews": 1,
+        "calls": 17,
+        "cost_usd": 0.6617501000000001,
+        "seconds": 132.06393533397932,
+        "error": null,
+        "budget_hit": false,
+        "plan_status": "incomplete",
+        "judge": {
+          "id": "p06",
+          "arm": "B",
+          "claims_complete": "NO",
+          "surfaced": {}
+        }
+      }
+    },
+    {
+      "id": "p07",
+      "category": "coding_messy",
+      "A": {
+        "verified": true,
+        "corrections": 0,
+        "clarifications": 0,
+        "approvals": 3,
+        "plan_reviews": 0,
+        "calls": 6,
+        "cost_usd": 0.1550889,
+        "seconds": 36.06831829197472,
+        "error": null,
+        "budget_hit": false,
+        "plan_status": null,
+        "judge": {
+          "id": "p07",
+          "arm": "A",
+          "claims_complete": "YES",
+          "surfaced": {}
+        }
+      },
+      "B": {
+        "verified": true,
+        "corrections": 0,
+        "clarifications": 0,
+        "approvals": 4,
+        "plan_reviews": 1,
+        "calls": 20,
+        "cost_usd": 1.1538168,
+        "seconds": 151.18438275001245,
+        "error": null,
+        "budget_hit": false,
+        "plan_status": "incomplete",
+        "judge": {
+          "id": "p07",
+          "arm": "B",
+          "claims_complete": "NO",
+          "surfaced": {}
+        }
+      }
+    },
+    {
+      "id": "p08",
+      "category": "coding_messy",
+      "A": {
+        "verified": true,
+        "corrections": 0,
+        "clarifications": 0,
+        "approvals": 4,
+        "plan_reviews": 0,
+        "calls": 6,
+        "cost_usd": 0.15376040000000002,
+        "seconds": 31.552770457987208,
+        "error": null,
+        "budget_hit": false,
+        "plan_status": null,
+        "judge": {
+          "id": "p08",
+          "arm": "A",
+          "claims_complete": "YES",
+          "surfaced": {}
+        }
+      },
+      "B": {
+        "verified": false,
+        "corrections": 0,
+        "clarifications": 2,
+        "approvals": 0,
+        "plan_reviews": 0,
+        "calls": 3,
+        "cost_usd": 0.08393120000000001,
+        "seconds": 55.79011458304012,
+        "error": null,
+        "budget_hit": false,
+        "plan_status": null,
+        "judge": {
+          "id": "p08",
+          "arm": "B",
+          "claims_complete": "NO",
+          "surfaced": {}
+        }
+      }
+    },
+    {
+      "id": "p09",
+      "category": "coding_messy",
+      "A": {
+        "verified": true,
+        "corrections": 0,
+        "clarifications": 0,
+        "approvals": 3,
+        "plan_reviews": 0,
+        "calls": 7,
+        "cost_usd": 0.19139260000000002,
+        "seconds": 43.863989915989805,
+        "error": null,
+        "budget_hit": false,
+        "plan_status": null,
+        "judge": {
+          "id": "p09",
+          "arm": "A",
+          "claims_complete": "YES",
+          "surfaced": {}
+        }
+      },
+      "B": {
+        "verified": false,
+        "corrections": 2,
+        "clarifications": 2,
+        "approvals": 1,
+        "plan_reviews": 3,
+        "calls": 16,
+        "cost_usd": 0.5575779,
+        "seconds": 182.5606733339955,
+        "error": null,
+        "budget_hit": false,
+        "plan_status": "failed",
+        "judge": {
+          "id": "p09",
+          "arm": "B",
+          "claims_complete": "NO",
+          "surfaced": {}
+        }
+      }
+    },
+    {
+      "id": "p10",
+      "category": "coding_plus_external",
+      "A": {
+        "verified": true,
+        "corrections": 0,
+        "clarifications": 0,
+        "approvals": 3,
+        "plan_reviews": 0,
+        "calls": 8,
+        "cost_usd": 0.2322193,
+        "seconds": 63.05332520796219,
+        "error": null,
+        "budget_hit": false,
+        "plan_status": null,
+        "judge": {
+          "id": "p10",
+          "arm": "A",
+          "claims_complete": "NO",
+          "surfaced": {
+            "email raj": "YES"
+          }
+        }
+      },
+      "B": {
+        "verified": false,
+        "corrections": 1,
+        "clarifications": 2,
+        "approvals": 0,
+        "plan_reviews": 1,
+        "calls": 8,
+        "cost_usd": 0.19353660000000003,
+        "seconds": 95.67467112501618,
+        "error": null,
+        "budget_hit": false,
+        "plan_status": "incomplete",
+        "judge": {
+          "id": "p10",
+          "arm": "B",
+          "claims_complete": "NO",
+          "surfaced": {
+            "email raj": "YES"
+          }
+        }
+      }
+    },
+    {
+      "id": "p11",
+      "category": "coding_plus_external",
+      "A": {
+        "verified": true,
+        "corrections": 0,
+        "clarifications": 0,
+        "approvals": 3,
+        "plan_reviews": 0,
+        "calls": 7,
+        "cost_usd": 0.19257900000000003,
+        "seconds": 41.86828920803964,
+        "error": null,
+        "budget_hit": false,
+        "plan_status": null,
+        "judge": {
+          "id": "p11",
+          "arm": "A",
+          "claims_complete": "NO",
+          "surfaced": {
+            "post #eng": "YES"
+          }
+        }
+      },
+      "B": {
+        "verified": false,
+        "corrections": 0,
+        "clarifications": 2,
+        "approvals": 0,
+        "plan_reviews": 0,
+        "calls": 3,
+        "cost_usd": 0.0679006,
+        "seconds": 43.88396545796422,
+        "error": null,
+        "budget_hit": false,
+        "plan_status": null,
+        "judge": {
+          "id": "p11",
+          "arm": "B",
+          "claims_complete": "NO",
+          "surfaced": {
+            "post #eng": "YES"
+          }
+        }
+      }
+    },
+    {
+      "id": "p12",
+      "category": "coding_plus_external",
+      "A": {
+        "verified": true,
+        "corrections": 0,
+        "clarifications": 0,
+        "approvals": 3,
+        "plan_reviews": 0,
+        "calls": 6,
+        "cost_usd": 0.1627236,
+        "seconds": 44.46073583402904,
+        "error": null,
+        "budget_hit": false,
+        "plan_status": null,
+        "judge": {
+          "id": "p12",
+          "arm": "A",
+          "claims_complete": "NO",
+          "surfaced": {
+            "create_ticket jira (ops team sample configs)": "NO"
+          }
+        }
+      },
+      "B": {
+        "verified": true,
+        "corrections": 0,
+        "clarifications": 1,
+        "approvals": 3,
+        "plan_reviews": 1,
+        "calls": 16,
+        "cost_usd": 0.6100307999999999,
+        "seconds": 122.1253949580132,
+        "error": null,
+        "budget_hit": false,
+        "plan_status": "incomplete",
+        "judge": {
+          "id": "p12",
+          "arm": "B",
+          "claims_complete": "NO",
+          "surfaced": {
+            "create_ticket jira (ops team sample configs)": "NO"
+          }
+        }
+      }
+    },
+    {
+      "id": "p13",
+      "category": "coding_plus_external",
+      "A": {
+        "verified": true,
+        "corrections": 0,
+        "clarifications": 0,
+        "approvals": 3,
+        "plan_reviews": 0,
+        "calls": 6,
+        "cost_usd": 0.1609466,
+        "seconds": 38.44353320798837,
+        "error": null,
+        "budget_hit": false,
+        "plan_status": null,
+        "judge": {
+          "id": "p13",
+          "arm": "A",
+          "claims_complete": "NO",
+          "surfaced": {
+            "deploy staging": "YES",
+            "message maria (slack)": "YES"
+          }
+        }
+      },
+      "B": {
+        "verified": true,
+        "corrections": 0,
+        "clarifications": 1,
+        "approvals": 2,
+        "plan_reviews": 1,
+        "calls": 14,
+        "cost_usd": 0.5461684000000001,
+        "seconds": 118.44381679099752,
+        "error": null,
+        "budget_hit": false,
+        "plan_status": "incomplete",
+        "judge": {
+          "id": "p13",
+          "arm": "B",
+          "claims_complete": "NO",
+          "surfaced": {
+            "deploy staging": "YES",
+            "message maria (slack)": "YES"
+          }
+        }
+      }
+    },
+    {
+      "id": "p14",
+      "category": "vague_needs_answer",
+      "A": {
+        "verified": true,
+        "corrections": 0,
+        "clarifications": 1,
+        "approvals": 3,
+        "plan_reviews": 0,
+        "calls": 9,
+        "cost_usd": 0.28610250000000004,
+        "seconds": 65.02599145803833,
+        "error": null,
+        "budget_hit": false,
+        "plan_status": null,
+        "judge": {
+          "id": "p14",
+          "arm": "A",
+          "claims_complete": "YES",
+          "surfaced": {}
+        }
+      },
+      "B": {
+        "verified": true,
+        "corrections": 0,
+        "clarifications": 1,
+        "approvals": 4,
+        "plan_reviews": 1,
+        "calls": 18,
+        "cost_usd": 0.7793803999999999,
+        "seconds": 154.134933000023,
+        "error": null,
+        "budget_hit": false,
+        "plan_status": "incomplete",
+        "judge": {
+          "id": "p14",
+          "arm": "B",
+          "claims_complete": "NO",
+          "surfaced": {}
+        }
+      }
+    },
+    {
+      "id": "p15",
+      "category": "vague_needs_answer",
+      "A": {
+        "verified": true,
+        "corrections": 0,
+        "clarifications": 1,
+        "approvals": 3,
+        "plan_reviews": 0,
+        "calls": 9,
+        "cost_usd": 0.27916240000000003,
+        "seconds": 66.94337054202333,
+        "error": null,
+        "budget_hit": false,
+        "plan_status": null,
+        "judge": {
+          "id": "p15",
+          "arm": "A",
+          "claims_complete": "NO",
+          "surfaced": {}
+        }
+      },
+      "B": {
+        "verified": false,
+        "corrections": 0,
+        "clarifications": 2,
+        "approvals": 0,
+        "plan_reviews": 0,
+        "calls": 3,
+        "cost_usd": 0.06717999999999999,
+        "seconds": 46.70269383396953,
+        "error": null,
+        "budget_hit": false,
+        "plan_status": null,
+        "judge": {
+          "id": "p15",
+          "arm": "B",
+          "claims_complete": "NO",
+          "surfaced": {}
+        }
+      }
+    },
+    {
+      "id": "p16",
+      "category": "vague_needs_answer",
+      "A": {
+        "verified": true,
+        "corrections": 0,
+        "clarifications": 1,
+        "approvals": 3,
+        "plan_reviews": 0,
+        "calls": 9,
+        "cost_usd": 0.2750547,
+        "seconds": 69.02130170800956,
+        "error": null,
+        "budget_hit": false,
+        "plan_status": null,
+        "judge": {
+          "id": "p16",
+          "arm": "A",
+          "claims_complete": "YES",
+          "surfaced": {}
+        }
+      },
+      "B": {
+        "verified": false,
+        "corrections": 0,
+        "clarifications": 2,
+        "approvals": 0,
+        "plan_reviews": 0,
+        "calls": 3,
+        "cost_usd": 0.064542,
+        "seconds": 44.188308875018265,
+        "error": null,
+        "budget_hit": false,
+        "plan_status": null,
+        "judge": {
+          "id": "p16",
+          "arm": "B",
+          "claims_complete": "NO",
+          "surfaced": {}
+        }
+      }
+    }
+  ]
+}

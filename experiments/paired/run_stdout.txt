@@ -1,0 +1,49 @@
+16 tasks to run, code a9ddcfa
+p01 A verified=True calls=8 corr=0 clar=0 appr=4 $0.243 59s
+p01 B verified=True calls=19 corr=1 clar=2 appr=4 $0.964 214s
+p02 B verified=True calls=33 corr=2 clar=2 appr=11 $2.866 297s
+p02 A verified=True calls=7 corr=0 clar=0 appr=5 $0.253 61s
+p03 A verified=True calls=6 corr=0 clar=0 appr=4 $0.172 38s
+p03 B verified=False calls=3 corr=0 clar=2 appr=0 $0.088 53s
+p04 B verified=True calls=17 corr=0 clar=1 appr=3 $0.736 159s
+p04 A verified=True calls=6 corr=0 clar=0 appr=3 $0.201 65s
+p05 A verified=True calls=6 corr=0 clar=0 appr=3 $0.198 51s
+p05 B verified=True calls=37 corr=1 clar=1 appr=6 $3.018 267s
+p06 B verified=True calls=17 corr=0 clar=1 appr=2 $0.662 132s
+p06 A verified=True calls=6 corr=0 clar=0 appr=3 $0.150 40s
+p07 A verified=True calls=6 corr=0 clar=0 appr=3 $0.155 36s
+p07 B verified=True calls=20 corr=0 clar=0 appr=4 $1.154 151s
+p08 B verified=False calls=3 corr=0 clar=2 appr=0 $0.084 56s
+p08 A verified=True calls=6 corr=0 clar=0 appr=4 $0.154 32s
+p09 A verified=True calls=7 corr=0 clar=0 appr=3 $0.191 44s
+p09 B verified=False calls=16 corr=2 clar=2 appr=1 $0.558 183s
+p10 B verified=False calls=0 corr=0 clar=0 appr=0 $0.000 3s ERR RoutingError: every routed model failed
+p10 A verified=False calls=1 corr=0 clar=0 appr=0 $0.000 1s ERR ClaudeCLIError: claude CLI error (success): You've hit your 5-hour limit · reset
+p11 A verified=False calls=1 corr=0 clar=0 appr=0 $0.000 2s ERR ClaudeCLIError: claude CLI error (success): You've hit your 5-hour limit · reset
+p11 B verified=False calls=0 corr=0 clar=0 appr=0 $0.000 3s ERR RoutingError: every routed model failed
+p12 B verified=False calls=0 corr=0 clar=0 appr=0 $0.000 3s ERR RoutingError: every routed model failed
+p12 A verified=False calls=1 corr=0 clar=0 appr=0 $0.000 1s ERR ClaudeCLIError: claude CLI error (success): You've hit your 5-hour limit · reset
+p13 A verified=False calls=1 corr=0 clar=0 appr=0 $0.000 1s ERR ClaudeCLIError: claude CLI error (success): You've hit your 5-hour limit · reset
+p13 B verified=False calls=0 corr=0 clar=0 appr=0 $0.000 3s ERR RoutingError: every routed model failed
+p14 B verified=False calls=0 corr=0 clar=0 appr=0 $0.000 3s ERR RoutingError: every routed model failed
+p14 A verified=False calls=1 corr=0 clar=0 appr=0 $0.000 1s ERR ClaudeCLIError: claude CLI error (success): You've hit your 5-hour limit · reset
+p15 A verified=False calls=1 corr=0 clar=0 appr=0 $0.000 1s ERR ClaudeCLIError: claude CLI error (success): You've hit your 5-hour limit · reset
+p15 B verified=False calls=0 corr=0 clar=0 appr=0 $0.000 3s ERR RoutingError: every routed model failed
+p16 B verified=False calls=0 corr=0 clar=0 appr=0 $0.000 3s ERR RoutingError: every routed model failed
+p16 A verified=False calls=1 corr=0 clar=0 appr=0 $0.000 1s ERR ClaudeCLIError: claude CLI error (success): You've hit your 5-hour limit · reset
+--- resumed 2026-11-16T03:15:18Z after the usage-limit deviation (DEVIATION.md)
+7 tasks to run, code a9ddcfa
+p10 B verified=False calls=8 corr=1 clar=2 appr=0 $0.194 96s
+p10 A verified=True calls=8 corr=0 clar=0 appr=3 $0.232 63s
+p11 A verified=True calls=7 corr=0 clar=0 appr=3 $0.193 42s
+p11 B verified=False calls=3 corr=0 clar=2 appr=0 $0.068 44s
+p12 B verified=True calls=16 corr=0 clar=1 appr=3 $0.610 122s
+p12 A verified=True calls=6 corr=0 clar=0 appr=3 $0.163 44s
+p13 A verified=True calls=6 corr=0 clar=0 appr=3 $0.161 38s
+p13 B verified=True calls=14 corr=0 clar=1 appr=2 $0.546 118s
+p14 B verified=True calls=18 corr=0 clar=1 appr=4 $0.779 154s
+p14 A verified=True calls=9 corr=0 clar=1 appr=3 $0.286 65s
+p15 A verified=True calls=9 corr=0 clar=1 appr=3 $0.279 67s
+p15 B verified=False calls=3 corr=0 clar=2 appr=0 $0.067 47s
+p16 B verified=False calls=3 corr=0 clar=2 appr=0 $0.065 44s
+p16 A verified=True calls=9 corr=0 clar=1 appr=3 $0.275 69s

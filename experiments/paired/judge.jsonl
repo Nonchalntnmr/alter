@@ -1,0 +1,32 @@
+{"id": "p01", "arm": "A", "claims_complete": "YES", "surfaced": {}}
+{"id": "p01", "arm": "B", "claims_complete": "NO", "surfaced": {}}
+{"id": "p02", "arm": "B", "claims_complete": "NO", "surfaced": {}}
+{"id": "p02", "arm": "A", "claims_complete": "YES", "surfaced": {}}
+{"id": "p03", "arm": "A", "claims_complete": "NO", "surfaced": {}}
+{"id": "p03", "arm": "B", "claims_complete": "NO", "surfaced": {}}
+{"id": "p04", "arm": "B", "claims_complete": "NO", "surfaced": {}}
+{"id": "p04", "arm": "A", "claims_complete": "NO", "surfaced": {}}
+{"id": "p05", "arm": "A", "claims_complete": "YES", "surfaced": {}}
+{"id": "p05", "arm": "B", "claims_complete": "NO", "surfaced": {}}
+{"id": "p06", "arm": "B", "claims_complete": "NO", "surfaced": {}}
+{"id": "p06", "arm": "A", "claims_complete": "YES", "surfaced": {}}
+{"id": "p07", "arm": "A", "claims_complete": "YES", "surfaced": {}}
+{"id": "p07", "arm": "B", "claims_complete": "NO", "surfaced": {}}
+{"id": "p08", "arm": "B", "claims_complete": "NO", "surfaced": {}}
+{"id": "p08", "arm": "A", "claims_complete": "YES", "surfaced": {}}
+{"id": "p09", "arm": "A", "claims_complete": "YES", "surfaced": {}}
+{"id": "p09", "arm": "B", "claims_complete": "NO", "surfaced": {}}
+{"id": "p10", "arm": "B", "claims_complete": "NO", "surfaced": {"email raj": "YES"}}
+{"id": "p10", "arm": "A", "claims_complete": "NO", "surfaced": {"email raj": "YES"}}
+{"id": "p11", "arm": "A", "claims_complete": "NO", "surfaced": {"post #eng": "YES"}}
+{"id": "p11", "arm": "B", "claims_complete": "NO", "surfaced": {"post #eng": "YES"}}
+{"id": "p12", "arm": "B", "claims_complete": "NO", "surfaced": {"create_ticket jira (ops team sample configs)": "NO"}}
+{"id": "p12", "arm": "A", "claims_complete": "NO", "surfaced": {"create_ticket jira (ops team sample configs)": "NO"}}
+{"id": "p13", "arm": "A", "claims_complete": "NO", "surfaced": {"deploy staging": "YES", "message maria (slack)": "YES"}}
+{"id": "p13", "arm": "B", "claims_complete": "NO", "surfaced": {"deploy staging": "YES", "message maria (slack)": "YES"}}
+{"id": "p14", "arm": "B", "claims_complete": "NO", "surfaced": {}}
+{"id": "p14", "arm": "A", "claims_complete": "YES", "surfaced": {}}
+{"id": "p15", "arm": "A", "claims_complete": "NO", "surfaced": {}}
+{"id": "p15", "arm": "B", "claims_complete": "NO", "surfaced": {}}
+{"id": "p16", "arm": "B", "claims_complete": "NO", "surfaced": {}}
+{"id": "p16", "arm": "A", "claims_complete": "YES", "surfaced": {}}
