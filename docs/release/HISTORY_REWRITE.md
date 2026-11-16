@@ -71,7 +71,9 @@ scratch directory and rewrote the copy there.
 | `src/` tree of every rewritten commit | identical |
 | dates, identities, parents | identical (parents through the map) |
 | `release/alter-0.2.0` final tree | byte-identical to `dd3dcda`'s |
+| every other ref (`main`, `origin/*`, parked branches, 33 in all) | unchanged in the mirror. From the second rehearsal on, the dry run checks this itself. |
 | real repository | untouched: branches unmoved, no temporary refs |
+| a second rehearsal, after rc2's later commits | 8 branches, picking up `rc2-post` automatically; still verified. The 7 branches that had not moved got the same new ids as in the first rehearsal, so the rewrite is deterministic. |
 
 `tests/test_rewrite_history.py` runs the whole cycle on a throwaway repository with fake
 identifiers. It covers:
