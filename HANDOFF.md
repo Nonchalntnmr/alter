@@ -85,20 +85,13 @@ The harnesses refuse to run if `src/` differs. Committing experiment outputs or 
 | `scripts/e2e_terminal.py` | 32/32 |
 | `main`'s tests against the integration code | 343 passed, 1 failed (the intended `plan`-mode change), 1 xfailed |
 
-## 2. Running now
+## 2. Running now: nothing
 
-**The B21 arm of the V3 paired evaluation (V2.1+ code).**
-- At handover it was at r15 of 16, with about 5 minutes left.
-- `raw.jsonl` should reach **48** lines: A, B3 and B21 × 16.
-- Progress: `~/projects/ci-intent-v3/experiments/eval_v3/paired/run_B21_stdout.txt`.
-- Check: `ps aux | grep "[e]val_v3_paired.py run B21"`.
-- If it died before 48 lines, resume with the identical command. It skips finished arms:
-
-```sh
-cd ~/projects/ci-intent-v3 && HF_HUB_OFFLINE=1 PCIM_CLI_REQUIRE_ISOLATION=1 \
-  PYTHONPATH=$HOME/projects/ci-v21-isolated/src $PY -W ignore scripts/eval_v3_paired.py run B21 \
-  >> experiments/eval_v3/paired/run_B21_stdout.txt 2>&1
-```
+**The B21 arm finished cleanly after this handover was first written.**
+- `raw.jsonl` has 48 lines: 48 unique (task, arm) pairs, no duplicates, no errors.
+- B21 (V2.1+) verified **7/16**, at $7.21 and 179 calls.
+- Its final record is `r16 B21 verified=True status=incomplete`.
+- **Do not re-run anything.** Go straight to §3.1 (judge and score).
 
 ## 3. Do next, in this order
 
@@ -165,8 +158,8 @@ cd ~/projects/ci-intent-v3 && HF_HUB_OFFLINE=1 PCIM_CLI_REQUIRE_ISOLATION=1 \
 - **Expected primary verdict: "not justified."** E1(B3) = 14 < 15 = E1(A) − 1, and person time
   is above 1.5×.
 
-**V3 paired, B21** (partial, through r14).
-- **6 of 14** verified.
+**V3 paired, B21** (complete; descriptive, not yet scored).
+- **7 of 16** verified, at $7.21 and 179 calls.
 - 7 arms stopped after repeated clarifications, with no work done (r02, r03, r04, r08, r10, r11,
   r12).
 - Costs ran to $1.44 per arm.
