@@ -41,6 +41,10 @@ from .intent_compiler import requested_actions
 
 DIRECT, CLARIFY, PLAN = "direct", "clarify", "plan"
 ROUTES = (DIRECT, CLARIFY, PLAN)
+# What `ci do` does when the person does not choose. "adaptive" acts on route(); "direct" always
+# goes direct, and prints route()'s choice as advice. experiments/eval_v4 sets it, by the rule
+# registered before its sets were read.
+ROUTING_DEFAULT = "adaptive"
 
 # What the paired runs measured per path, for --explain. Not used to decide: the rules below are.
 MEASURED = {

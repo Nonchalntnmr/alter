@@ -901,7 +901,7 @@ def _do_act(ci, uid: str, here, rec: dict, r, text: str, model: str | None) -> i
 
 
 def cmd_do(argv: list[str]) -> int:
-    from .router import DIRECT, PLAN, Route, route
+    from .router import DIRECT, PLAN, ROUTING_DEFAULT, Route, route
     from .types import new_id, utcnow
     if not argv or argv[0] in ("-h", "--help"):
         print('usage: ci do "<request>" [--route direct|plan] [--model provider:model] [--explain]\n'
@@ -957,6 +957,9 @@ def cmd_do(argv: list[str]) -> int:
     r = route(text)
     if a.route and a.route != r.decision:
         r = Route(a.route, [f"you chose {a.route} (CI would have chosen {r.decision})"], None, r.yours, r.signals)
+    elif not a.route and ROUTING_DEFAULT == DIRECT and r.decision != DIRECT:
+        r = Route(DIRECT, [f"direct is the default; CI's router suggests {r.decision}: {'; '.join(r.reasons)} "
+                           f"(ci do --route {r.decision if r.decision == PLAN else DIRECT} …)"], None, r.yours, r.signals)
     if a.explain:
         from .router import MEASURED
         _print_json({"decision": r.decision, "reasons": r.reasons, "signals": r.signals, "measured": MEASURED})

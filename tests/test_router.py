@@ -219,3 +219,13 @@ def test_ci_do_outside_an_authorized_folder_refuses(term, monkeypatch, capsys):
     monkeypatch.setattr(terminal, "_here", lambda c, u, cwd=None: None)
     assert terminal.main(["do", "fix add()"]) == 2
     assert "authorized" in capsys.readouterr().err
+
+
+def test_with_direct_as_the_default_the_router_only_advises(term, capsys, monkeypatch):
+    terminal, ci, ws, agent, p, repo = term
+    monkeypatch.setattr(router, "ROUTING_DEFAULT", "direct")
+    mock = Scripted([{"text": "Which cleanup? I see no notes on it."}])
+    agent.set_adapter("mock", None, mock)
+    assert terminal.main(["do", "--model", "mock", "redo the cleanup we talked about"]) == 0
+    out = capsys.readouterr().out
+    assert "direct is the default" in out and "suggests clarify" in out and mock.calls == 1
