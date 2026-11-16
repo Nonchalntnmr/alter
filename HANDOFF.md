@@ -1,294 +1,279 @@
-# Handoff: CI intent-compiler milestone
+# Handover to Gemini: Alter (`contextual-intelligence`)
 
-From Claude to the next agent (Gemini in Antigravity), 2026-11-13, about 14:35 UTC.
-Read all of this before touching anything.
+From Claude, 2026-11-16. This replaces the 2026-11-13 handover. Read all of it before acting.
+Copy: `HANDOFF.md` on branch `feat/intent-v3`.
 
-## 0. Rules from the owner (non-negotiable)
+## 0. Rules, plus what went wrong last time
 
 **Outward actions.**
 - Do not push, merge into `main`, deploy, or take any outward action.
-- Commit locally only. Keep every commit message ending with an attribution line.
+- Commit locally only. End every commit message with a co-author line naming yourself.
 
-**The running experiment.**
-- Do not modify the frozen experiment while it runs. Frozen means:
-  - `~/projects/ci-intent/src` (must equal commit `a9ddcfa`);
-  - `scripts/paired_eval.py`;
-  - `experiments/paired/PREREGISTRATION.md` and `experiments/paired/FROZEN.txt`;
-  - the task set `~/projects/ci-sealed/paired_v1/tasks.json`.
+**Frozen code.** Never edit `src/` in these worktrees:
 
-**Sealed sets.**
-- Do not read the new sealed sets until the V3 code is committed and frozen:
-  - `~/projects/ci-sealed/intent_heldout_v2.json`;
-  - `~/projects/ci-sealed/paired_v2/`;
-  - the scratch folder `…/scratchpad/eval_v3_build/`.
-- Reading them earlier destroys their value as held-out evidence.
+| worktree | must stay at |
+|---|---|
+| `~/projects/ci-intent` | `a9ddcfa` (paired v1) |
+| `~/projects/ci-intent-v3` | `9efe636` (V3 evaluation) |
+| `~/projects/ci-v21-isolated` | `53306b3` (V2.1+) |
 
-**Results.**
-- Never fabricate results, weaken tests, or redefine success.
-- Report negative results.
-- Non-significance is not equivalence.
-- Model agreement (the judge) is not verification. Only the hidden checks verify.
+The harnesses refuse to run if `src/` differs. Committing experiment outputs or docs there is fine.
 
-**Model calls and spending.**
+**Live calls.**
 - Make live model calls only through the logged-in `claude` CLI, and state the estimated cost
-  before each live run.
-- Each (task, arm) runs once. There are no retries of billable calls.
+  first.
+- **The account has a 5-hour usage limit.**
+  - It killed 14 arms of paired v1.
+  - Don't run helper agents alongside a live evaluation.
+  - Stage the runs.
+  - The harnesses retry an arm lost to the usage limit **once**. If it happens, wait for the
+    reset before re-running.
 
-**Python environment.**
-- Use the shared venv, `PY=~/projects/contextual-intelligence/.venv/bin/python`.
-- Always set `PYTHONPATH=<worktree>/src`. The venv's editable install points at the main
-  checkout.
-- Never run `pip install -e`.
-
-**Other people's work.**
-- `~/projects/contextual-intelligence` (the main checkout) belongs to another session, which has
-  uncommitted E2 work. Do not touch it.
-- Run `git status` in every worktree before working, and look for edits you did not make.
+**Rules from what went wrong last time:**
+- **Any change to the CLI adapter or the child process's environment must be verified live:**
+  `PYTHONPATH=src python -m pcim.adapters.cli_probe --trials 2 --baseline`.
+  - Your earlier L4 change (`55c6b77`, leaving `CLAUDE_SECURESTORAGE_CONFIG_DIR` unset) broke the
+    login: every isolated call failed "Not logged in".
+  - The offline tests, which use fake runners, passed anyway. A live probe caught it. It was
+    fixed in `0f68403`.
+- **Every fix needs a test that fails on the commit before it.** Check this by running the new
+  test against the old source:
+  `git archive <old> src | tar -x -C /tmp/x && PYTHONPATH=/tmp/x/src pytest …`.
+  - Several of your V3 changes had paths that **silently dropped real requests**: "send that to
+    priya" was skipped, and an unrelated "don't" in an answer withdrew "email the report". They
+    also had **false-completion paths**: a session that changed nothing became `done`.
+  - All were fixed in `1b8cc3e`, each pinned by such a test.
+- **Never weaken or delete a test to make it pass.** The only removal allowed is a strict xfail
+  mark when the defect it pins is fixed.
 
 **Personal data.**
 - Committed model outputs must not contain the account email, the person's name, the username or
-  the institution. Redact them first (see `experiments/intent_heldout/` for how), then re-score
-  to confirm nothing changes.
-- Redaction is not a privacy fix. The fix is `sec/cli-identity`.
+  the institution.
+- Check before calling a branch reviewable:
+  `git diff origin/main | grep '^+' | grep -ciE "<identifier pattern removed; use scripts/scan_identity.py>"`
+  must print 0.
 
-## 1. Worktrees and branches (all local; nothing pushed)
+**Reporting.**
+- The hidden checks are verification. The Haiku judge is model agreement, and must be labelled
+  as such.
+- Non-significance is not equivalence.
+- Report negative results.
 
-| worktree | branch | head | what it is |
+**Python.**
+- Use the shared venv: `PY=~/projects/contextual-intelligence/.venv/bin/python`.
+- Always set `PYTHONPATH=<worktree>/src`, and `HF_HUB_OFFLINE=1`.
+- Never run `pip install -e`.
+- Never touch `~/projects/contextual-intelligence` (another session's uncommitted work).
+
+## 1. Branches (all local, nothing pushed)
+
+| worktree | branch | head | what |
 |---|---|---|---|
-| `~/projects/ci-intent` | `feat/intent-compiler` | `bc93c86` | V2.1 plus held-out results plus docs (report partly pending). **The frozen paired run executes from here.** |
-| `~/projects/ci-intent-v3` | `feat/intent-v3` | `fa81b4e` plus this file | V3 work: new evaluation rubric committed; implementation not started |
-| `~/projects/ci-sec-cli` | `sec/cli-identity` | `c9edc64` | CLI identity isolation, tested (from `origin/main` 1f9bd08) |
-| `~/projects/ci-intent-prev` | detached `ff74305` | | V0/V1 code for the held-out runner (read-only) |
-| `~/projects/ci-main-baseline` | detached `origin/main` 1f9bd08 | | baseline tests (read-only) |
+| `~/projects/ci-intent` | `feat/intent-compiler` | `cc5d33a` | V2.1, held-out v1 and paired v1 evidence, V2 report |
+| `~/projects/ci-sec-cli` | `sec/cli-identity` | `0f68403` | CLI identity isolation; review fixes M1–M4, L1–L4, plus the login fix |
+| `~/projects/ci-intent-v3` | `feat/intent-v3` | `6fee196` | V3 (frozen `src` = `9efe636`), the V3 evaluation (harnesses, prereg, results). **B21 is running here.** |
+| `~/projects/ci-intent-v31` | `feat/intent-v3.1` | `d9e281b` | V3.1: contract approve display and Stop-all/retry consistency. e2e 32/32 |
+| `~/projects/ci-v21-isolated` | `eval/v21-isolated` | `53306b3` | V2.1 plus the isolation fix. **An evaluation arm only; never integrate it.** |
+| `~/projects/ci-integration` | `integration/intent-compiler` | `de6ab16` | `origin/main` + intent-compiler + intent-v3.1 + docs. **The review branch.** Integration docs commit `bfce2e4`: preserve it. |
+| `~/projects/alter-rc` | `release/alter-0.2.0` | `de6ab16` | the production-readiness work goes here. **Nothing done yet.** |
 
-Commits on `feat/intent-compiler`, oldest first:
+**Test status at handover:**
 
-| commit | what |
+| branch | result |
 |---|---|
-| `cc21ffa` | V0 |
-| `ff74305` | V1 |
-| `58348cc` | V2, typed intent and the state machine |
-| `9eb2721` | held-out protocol and runner, frozen |
-| `7821157` | held-out runner fix |
-| `d22da63` | paired experiment frozen |
-| `18f7d37` | held-out results |
-| `a9ddcfa` | V2.1, the real-word typo fix |
-| `2eb0173` | paired code amended to V2.1 before the tasks were read |
-| `bc93c86` | docs in progress |
+| integration, V3.1 | 499 passed, 1 skipped (the opt-in live probe), 1 xfailed (M10, from `main`) |
+| `scripts/e2e_terminal.py` | 32/32 |
+| `main`'s tests against the integration code | 343 passed, 1 failed (the intended `plan`-mode change), 1 xfailed |
 
-## 2. What is running or may have died with Claude's session
+## 2. Running now
 
-1. **The frozen paired run (Mission 3).** At handoff, p01–p06 had finished both arms and p07 had
-   finished arm A.
-   - Progress: `~/projects/ci-intent/experiments/paired/run_stdout.txt`.
-   - Results: `experiments/paired/raw.jsonl`, one line per (task, arm), 32 expected.
-   - **Check:** `ps aux | grep "[p]aired_eval.py run"` and `wc -l experiments/paired/raw.jsonl`.
-   - **If it died before 32 lines,** resume with the same command. It skips pairs already done
-     and never re-runs one:
-     ```sh
-     cd ~/projects/ci-intent && HF_HUB_OFFLINE=1 PYTHONPATH=$HOME/projects/ci-intent/src $PY -W ignore scripts/paired_eval.py run >> experiments/paired/run_stdout.txt 2>&1
-     ```
-     It refuses to start if `src/` or any frozen hash differs. Do not "fix" that by changing
-     hashes.
-   - **Expected remaining cost:** about $10–20 notional, about 40–60 min.
-2. **The writer agent for the V3 evaluation sets. FINISHED** (14:40 UTC). Both sets exist and are
-   validated: 84 checks, 0 failures. Their hashes are in `experiments/eval_v3/SEALED.txt`.
-   **Do not recreate them, and do not read them** until V3 is frozen. The rest of this item was
-   the fallback.
-   - Former note: the writer agent for the V3 evaluation sets. Its outputs are
-   `~/projects/ci-sealed/intent_heldout_v2.json` and `~/projects/ci-sealed/paired_v2/`, with
-   `tasks.json`, `validation.json` and `reference/`.
-   - **Check existence and size only.** Do not read them.
-   - If they are missing or incomplete, re-create them with a fresh agent that cannot see CI's
-     code. Its only spec is `experiments/eval_v3/RUBRIC.md` (committed as `fa81b4e`, sha256
-     `81a8d4ce…`). It must validate the paired tasks: the hidden test fails on the original code,
-     passes on the reference, and fails on the other reading for vague tasks.
-   - Record each set's sha256 without reading the contents.
-3. **The review of `c9edc64` is FINISHED.** It found 4 medium and 4 low defects, none high:
-   `~/projects/ci-sec-cli/docs/SECURITY_CLI_IDENTITY_REVIEW.md`. **Fix M1–M4 and L1–L4 on
-   `sec/cli-identity` first.**
-   - Add a test for each, re-run the probe with `--record`, and have the fix reviewed
-     independently again.
-   - Only then merge the branch into V3 or the integration branch.
-   - Former note: a review agent for `c9edc64` (the security branch). Its result is lost if the session
-   died. Re-run an independent review of `git -C ~/projects/ci-sec-cli show c9edc64`. It should
-   look for fail-open paths, identity leaks, cleanup, and the probe relay's token handling.
-
-## 3. After the paired run finishes (Mission 3, frozen; change nothing in the harness)
+**The B21 arm of the V3 paired evaluation (V2.1+ code).**
+- At handover it was at r15 of 16, with about 5 minutes left.
+- `raw.jsonl` should reach **48** lines: A, B3 and B21 × 16.
+- Progress: `~/projects/ci-intent-v3/experiments/eval_v3/paired/run_B21_stdout.txt`.
+- Check: `ps aux | grep "[e]val_v3_paired.py run B21"`.
+- If it died before 48 lines, resume with the identical command. It skips finished arms:
 
 ```sh
-cd ~/projects/ci-intent
-wc -l experiments/paired/raw.jsonl                                   # must be 32
-HF_HUB_OFFLINE=1 PYTHONPATH=src $PY scripts/paired_eval.py judge     # claude-cli:haiku, small cost
-HF_HUB_OFFLINE=1 PYTHONPATH=src $PY scripts/paired_eval.py score     # offline; prints E1–E8 and the decision rule
+cd ~/projects/ci-intent-v3 && HF_HUB_OFFLINE=1 PCIM_CLI_REQUIRE_ISOLATION=1 \
+  PYTHONPATH=$HOME/projects/ci-v21-isolated/src $PY -W ignore scripts/eval_v3_paired.py run B21 \
+  >> experiments/eval_v3/paired/run_B21_stdout.txt 2>&1
 ```
 
-**Verify first.**
-- Every raw record's code is `a9ddcfa`, and `FROZEN.txt`'s hashes match. `score` and `check()` do
-  this.
-- Each (task, arm) appears exactly once.
+## 3. Do next, in this order
 
-**Then report.**
-- Paired outcomes per task, with A against B for each of: verified, calls, cost, seconds,
-  corrections, clarifications, approvals, plan reviews, out-of-scope denials, and plan status.
-- The decision rule from `experiments/paired/PREREGISTRATION.md`.
-- Wilson intervals, and exact McNemar on E1.
-- **p01.** Report it specifically.
-- **p12.** A coding change plus creating a ticket. "Ticket" is not in V2.1's lexicon. Did B
-  preserve it as an outcome by you, ask about it, block, or drop it silently? Did A mention it
-  as not done?
-- **Separate** verified completion (the hidden check) from the plan's own status and from the
-  judge's model-reported "complete".
+1. **Judge and score** (about 50 Haiku calls, under $0.10):
+   ```sh
+   cd ~/projects/ci-intent-v3
+   HF_HUB_OFFLINE=1 PCIM_CLI_REQUIRE_ISOLATION=1 PYTHONPATH=$HOME/projects/ci-intent-v3/src $PY scripts/eval_v3_paired.py judge
+   $PY scripts/eval_v3_paired.py score     # writes experiments/eval_v3/paired/results.json
+   ```
+   - Report the **primary** decision (A against B3, the same 4-condition rule as v1) and the
+     **secondary** checks (B3 against B21).
+   - Separate per-task E1–E8 and F1–F4, with Wilson intervals and paired tests.
+2. **Commit** on `feat/intent-v3`.
+   - The outputs go in `experiments/eval_v3/paired/`.
+   - Release the set: `cp ~/projects/ci-sealed/paired_v2/tasks.json experiments/eval_v3/paired/`.
+   - Run the identity grep first. The A and B3 outputs had 0 hits.
+3. **Merge** `feat/intent-v3` into `integration/intent-compiler`, then integration into
+   `release/alter-0.2.0`. Re-run the full suite and the e2e check on both.
+4. **Write the results** on the integration branch:
+   - `docs/INTENT_V2_REPORT.md`: add a "V3" section and fill in §5, the merge recommendation.
+     The only remaining "PENDING" text is in §5.
+   - `docs/CI_INTENT_MESH.md`: add §5c (the paired results; §3 already refers to it) and update
+     §8 (claims).
 
-**Redact before committing.** Redact identity in `raw.jsonl` and any judge outputs. Check:
-`grep -ciE "<identifier pattern removed; use scripts/scan_identity.py>" experiments/paired/*`.
-Then re-score, confirm identical, and commit the raw data, the judge outputs and the results.
+## 4. Results so far (all committed unless marked)
 
-**Fill in the docs.** In `docs/INTENT_V2_REPORT.md`, fill in Mission 3 and §5 (the merge
-recommendation). Also update `CI_INTENT_MESH.md` §8 H3, and run the full suite (expect 452
-passed, 2 xfailed).
+**Paired v1** (`eb21b53`; frozen V2.1, 16 tasks).
+- Direct (A): **16/16** [0.81, 1.00]. Plan + step execution (B): **9/16** [0.33, 0.77].
+  McNemar p = 0.016.
+- B used 3.6× the person time and 3.8× the cost ($12.46 against $3.31), 230 calls against 112,
+  with a median latency of 127 s against 48 s.
+- Verdict: **"not justified."**
+- B never reported `done`: all 9 of its verified tasks ended `incomplete` or falsely
+  `awaiting_you`.
+- **p12:** B dropped the Jira ticket after clarification (a silent omission). A's final message
+  left it open for the person. The judge scored both as not surfacing it, against my reading of
+  A; reported as model judgement.
 
-## 4. Paired v1 so far: confirmed V2.1 defects (from p01–p06; arm A verified all six)
+**V3 intent evaluation** (`6fee196`; 50 new items; V2.1+ against V3).
+- H1 26/26 for both. H4 39/39, H5 6/6, H6 50/50, H7 10/10.
+- C1 (preservation after the answer): 26/26 and 25/25.
+- **H3 (≤ 0.25) missed by both:** V2.1+ 16/23, V3 11/23. Every V3 false question is on a clear
+  request that includes an outside action (book, email, RSVP, pay, file a ticket).
+- **H2 regressed for V3:** 18/21. It no longer asks on 3 genuinely vague requests (q29, q39,
+  q45).
+- W1 (withdrawal): V2.1+ 2/4, V3 4/4, recorded visibly.
 
-**Interim numbers.** These are not the result.
+**V3 paired, A and B3** (descriptive, from `raw.jsonl`; not yet scored, judged or committed).
 
-| arm | verified | calls each | cost each |
-|---|---|---|---|
-| A (direct) | 6/6 | about 6–8 | $0.15–0.25 |
-| B (plan) | 5/6 (p03 failed) | 17–37 | $0.66–3.02 |
+| | A | B3 |
+|---|---|---|
+| verified | **16/16** | **14/16** |
+| cost | $2.62 | $3.56 |
+| calls | 102 | 126 |
+| median latency | 47 s | 75 s |
+| modelled person time | 645 s | 1,380 s |
 
-**D1. Over-clarification on clear coding tasks.**
-- B asked questions on every clear or messy task.
-- p03: three `needs_answers` plans in a row, even after "go with your best reading". The arm
-  stopped and the task was never done.
-- Fix direction: inside an authorized workspace, plan to *read the code* rather than ask.
-  - After one answer round, unresolved low-stakes questions become stated assumptions.
-  - Only consequential ambiguity (destructive or external) may ask again.
+- B3's failures:
+  - **r10:** the planner did not return JSON, so the plan was `invalid` and the arm stopped.
+  - **r15:** a vague task V3 did not ask about. It went with its own reading and failed even
+    after 2 corrections. It reported `incomplete`, with no false completion.
+- **B3 had zero false incompletes** (V2.1 had 9/9). Every verified task ended `done`, or
+  `awaiting_you` when the task has an external action.
+- **Expected primary verdict: "not justified."** E1(B3) = 14 < 15 = E1(A) − 1, and person time
+  is above 1.5×.
 
-**D2. Extractor false positives on code and technical prose.**
-- p02: "**Calls** that don't pass holidays…" was read as call, i.e. contact.
-- p05: "**reserve** raises…", "**release** raises…" and "**remove** doesn't…" are function names
-  used as subjects. They were read as book, deploy and delete.
-- Each became a false `yours_pending` outcome, so all-met plans ended `awaiting_you`.
-- Fix direction: a clause-initial word followed by `(`, wrapped in backticks, or followed by a
-  third-person or modal verb (raises, returns, is, should, must, does, doesn't) is a subject or
-  an identifier, not an imperative.
-  - Reconsider inflected forms ("Calls", "emails") at the start of a clause. Imperatives are base
-    form.
-  - Keep the guarantee: never drop a real requested action, and add tests both ways.
+**V3 paired, B21** (partial, through r14).
+- **6 of 14** verified.
+- 7 arms stopped after repeated clarifications, with no work done (r02, r03, r04, r08, r10, r11,
+  r12).
+- Costs ran to $1.44 per arm.
+- **Expected secondary result: V3 is far better than V2.1+.**
 
-**D3. False `incomplete`.**
-- p04 and p06: a `record_claim` tool failure ("the claim ledger is not enabled here") made a
-  write step `incomplete`. The dependent steps never ran, although the code change was done and
-  verified.
-- p01: a self-check step tried to write a scratch script outside the allowed files. The write
-  was denied, so the step was incomplete and the plan was `incomplete`, although the work was
-  verified.
-- Fix direction:
-  - Bookkeeping tools (`record_note`, `record_claim`) failing must not decide a step's outcome.
-  - Don't offer tools the workspace has disabled.
-  - Keep **three independent states**:
-    1. outcome success, from evidence (for example, a passing test run after the last write);
-    2. plan completion, meaning which steps finished;
-    3. authorization compliance, meaning denials and out-of-scope attempts, listed.
-  - A denied optional step must show as a denial, not erase verified outcomes. Never mark an
-    outcome met without evidence.
+**Decision-gate reading** (for Phase 6, if B21 finishes as expected):
+- V3 should **replace V2.1 as the `ci plan` engine.**
+- Planning should stay **opt-in**: direct execution remains the default path, because A ≥ B3 on
+  both paired evaluations.
+- Do not make planning the default.
 
-**D4. Planner-induced unnecessary steps and cost.**
-- Examples: p04's "save a copy of the original outside the project", and "check with a quick
-  script".
-- One agent turn per step re-reads files.
-- B costs 4–15× more than A.
-- Fix direction, and the owner's instruction: if planning does not measurably improve execution,
-  **simplify or redesign**.
-  - The strongest candidate for V3 keeps the intent contract: outcomes, preserved external
-    actions, constraints, and questions only when consequential.
-  - It executes the contract in **one** governed agent session, with the contract as the
-    checklist, rather than one session per step.
-  - It judges completion per outcome from evidence.
+## 5. Known defects and open issues (prioritised)
 
-**D5. Preserving intent across clarification and correction.**
-- When a plan is re-compiled from an answer or a correction (`ci plan answer`), the parent
-  plan's external and destructive outcomes must carry over, unless the answer explicitly
-  withdraws them. Today only the original request text is re-scanned, so an action the *model*
-  found, outside the lexicon, can vanish.
-- Add tests.
+1. **V3 compiler quality.**
+   - H3: it asks on clear outside-action requests.
+   - H2: it doesn't ask on genuinely vague ones.
+   - r10: an invalid JSON plan. Proposed fix: **one bounded re-ask** on an invalid plan reply
+     (as `ClaudeCLIAdapter.agent_step` already does), as V3.2 with a test.
+   - Any compiler change is unmeasured until a **new** independently written set exists. Every
+     existing set has now been read.
+2. **The agent's session lock is in-process only** (`agent.py` `_lock` is a `threading.Lock`).
+   Two terminals can drive one direct session. Fix: an `flock` per session, like
+   `plan_exec.plan_lock`, plus a two-process test.
+3. **Building `PersonalCI` contacts the Hugging Face Hub** unless `HF_HUB_OFFLINE=1`. Fix: go
+   offline when the model is cached, as `mesh.py` does, plus a test.
+4. **Identity isolation, still open:**
+   - it is verified only for CLI 2.1.316;
+   - the CLI refetches the profile during every call (measured clean, not guaranteed);
+   - the account id stays in API metadata;
+   - older stored records are not scrubbed.
+   Docs: `docs/SECURITY_CLI_IDENTITY.md` and `SECURITY_CLI_IDENTITY_REVIEW.md`.
+5. **M10** (on `main`): deleting a project keeps the `ci` requests made in it. It is pinned by a
+   strict xfail.
+6. **Mesh trust:** `mesh.json`'s `trusted: true` has no attestation.
+7. **History.** Commit `ff74305` on `feat/intent-compiler` still holds the home path in history,
+   although the current files are redacted. `main` has the path in old experiment files
+   (milestone1, routing). Removing either needs a history rewrite: **the owner decides; don't do
+   it yourself.**
 
-## 5. The remaining sequence (owner's mandate)
+## 6. The owner's latest directive: "ALTER production readiness" (not started)
 
-1. **Finish and score paired v1.** See §3.
-2. **Implement V3 on `feat/intent-v3`.**
-   - Merge `sec/cli-identity` into it first (`git merge sec/cli-identity`). Conflicts are
-     expected to be small: adapters are untouched by the intent branch, and `engine.py` changes
-     are separate lines.
-   - Fix D1–D5 and the `agent.py` Stop-all wedge. The wedge is pinned by the strict xfail
-     `tests/test_plan_exec.py::test_the_workspace_agent_recovers_by_itself_after_stop_all`.
-     When fixed, remove the xfail mark; don't weaken the test.
-   - Run the full suite.
-3. **Freeze V3 and run the new evaluation.**
-   - Write `experiments/eval_v3/PREREGISTRATION.md` **before reading the sets**:
-     - metrics: H1–H7 as before, plus C1, preservation after clarification;
-     - for the paired evaluation, arms A (direct), B2.1 (V2.1 plan) and B3 (V3), with E1–E8 plus
-       false incomplete, out-of-scope attempts, and clarifications on clear tasks;
-     - a decision rule.
-   - Write a harness: reuse `scripts/paired_eval.py` logic in a new file, never edit the frozen
-     one. Set `PCIM_CLI_REQUIRE_ISOLATION=1` for every eval call, after recording the probe:
-     `python -m pcim.adapters.cli_probe --trials 4 --record`.
-   - Record the hashes in `FROZEN.txt`, commit, then read and run the sets.
-   - Budget: about $35–45 notional, 2–3 h. State it before running.
-4. **Integration.** Create branch `integration/intent-compiler` from `origin/main`.
-   - Merge `feat/intent-compiler` (or `feat/intent-v3`, which contains it) and `sec/cli-identity`.
-   - Resolve conflicts safely and run the full suite.
-   - **Do not merge to `main`.**
-5. **End-to-end checks** in a temporary `PCIM_HOME` with an authorized temporary repo.
-   - Commands: `ci plan`, `ci execute`, `ci approve`, `ci deny`, `ci mesh`, `ci twin`, `ci audit`
-     and `ci learn`, against their documented behaviour.
-   - Behaviours: restart recovery (kill mid-step, expect `interrupted`, then `--retry`), Stop-all
-     (`ci halt` / `ci resume`), permission boundaries (writes outside the folder are refused),
-     and failure handling.
-6. **Finish the docs.** `docs/INTENT_V2_REPORT.md`, `docs/CI_INTENT_MESH.md`,
-   `docs/TEST_COMMANDS.md`, and `docs/SECURITY_CLI_IDENTITY.md` (on the security branch). Include
-   exact numbers, limitations and blockers.
-7. **The final report.** Give commit SHAs, test results, experimental results, blockers, and the
-   integration recommendation.
+The owner asked for:
+- **Phase 0:** finish and preserve the experiment (§2 and §3 above);
+- **Phase 1:** an audit of 10 areas: reasoning, planning and execution, routing, memory,
+  authorization boundaries, recovery, security and injection and secrets, CLI and install,
+  performance, observability;
+- **Phase 2–3:** capability and production engineering;
+- **Phase 4:** tests;
+- **Phase 5:** a release candidate (versioned artifacts, install docs, config docs, security and
+  ops runbooks, release notes, rollback, readiness checklist, smoke procedure);
+- **Phase 6:** a decision gate.
 
-## 6. Results already established (with evidence)
+**Rules for this directive:**
+- Work on `release/alter-0.2.0` (`~/projects/alter-rc`).
+- Do not deploy or publish anything.
+- **Don't claim readiness from unit tests alone.**
 
-**The held-out intent run** (`experiments/intent_heldout/`, 50 independently labelled items).
-- V0, V1 and V2 all meet H1–H7 on the point estimate. McNemar p = 1.0, so the set did not
-  separate the versions.
-- 16 of the 17 action items passed by asking a question.
-- V2 fixed h48. V1's tripwire over-blocked h14 and h50.
-- The lower confidence bounds for H1 (0.82), H4 (0.91) and H5 (0.70) are below target.
-- Cost: 100 calls, $3.28.
-- The 24-item development run's M2 miss (5/6) stands. It is not counted as a success.
+**The highest-leverage, evidence-backed items, in suggested order:**
+1. **`ci doctor`**, a diagnostic that only reads. It checks:
+   - the Python version and dependencies;
+   - the `PCIM_HOME` identity;
+   - the `claude` binary, its version, its login, and `ClaudeCLIAdapter().identity_isolation()`;
+   - the HF model cache and offline state;
+   - the audit chain;
+   - the authorized workspaces;
+   - Stop-all.
 
-**V2.1** (`a9ddcfa`).
-- A real word is not read as a typo of an action verb (look≠book, test≠text).
-- A post hoc replay on stored replies changes only h40 and h49.
+   It should exit non-zero on blocking problems. Also add `ci --version`.
+2. **Version 0.2.0rc1** in `pyproject.toml` and `pcim/__init__.py`.
+3. **Fix §5 items 2 and 3** (the session lock and the Hub contact), each with a regression test.
+4. **Prompt-injection tests.** Tool output or a file that tells the agent to write outside the
+   folder, approve its own action, or run a shell command must not do so. Use the mock agent: the
+   governor and authorization must stop it whatever the model "decides". Also test a forged turn
+   delimiter in a tool result for the CLI adapter.
+5. **A concurrency test** for two processes on one plan or one session.
+6. **An install test.**
+   - Build: `cd ~/projects/alter-rc && $PY -m pip wheel . --no-deps -w dist/`.
+   - Then in a fresh venv: `python3 -m venv /tmp/alter-venv && /tmp/alter-venv/bin/pip install dist/*.whl`.
+     Installing the dependencies downloads from PyPI. That is a network action; say so before
+     doing it.
+   - Then run `ci --help`, `pcim init`, `ci doctor`, and `scripts/e2e_terminal.py` against the
+     installed package.
+7. **An upgrade test.** Make a `PCIM_HOME` with `main`'s code (`~/projects/ci-main-baseline`,
+   at `origin/main`), then run the RC's `ci status`, `ci audit`, `ci twin` and `ci plan` on it.
+8. **Release docs** in `docs/release/`: `RELEASE_NOTES_0.2.0rc1.md`, `INSTALL.md`, `CONFIG.md`
+   (every env var: `PCIM_HOME`, `PCIM_CLAUDE_BIN`, `PCIM_CLI_REQUIRE_ISOLATION`, `HF_HUB_OFFLINE`,
+   `PCIM_EMBEDDER`, …), `RUNBOOK.md` (security and ops: Stop-all, isolation re-probe after a CLI
+   update, recovery from `interrupted`), `ROLLBACK.md`, `READINESS.md` (the checklist with actual
+   results) and `SMOKE.md` (the doctor and e2e commands).
+9. **Phase 6 gate.**
+   - Likely **CONDITIONAL**: V3 replaces V2.1 for `ci plan`, and planning stays opt-in.
+   - Blockers to state honestly:
+     - identity isolation is verified only for the installed CLI version;
+     - H2 and H3 compiler quality;
+     - M10;
+     - no human evaluation yet.
 
-**Security** (`c9edc64`).
-- The CLI put the account email and the home-path username into every request. This was
-  measured on the request itself, by a loopback relay.
-- The fix: a neutral working directory and a sanitized per-call config. It came out clean in
-  10/10 trials on CLI 2.1.316.
-- Identity-sensitive calls are refused unless verified (`PCIM_CLI_REQUIRE_ISOLATION=1`).
-- Open:
-  - the CLI refetches the profile during calls (measured clean, not guaranteed);
-  - the account id stays in API metadata;
-  - other CLI versions are unverified.
-- The report is `docs/SECURITY_CLI_IDENTITY.md` on `sec/cli-identity`.
+## 7. Command reference
 
-**Test counts.**
+```sh
+PY=~/projects/contextual-intelligence/.venv/bin/python; export HF_HUB_OFFLINE=1
+cd <worktree> && PYTHONPATH=src $PY -m pytest -q -p no:cacheprovider               # full suite
+PYTHONPATH=src $PY scripts/e2e_terminal.py                                          # 32 e2e checks, no model calls
+PYTHONPATH=src $PY -m pcim.adapters.cli_probe --trials 2 --baseline                 # live identity probe (Haiku, <$0.01)
+PYTHONPATH=src $PY -m pcim.adapters.cli_probe --trials 4 --record                   # record a clean result for this CLI
+cd ~/projects/ci-main-baseline && PYTHONPATH=<worktree>/src $PY -m pytest -q        # main's tests on new code
+git -C ~/projects/ci-integration merge-tree --write-tree HEAD origin/main           # conflict check
+```
 
-| suite | result |
-|---|---|
-| `feat/intent-compiler` | 452 passed, 2 xfailed |
-| `sec/cli-identity` | 352 passed, 1 skipped (live), 1 xfailed |
-| `main` | 344 passed, 1 xfailed |
-
-**Known pre-existing issues** (`INTENT_V2_REPORT.md` §2).
-- The `agent.py` Stop-all wedge.
-- The agent's session lock works in-process only.
-- Building `PersonalCI` contacts the Hugging Face Hub unless `HF_HUB_OFFLINE=1`.
-- The mesh trusts `mesh.json`.
+Full test-command list: `docs/TEST_COMMANDS.md` on the integration branch.
