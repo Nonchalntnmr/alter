@@ -1,4 +1,4 @@
-# Smoke Procedure (`0.2.0rc1`)
+# Smoke Procedure (`0.2.0rc2`)
 
 ## 1. Version and read-only diagnostics
 
@@ -8,7 +8,7 @@ PYTHONPATH=src $PY -m pcim.terminal --version
 PYTHONPATH=src $PY -m pcim.terminal doctor
 ```
 
-## 2. End-to-end terminal suite (offline, 32 checks)
+## 2. End-to-end terminal suite (offline, 37 checks)
 
 Requires the `[test]` extra (`pytest` is not a runtime dependency):
 
@@ -16,7 +16,9 @@ Requires the `[test]` extra (`pytest` is not a runtime dependency):
 PYTHONPATH=src $PY scripts/e2e_terminal.py
 ```
 
-Expected: `32 of 32 checks passed`.
+Expected: `37 of 37 checks passed`. That includes `ci do`: a direct route that waits for
+approval before writing, a clarify route that makes no model call, and a plan route that
+changes nothing.
 
 **Against an installed wheel instead of this checkout.** Without this flag the script tests the
 checkout's `src/`, even when run with the venv's Python:
@@ -42,9 +44,9 @@ Expected: `clean: true` in isolated trials and `account email` present in `basel
 ## 5. Upgrade and rollback (local, no model calls)
 
 1. Create a `PCIM_HOME` with `main`'s code: `pcim init`, `pcim remember "…"`, `ci status`, and one
-   `ci "…"` request.
-2. Run this release on it: `ci doctor` (exit 0), `ci status`, `ci audit`, `ci twin`, and
-   `ci plan "…"`.
+   `ci "…"` request. That one is a text answer: `ci "…"` never acts in a folder; `ci do` does.
+2. Run this release on it: `ci doctor` (exit 0), `ci status`, `ci audit`, `ci twin`, `ci plan "…"`
+   and `ci do list`.
 3. Go back to `main` on the same data: `ci status`, `pcim memory`, and `pcim audit`. The audit
    must report `"chain_ok": true`.
 

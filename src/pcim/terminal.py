@@ -49,6 +49,7 @@ import argparse
 import contextlib
 import dataclasses
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -823,6 +824,12 @@ def cmd_approve(argv: list[str], approve: bool = True) -> int:
     return 0
 
 
+def _routing_default(built_in: str) -> str:
+    """PCIM_DO_ROUTING=direct|adaptive overrides the built-in default (the human evaluation sets it)."""
+    v = os.environ.get("PCIM_DO_ROUTING", "").strip().lower()
+    return v if v in ("direct", "adaptive") else built_in
+
+
 DO_STATE = "pcim-do"
 # "ci do you think …", "ci do we have …": a yes/no question, not work to do
 _QUESTION_SUBJECTS = frozenset({"i", "you", "u", "we", "they", "he", "she"})
@@ -939,10 +946,19 @@ def cmd_do(argv: list[str]) -> int:
             print("that request belongs to another project folder", file=sys.stderr)
             return 2
         answer = " ".join(" ".join(argv[2:]).split())
-        if rec.get("session_id"):  # a running conversation with the agent: the answer is the next message
-            return _do_act(ci, uid, here, rec, Route(**rec["route"]), answer, None)
+        if rec.get("session_id"):
+            # Its own conversation, if still open, gets the answer as the next message. A later
+            # request or the idle timeout closes it (one open session per project), and then the
+            # answer would land in someone else's conversation, or alone in a new one. So it
+            # starts again with the request and the answer together.
+            if _workspace_agent(ci).open_session(uid, here.project_id) == rec["session_id"]:
+                return _do_act(ci, uid, here, rec, Route(**rec["route"]), answer, None)
+            rec["session_id"], rec["answers"] = None, answer
+            return _do_act(ci, uid, here, rec, Route(**rec["route"]),
+                           f"{rec['text']}\n\nAnswer to your question: {answer}", None)
         if rec["status"] != "needs_answer":
-            print(f"{rec['id']} is {rec['status']}; see ci plan show {rec.get('plan_id')}", file=sys.stderr)
+            hint = f"answer the plan with: ci plan answer {rec['plan_id']} \"…\"" if rec.get("plan_id") else ""
+            print(f"{rec['id']} is {rec['status']}" + (f"; {hint}" if hint else ""), file=sys.stderr)
             return 2
         rec["answers"] = answer
         r = route(rec["text"], answered=True, answers=answer)
@@ -957,7 +973,7 @@ def cmd_do(argv: list[str]) -> int:
     r = route(text)
     if a.route and a.route != r.decision:
         r = Route(a.route, [f"you chose {a.route} (CI would have chosen {r.decision})"], None, r.yours, r.signals)
-    elif not a.route and ROUTING_DEFAULT == DIRECT and r.decision != DIRECT:
+    elif not a.route and _routing_default(ROUTING_DEFAULT) == DIRECT and r.decision != DIRECT:
         r = Route(DIRECT, [f"direct is the default; CI's router suggests {r.decision}: {'; '.join(r.reasons)} "
                            f"(ci do --route {r.decision if r.decision == PLAN else DIRECT} …)"], None, r.yours, r.signals)
     if a.explain:

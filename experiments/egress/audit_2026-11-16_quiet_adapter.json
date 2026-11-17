@@ -1,0 +1,360 @@
+{
+ "cli_version": "2.1.316",
+ "measured_at": "2026-11-16T22:01:26Z",
+ "identifier_labels_checked": [
+  "account display name",
+  "account email",
+  "account full name",
+  "account id",
+  "email domain",
+  "email domain label",
+  "email local part",
+  "git user.email",
+  "git user.name",
+  "home path",
+  "hostname",
+  "name token 1",
+  "name token 2",
+  "organization id",
+  "organization name",
+  "username ($USER)",
+  "username fragment"
+ ],
+ "observer_limits": [
+  "lsof sampled every 50 ms: a shorter connection can be missed",
+  "DNS lookups are not observed",
+  "only traffic of the claude process tree during the call is watched"
+ ],
+ "scenarios": [
+  {
+   "scenario": "generate",
+   "env_added": [],
+   "error": null,
+   "cost_usd": 4.64e-05,
+   "api_requests": [
+    {
+     "method": "POST",
+     "path": "/v1/messages",
+     "query_keys": [
+      "beta"
+     ],
+     "headers": {
+      "accept": "application/json",
+      "authorization": {
+       "chars": 115,
+       "bearer": true,
+       "identifiers": [],
+       "uuids": 0
+      },
+      "content-type": "application/json",
+      "user-agent": "claude-cli/2.1.316 (external, sdk-cli, agent-sdk/0.3.325)",
+      "x-claude-code-session-id": {
+       "chars": 36,
+       "bearer": false,
+       "identifiers": [],
+       "uuids": 1
+      },
+      "x-stainless-arch": "arm64",
+      "x-stainless-lang": "js",
+      "x-stainless-os": "MacOS",
+      "x-stainless-package-version": "0.128.0",
+      "x-stainless-retry-count": "0",
+      "x-stainless-runtime": "node",
+      "x-stainless-runtime-version": "v26.12.1",
+      "x-stainless-timeout": "600",
+      "anthropic-beta": "oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,claude-code-<num>,per-turn-control-2026-07-01,mid-conversation-tool-changes-2026-07-01,thinking-token-count-2026-05-13,effort-2025-11-24,extended-cache-ttl-2025-04-11",
+      "anthropic-dangerous-direct-browser-access": "true",
+      "anthropic-version": "2023-06-01",
+      "x-app": "cli",
+      "connection": {
+       "chars": 10,
+       "bearer": false,
+       "identifiers": [],
+       "uuids": 0
+      },
+      "host": {
+       "chars": 15,
+       "bearer": false,
+       "identifiers": [],
+       "uuids": 0
+      },
+      "accept-encoding": {
+       "chars": 23,
+       "bearer": false,
+       "identifiers": [],
+       "uuids": 0
+      },
+      "content-length": {
+       "chars": 4,
+       "bearer": false,
+       "identifiers": [],
+       "uuids": 0
+      }
+     },
+     "body": {
+      "keys": [
+       "context_management",
+       "max_tokens",
+       "messages",
+       "metadata",
+       "model",
+       "output_config",
+       "stream",
+       "system",
+       "thinking",
+       "tools"
+      ],
+      "model": "claude-haiku-5-5",
+      "system_chars": 379,
+      "system_blocks": 3,
+      "messages": 2,
+      "message_chars": 1197,
+      "tools": 0,
+      "tool_names": [],
+      "metadata": {
+       "user_id": "{\"device_id\":\"<hex64>\",\"account_uuid\":\"<account id>\",\"session_id\":\"<uuid>\"}"
+      },
+      "identifiers_in_model_input": [],
+      "identifiers_in_metadata": [
+       "account id"
+      ],
+      "identifiers_elsewhere": []
+     },
+     "status": 200
+    }
+   ],
+   "other_https_destinations_via_proxy": [
+    "api.anthropic.com:443"
+   ],
+   "connections_bypassing_the_proxy": [],
+   "loopback_only": true,
+   "relay_port": "52802"
+  },
+  {
+   "scenario": "agent",
+   "env_added": [],
+   "error": null,
+   "cost_usd": 0.0001837,
+   "api_requests": [
+    {
+     "method": "POST",
+     "path": "/v1/messages",
+     "query_keys": [
+      "beta"
+     ],
+     "headers": {
+      "accept": "application/json",
+      "authorization": {
+       "chars": 115,
+       "bearer": true,
+       "identifiers": [],
+       "uuids": 0
+      },
+      "content-type": "application/json",
+      "user-agent": "claude-cli/2.1.316 (external, sdk-cli, agent-sdk/0.3.325)",
+      "x-claude-code-session-id": {
+       "chars": 36,
+       "bearer": false,
+       "identifiers": [],
+       "uuids": 1
+      },
+      "x-stainless-arch": "arm64",
+      "x-stainless-lang": "js",
+      "x-stainless-os": "MacOS",
+      "x-stainless-package-version": "0.128.0",
+      "x-stainless-retry-count": "0",
+      "x-stainless-runtime": "node",
+      "x-stainless-runtime-version": "v26.12.1",
+      "x-stainless-timeout": "600",
+      "anthropic-beta": "oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,claude-code-<num>,per-turn-control-2026-07-01,mid-conversation-tool-changes-2026-07-01,thinking-token-count-2026-05-13,effort-2025-11-24,extended-cache-ttl-2025-04-11",
+      "anthropic-dangerous-direct-browser-access": "true",
+      "anthropic-version": "2023-06-01",
+      "x-app": "cli",
+      "connection": {
+       "chars": 10,
+       "bearer": false,
+       "identifiers": [],
+       "uuids": 0
+      },
+      "host": {
+       "chars": 15,
+       "bearer": false,
+       "identifiers": [],
+       "uuids": 0
+      },
+      "accept-encoding": {
+       "chars": 23,
+       "bearer": false,
+       "identifiers": [],
+       "uuids": 0
+      },
+      "content-length": {
+       "chars": 4,
+       "bearer": false,
+       "identifiers": [],
+       "uuids": 0
+      }
+     },
+     "body": {
+      "keys": [
+       "context_management",
+       "max_tokens",
+       "messages",
+       "metadata",
+       "model",
+       "output_config",
+       "stream",
+       "system",
+       "thinking",
+       "tools"
+      ],
+      "model": "claude-haiku-5-5",
+      "system_chars": 1078,
+      "system_blocks": 3,
+      "messages": 2,
+      "message_chars": 1725,
+      "tools": 0,
+      "tool_names": [],
+      "metadata": {
+       "user_id": "{\"device_id\":\"<hex64>\",\"account_uuid\":\"<account id>\",\"session_id\":\"<uuid>\"}"
+      },
+      "identifiers_in_model_input": [],
+      "identifiers_in_metadata": [
+       "account id"
+      ],
+      "identifiers_elsewhere": []
+     },
+     "status": 200
+    }
+   ],
+   "other_https_destinations_via_proxy": [
+    "api.anthropic.com:443"
+   ],
+   "connections_bypassing_the_proxy": [],
+   "loopback_only": true,
+   "relay_port": "52810"
+  },
+  {
+   "scenario": "generate+quiet",
+   "env_added": [
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+    "DISABLE_AUTOUPDATER",
+    "DISABLE_ERROR_REPORTING",
+    "DISABLE_TELEMETRY"
+   ],
+   "error": null,
+   "cost_usd": 4.63e-05,
+   "api_requests": [
+    {
+     "method": "POST",
+     "path": "/v1/messages",
+     "query_keys": [
+      "beta"
+     ],
+     "headers": {
+      "accept": "application/json",
+      "authorization": {
+       "chars": 115,
+       "bearer": true,
+       "identifiers": [],
+       "uuids": 0
+      },
+      "content-type": "application/json",
+      "user-agent": "claude-cli/2.1.316 (external, sdk-cli, agent-sdk/0.3.325)",
+      "x-claude-code-session-id": {
+       "chars": 36,
+       "bearer": false,
+       "identifiers": [],
+       "uuids": 1
+      },
+      "x-stainless-arch": "arm64",
+      "x-stainless-lang": "js",
+      "x-stainless-os": "MacOS",
+      "x-stainless-package-version": "0.128.0",
+      "x-stainless-retry-count": "0",
+      "x-stainless-runtime": "node",
+      "x-stainless-runtime-version": "v26.12.1",
+      "x-stainless-timeout": "600",
+      "anthropic-beta": "oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,claude-code-<num>,per-turn-control-2026-07-01,mid-conversation-tool-changes-2026-07-01,thinking-token-count-2026-05-13,effort-2025-11-24,extended-cache-ttl-2025-04-11",
+      "anthropic-dangerous-direct-browser-access": "true",
+      "anthropic-version": "2023-06-01",
+      "x-app": "cli",
+      "connection": {
+       "chars": 10,
+       "bearer": false,
+       "identifiers": [],
+       "uuids": 0
+      },
+      "host": {
+       "chars": 15,
+       "bearer": false,
+       "identifiers": [],
+       "uuids": 0
+      },
+      "accept-encoding": {
+       "chars": 23,
+       "bearer": false,
+       "identifiers": [],
+       "uuids": 0
+      },
+      "content-length": {
+       "chars": 4,
+       "bearer": false,
+       "identifiers": [],
+       "uuids": 0
+      }
+     },
+     "body": {
+      "keys": [
+       "context_management",
+       "max_tokens",
+       "messages",
+       "metadata",
+       "model",
+       "output_config",
+       "stream",
+       "system",
+       "thinking",
+       "tools"
+      ],
+      "model": "claude-haiku-5-5",
+      "system_chars": 379,
+      "system_blocks": 3,
+      "messages": 2,
+      "message_chars": 1197,
+      "tools": 0,
+      "tool_names": [],
+      "metadata": {
+       "user_id": "{\"device_id\":\"<hex64>\",\"account_uuid\":\"<account id>\",\"session_id\":\"<uuid>\"}"
+      },
+      "identifiers_in_model_input": [],
+      "identifiers_in_metadata": [
+       "account id"
+      ],
+      "identifiers_elsewhere": []
+     },
+     "status": 200
+    }
+   ],
+   "other_https_destinations_via_proxy": [
+    "api.anthropic.com:443"
+   ],
+   "connections_bypassing_the_proxy": [],
+   "loopback_only": true,
+   "relay_port": "52818"
+  }
+ ],
+ "analysis": {
+  "device_id_differs_between_calls": true,
+  "device_id_equals_local_cli_user_id": false,
+  "account_uuid_is_the_real_account_id": true,
+  "session_id_differs_between_calls": true,
+  "datadog_contacted_by_default": false,
+  "datadog_contacted_with_quiet_switches": false,
+  "identifiers_in_model_input": [],
+  "identifiers_in_metadata": [
+   "account id"
+  ],
+  "identifiers_in_headers": []
+ }
+}

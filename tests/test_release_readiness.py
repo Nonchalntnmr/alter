@@ -1,4 +1,4 @@
-"""Production-readiness tests for ALTER 0.2.0rc1: doctor, version, offline cache, locks, injection."""
+"""Production-readiness tests for ALTER 0.2.0 (rc1 onward): doctor, version, offline cache, locks, injection."""
 from __future__ import annotations
 
 import json
@@ -20,9 +20,12 @@ from pcim.workspace import Workspace
 
 
 def test_version_and_doctor(tmp_path, monkeypatch, capsys):
-    assert __version__ == "0.2.0rc1"
+    import tomllib
+    from pathlib import Path
+    declared = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text())["project"]["version"]
+    assert __version__ == declared  # the package and its metadata never disagree
     assert terminal.main(["--version"]) == 0
-    assert "0.2.0rc1" in capsys.readouterr().out
+    assert declared in capsys.readouterr().out
 
     # Uninitialized PCIM_HOME -> blocking failure (exit 1)
     pcim_home = tmp_path / "pcim"

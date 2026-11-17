@@ -3,6 +3,12 @@
 **Package:** `contextual-intelligence` `0.2.0rc1` (`ci`, `pcim`, `pcim-mcp`)
 **Branch:** `release/alter-0.2.0` (not merged to `main`, not published)
 
+> **Correction, 2026-11-16 (found while preparing rc2).** These notes say direct execution stays
+> the default "(`ci "…"`)". That is wrong for rc1. `ci "…"` gives a routed text answer with no
+> workspace tools. The direct arm that verified 16/16 is the governed agent (`Agent.send`), which
+> rc1 exposes only through the HTTP API and inside plan execution. rc2 adds `ci do` as its
+> terminal path.
+
 ## What is in `0.2.0rc1`
 
 - **Opt-in intent compiler V3 (`ci plan`, `ci execute`):**

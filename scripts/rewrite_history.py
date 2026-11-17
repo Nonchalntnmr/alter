@@ -272,6 +272,15 @@ def cmd_dry_run(base: str, work: Path, names: bool = False) -> int:
             problems.append(f"{o[:7]} -> {n[:7]}: dates or identities differ")
         if [cmap.get(x, x) for x in po[6].split()] != pn[6].split():
             problems.append(f"{o[:7]} -> {n[:7]}: parents do not map")
+    # nothing but the affected branches may move: main, remote-tracking refs, other branches, tags
+    targets = {f"refs/heads/{b}" for b in branches} | {"refs/rewrite-base"}
+    for line in git("for-each-ref", "--format=%(refname) %(objectname)", cwd=mirror).splitlines():
+        ref, sha = line.split()
+        if ref in targets or ref.startswith("refs/filter-repo/"):
+            continue
+        real = subprocess.run(["git", "rev-parse", "-q", "--verify", ref], capture_output=True, text=True).stdout.strip()
+        if real != sha:
+            problems.append(f"{ref} moved in the rewrite, and it is not one of the branches to rewrite")
     rewritten = len({c for cs in olds.values() for c in cs if cmap.get(c, c) != c})
     state = {"base": base_sha, "branches": branches, "old": old, "new": new, "verified": not problems,
              "worktrees": trees, "redacted_files": sorted(redacted), "made": time.strftime("%Y-%m-%dT%H:%M:%S")}
@@ -287,7 +296,7 @@ def cmd_dry_run(base: str, work: Path, names: bool = False) -> int:
             print(f"  - {p}")
         return 1
     print("verified: scans clean; same commit counts; only the redacted files change; every src/ "
-          "tree identical; dates and names kept. The real repository was not touched.")
+          "tree identical; dates and names kept; no other ref moved. The real repository was not touched.")
     print(f"next, if the owner approves: PYTHONPATH=src python scripts/rewrite_history.py apply --work {work}")
     return 0
 

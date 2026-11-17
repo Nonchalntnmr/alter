@@ -300,3 +300,23 @@ def test_agent_step_retry_preserves_refetch_flag_without_shared_state(person):
     assert not hasattr(ad, "last_isolation")
     step = ad.agent_step("s", [{"role": "user", "content": "x"}], [])
     assert step.provider_context["profile_refetched_during_call"] is True
+
+
+def test_every_cli_call_sets_the_quiet_switches_unless_the_person_set_them(tmp_path, monkeypatch):
+    """CLI 2.1.316 sends telemetry to Datadog on every call unless these are set (audit_egress.py)."""
+    import subprocess
+    from pcim.adapters.base import RenderedPrompt
+    from pcim.adapters.claude_cli import QUIET_ENV, ClaudeCLIAdapter
+    seen = {}
+
+    def runner(argv, **kw):
+        seen.update(kw["env"])
+        out = '{"type": "result", "subtype": "success", "is_error": false, "result": "OK", "total_cost_usd": 0}'
+        return subprocess.CompletedProcess(argv, 0, out, "")
+
+    monkeypatch.setenv("PCIM_HOME", str(tmp_path))
+    monkeypatch.setenv("DISABLE_AUTOUPDATER", "0")  # the person's own choice is kept
+    a = ClaudeCLIAdapter("haiku", runner=runner, isolate_identity=False, require_isolation=False)
+    a.generate(RenderedPrompt(system="s", user="u"))
+    assert all(seen.get(k) == v for k, v in QUIET_ENV.items() if k != "DISABLE_AUTOUPDATER")
+    assert seen["DISABLE_AUTOUPDATER"] == "0"
