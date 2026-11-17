@@ -5,6 +5,10 @@
     HF_HUB_OFFLINE=1 PCIM_CLI_REQUIRE_ISOLATION=1 PYTHONPATH=~/projects/alter-rc2/src \\
         caffeinate -i python scripts/eval_v4_rerun.py paired
     python scripts/eval_v4_rerun.py list        # what would be re-run; calls nothing
+    HF_HUB_OFFLINE=1 PCIM_CLI_REQUIRE_ISOLATION=1 PYTHONPATH=~/projects/alter-rc2/src \
+        caffeinate -i python scripts/eval_v4_rerun.py resume-paired
+        # the paired tasks not yet run, one at a time through the frozen run(), each started
+        # only while the lid is open and the battery is not low
 
 It imports the frozen harnesses unchanged and uses their own check() and per-item functions.
 - A record is re-run only if its error matches a loss signature in DEVIATION.md and it is the
@@ -40,6 +44,23 @@ def lid_closed() -> bool:
     return '"AppleClamshellState" = Yes' in out
 
 
+def battery_low() -> bool:
+    out = subprocess.run(["pmset", "-g", "ps"], capture_output=True, text=True).stdout
+    import re as _re
+    m = _re.search(r"(\d+)%; discharging", out)
+    return bool(m) and int(m.group(1)) < 25
+
+
+def wait_until_safe() -> None:
+    """Wait while the lid is closed or the battery is low and draining."""
+    said = False
+    while lid_closed() or battery_low():
+        if not said:
+            print(f"{time.strftime('%H:%M:%S')} waiting: lid closed or battery low", flush=True)
+            said = True
+        time.sleep(30)
+
+
 def note(line: str) -> None:
     with LOG.open("a") as f:
         f.write(line + "\n")
@@ -69,9 +90,28 @@ def main(argv: list[str]) -> int:
     if argv[:1] == ["list"]:
         print("intent v32:", intent_todo("v32"), " intent v33:", intent_todo("v33"), " paired A:", paired_todo())
         return 0
+    me = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    if argv[:1] == ["resume-paired"]:
+        import eval_v4_paired as h
+        h.check(["A", "R"])
+        every = h.tasks()
+        note(f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} rerun.py {me} resume-paired")
+        for t in every:
+            raw = h.EXP / "raw.jsonl"
+            have = {(r["id"], r["arm"]) for r in map(json.loads, raw.read_text().splitlines())} if raw.exists() else set()
+            if (t["id"], "A") in have and (t["id"], "R") in have:
+                continue
+            wait_until_safe()
+            h.tasks = lambda t=t: [t]  # the frozen run(), on this one task
+            try:
+                h.run(["A", "R"])
+            except SystemExit as e:
+                print(f"{t['id']}: {e}", flush=True)
+            finally:
+                h.tasks = lambda: every
+        return 0
     if lid_closed():
         sys.exit("the lid is closed: the machine will sleep mid-call. Open it (and plug in) first.")
-    me = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     if argv[:1] == ["intent"] and len(argv) == 2:
         import eval_v4_intent as h
         pass_ = argv[1]
