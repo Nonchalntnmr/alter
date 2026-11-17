@@ -9,15 +9,16 @@ here has been pushed.
 every blob new to the branch. It reads the identifiers from this machine at run time, so no value
 is written here.
 
-Three unpushed commits put identifiers into the release lineage:
+Four unpushed commits put identifiers into the release lineage:
 
 | commit | date | file | what it adds |
 |---|---|---|---|
 | `ff74305` | 2026-11-13 | `experiments/intent/results.json` | the home path (which contains the username), inside 3 model questions about the CLI's sandbox folder. `cc5d33a` redacted the file later, but the original blob is still in history. |
 | `d6cc52f` | 2026-11-13 | `HANDOFF.md` | a hand-written `grep -ciE "…"` check that spells out identifier fragments: the email domain, name pieces and a username fragment |
 | `b77dcc6` | 2026-11-16 | `HANDOFF.md` | the same kind of grep check, including the home path. `e822f44` carries it forward. |
+| `9bc0c23` | 2026-11-17 | `experiments/eval_v4/*/run_*_stdout.txt` | the home path, in Python warnings that quote file paths. Redacted in `cf9e893`, but the original blobs are in history. The third rehearsal covers it. |
 
-These are the only commits that need the rewrite. The diff scan on the final tree
+These four are the only commits that need the rewrite. The diff scan on the final tree
 (`scan_identity.py`, with no `--history`) is clean, because the identifiers were removed later.
 They are still in history.
 

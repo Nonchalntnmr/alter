@@ -16,6 +16,9 @@
   - `plan`: for a removal or overwrite with a broad scope, the intent compiler shows the plan for
     approval. Then `ci plan approve` and `ci execute`.
 
+  **The router misses most ambiguity** (see Evaluation). In practice `ci do` almost always goes
+  direct, and the agent asks its own questions.
+
   Other forms: `ci do list`, `ci do --route direct|plan`, `ci do --explain`. With
   `PCIM_DO_ROUTING=direct`, `ci do` always goes direct and prints the router's choice as advice.
   The evaluation's rule decides the built-in default (below).
@@ -56,9 +59,20 @@
 - **rc1's statement that only `ff74305` holds an identifier in history.** Three unpushed commits
   do: `ff74305`, `d6cc52f` and `b77dcc6` (`docs/release/HISTORY_REWRITE.md`).
 
-## Evaluation
+## Evaluation (`experiments/eval_v4/RESULTS.md`; sets frozen before they were read)
 
-See `docs/release/READINESS.md` §2 and `experiments/eval_v4/`.
+- **Intent compiler V3.3 against V3.2, on 50 new requests.**
+  - It asks needlessly on 1/21 clear requests, against 10/21 (McNemar p = 0.004).
+  - Asking when it should is unchanged at 20/23.
+  - No action was dropped (23/23), and every plan was valid (50/50).
+  - It is cheaper: $2.57 against $2.92.
+  - **So V3.3 is the `ci plan` engine.**
+- **Router.** It is safe but nearly inert: it asks when it should on only 4/21. The model compiler
+  catches what it misses.
+- **Execution, on 16 new coding tasks.**
+  - Direct and routed each verified 16/16, with no unauthorized change.
+  - Routing acted on 2 tasks, with one fewer correction and lower cost.
+  - So the registered rule keeps adaptive routing as `ci do`'s default, by a thin margin.
 
 ## Known limitations
 

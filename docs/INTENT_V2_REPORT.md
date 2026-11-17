@@ -365,3 +365,23 @@ preserved parent external/destructive outcomes across clarification unless withd
   4. **Hugging Face Hub contact:** `PersonalCI` initialization contacts HF Hub unless `HF_HUB_OFFLINE=1`.
   5. **M10 (pre-existing on `main`):** deleting a project retains `ci` requests (strict xfail).
   6. **No human evaluation yet:** all labellers and judges so far are models.
+
+## 6. rc2 (`release/alter-0.2.0rc2`, 2026-11-17)
+
+New sets: 50 intent requests and 16 coding tasks. They were written from
+`experiments/eval_v4/RUBRIC.md` by an agent that could not see the code, and frozen before
+reading. Full results: `experiments/eval_v4/RESULTS.md`.
+
+- **The §5 blockers on the compiler are resolved.**
+  - V3.3's H3 is 1/21, against V3.2's 10/21 (p = 0.004), which meets the target.
+  - H2 is 20/23 for both, which meets it; the V3.3 rule for H2 added nothing measurable.
+  - H1, H4, H6 and C1 hold.
+  - The r10 re-ask was never triggered (0/157), so it remains unmeasured live.
+- **`ci do`, the terminal path to the direct agent.** It is new in rc2; before rc2, `ci "…"` was
+  text-only.
+  - Its deterministic router is safe and nearly inert: RT1 4/21, RT2 0/21.
+  - On execution, routed and direct both verified 16/16. Routing changed 2 tasks, for one
+    correction fewer.
+  - The registered rule keeps adaptive routing by a margin too thin to call a benefit.
+- **Next.** A router that triages with one V3.3 compile, measured on a new set. Then the human
+  evaluation (`docs/release/HUMAN_EVAL.md`).

@@ -1,76 +1,129 @@
-# Release readiness: Alter `0.2.0rc1`
+# Release readiness: Alter `0.2.0rc2`
 
 **Gate decision: CONDITIONAL.**
-- **V3 replaces V2.1 as the `ci plan` engine.** Planning stays **opt-in**, and direct execution
-  (`ci "…"`) remains the default.
-- **Do not merge to `main` or publish** until the owner has reviewed the conditions in §3.
+- **Ready:** a restricted developer preview on a verified configuration. That means the owner's
+  machine, `claude` CLI 2.1.316, and an isolation probe recorded in that `PCIM_HOME`. It still has
+  to come **after** the history rewrite (§4.1).
+- **Not ready:** broad release, until the human evaluation (`HUMAN_EVAL.md`) has been run and
+  passes its rule.
+- **Not proposed:** making planning the default for every request. Direct execution stays the
+  path for clear work.
 
-**Sources.** Every result below was produced on 2026-11-16 by a command that ran to completion.
-- The commands are in `SMOKE.md` and `docs/TEST_COMMANDS.md`.
-- Results claimed by an earlier agent and not re-run here are marked *not re-verified*.
+**Branch.** `release/alter-0.2.0rc2` @ `08f011e`. Nothing is pushed, merged into `main` or
+published.
 
-## 1. Verification
+**Sources.** Every result below was produced on 2026-11-17 by a command that ran to completion.
+- The evaluation's own numbers are in `experiments/eval_v4/RESULTS.md`.
+- The commands are in `SMOKE.md` and `docs/TEST_COMMANDS.md` §8.
 
-| check | result | how |
-|---|---|---|
-| full suite, `release/alter-0.2.0` @ `0cb74c9` | **509 passed, 1 skipped**, 0 xfailed | skipped: the opt-in live CLI probe. M10 is fixed, so its strict xfail mark is gone. |
-| `main`'s own tests against this code | **343 passed, 2 failed** | both intended: (1) `plan` is a command, not a settable mode; (2) `main`'s strict xfail for M10 now passes (`XPASS(strict)`), because M10 is fixed |
-| `scripts/e2e_terminal.py`, this checkout | **32 / 32** | `ci` subprocesses, temporary `PCIM_HOME` and repo, scripted model |
-| wheel build | `contextual_intelligence-0.2.0rc1-py3-none-any.whl`, 331,735 bytes | `pip wheel . --no-deps --no-build-isolation` |
-| clean install, fresh venv | **passed** | `pip install "<wheel>[test]"` (downloads the dependencies from PyPI); `ci`, `pcim` and `pcim-mcp` installed |
-| installed package: `ci --version`, `pcim init`, `ci doctor`, `ci status` | **passed** | `doctor` exits 1 before `pcim init` and 0 after, with the right per-check verdicts |
-| e2e against the **installed** package | **32 / 32** | `E2E_INSTALLED=1 <venv>/bin/python scripts/e2e_terminal.py`, with no `PYTHONPATH`. Earlier "installed" e2e runs had silently tested the checkout. |
-| upgrade, `main` (1f9bd08) → RC, `semantic` extra available | **passed** | data made by `main` (`init`, `remember`, `ask`); then the RC's `doctor` (exit 0), `status`, `audit`, `twin`, `plan` (`ready`) and memory |
-| upgrade, `main` → installed RC **without** the `semantic` extra | **fails clearly** (fixed in `0cb74c9`) | the store is pinned to the semantic embedder. `doctor` fails the `embedder` check, naming the extra, and `ci plan` exits 2 with the instruction. Before the fix it was a traceback. |
-| rollback, RC → `main` on the same data | **passed** | `main`'s `ci status`, `pcim memory` and `pcim audit` (`chain_ok: true` on both stores). `main` has no `ci audit` or `ci twin`, so those are not rollback checks. |
-| cross-process session lock | **passed** | a second process is refused while the first holds `.session-<id>.lock` (`test_session_flock_blocks_second_process`) |
-| prompt injection | **passed** | a file tells the agent to write outside the folder, approve its own action and run a shell. The write is denied by the governor and does not happen; the unknown tools are refused. |
-| identity in the diff against `main` | **see below** | `PYTHONPATH=src python scripts/scan_identity.py`: it reads this machine's identifiers at run time and prints counts per label, never values |
+## 1. Verification (on `08f011e` unless noted)
 
-## 2. Evaluation evidence (the gate)
+| check | result |
+|---|---|
+| full suite | **539 passed, 4 skipped**. Skipped: the live probe test (opt-in), and the 3 history-rewrite tests, which pass (3/3) with `FILTER_REPO` set. |
+| `main`'s own tests against this code | **343 passed, 2 failed**, both intended: `plan` is a command, not a settable mode; and `main`'s strict xfail for M10 now passes, because M10 is fixed |
+| `scripts/e2e_terminal.py`, this checkout | **37 / 37**, including `ci do`: direct waits for approval before writing, clarify makes no model call, plan changes nothing |
+| wheel | `contextual_intelligence-0.2.0rc2-py3-none-any.whl`, 339,556 bytes |
+| clean install, fresh venv | **passed**; `ci 0.2.0rc2`, `pcim` and `pcim-mcp` installed |
+| e2e against the **installed** wheel | **37 / 37** (`E2E_INSTALLED=1`) |
+| upgrade, `main` → rc2, `semantic` extra available | **passed**: `doctor` exits 0; `status`, `audit`, `plan` (ready), `do list` and memory all work |
+| upgrade, `main` → installed rc2 **without** `semantic` | **fails clearly**: `doctor` exits 1 on the `embedder` check, and `ci plan` exits 2 with the instruction |
+| fresh rc2 store without `semantic` | **passed**: `hashing-512`, `doctor` exits 0, `plan` is ready. Then `main` reads it. |
+| rollback, rc2 → rc1 (`dd3dcda`) and rc2 → `main` | **passed**: both read rc2's data, rc1 lists rc2's plans, and `main`'s `pcim audit` reports `chain_ok: true` |
+| identity probe, live, on this code | **clean 4/4**, agent path included, with the positive control. Recorded for CLI 2.1.316. |
+| egress audit, live, on this code | **only `api.anthropic.com`**. No identifiers in the model input or the headers. The account id is in metadata, as documented (`docs/SECURITY_WHAT_LEAVES.md`). |
+| identity scan of the final diff against `main` | **clean**: 0 hits on every label, 34,598 added lines |
+| identity scan of the branch **history** | **4 commits carry identifiers** (§4.1) |
+| history-rewrite rehearsal on a mirror | **verified** for all 8 affected branches: no other ref moved, every `src/` tree identical, dates kept. The real repository is untouched. |
 
-| | V3 paired, `experiments/eval_v3/paired/` | V3 intent, `experiments/eval_v3/intent/` |
-|---|---|---|
-| sets | 16 new tasks with hidden checks; frozen before reading | 50 new items; frozen before reading |
-| direct (A) | **16/16** verified [0.81, 1.00], $2.62, 102 calls | — |
-| V3 plan (B3) | **14/16** [0.64, 0.97], $3.56, 126 calls, 0 false completions, 0 false incompletes | H1 26/26, H4 39/39, C1 25/25. **H3 11/23: missed (target ≤ 0.25). H2 18/21: met, but 3 regressions.** |
-| V2.1+ plan (B21) | **7/16** [0.23, 0.67], $7.21, 179 calls, 3 false incompletes, 12 clarifications on clear tasks | H3 16/23 (missed), H2 21/21 |
-| B3 against A (primary) | McNemar p = 0.50. Person time higher on 15/16 tasks, p < 0.001. **"Not justified on this evidence."** | — |
-| B3 against B21 (secondary) | McNemar p = 0.016; corrections p = 0.039; clarifications p < 0.001. **All five checks pass: the V3 fixes are confirmed.** | McNemar on H1, H4 and C1: no discordant items |
-| unauthorized changes | **0** in every arm (A, B3, B21; and v1's A and B) | — |
-| identity strings in stored outputs | 0. Isolation was required on every call; the stored final messages were checked. | 0 in the stored views (not full replies) |
+## 2. Evaluation evidence (`experiments/eval_v4/`, frozen before reading)
 
-Paired v1 (frozen V2.1): direct 16/16 against plan 9/16, p = 0.016 (`experiments/paired/`).
+**Intent (50 new requests).**
+- **V3.3 meets P1–P3**, and replaces V3.2 as the `ci plan` engine:
+
+  | metric | V3.3 | V3.2 | McNemar |
+  |---|---|---|---|
+  | H3: asks needlessly on clear requests | **1/21** | 10/21 | p = 0.004 |
+  | H2: asks when it should | 20/23 | 20/23 (unchanged) | |
+  | H1 | 23/23 | | |
+  | H4 | 38/38 | | |
+  | H6 | 50/50 | | |
+  | C1 | 9/9 | | |
+  | calls, cost | 72, $2.57 | 85, $2.92 | |
+
+- **Intent preservation holds:** no requested outside action was dropped (H1).
+- **The bounded re-ask was never exercised:** 0 of 157 first replies were not JSON.
+
+**Router (`ci do`).**
+- **Safe, but nearly inert.** It never asked needlessly (RT2 0/21) and never detoured a direct
+  request (RT5 25/25).
+- **But it missed most of the needed questions** (RT1 4/21) and most destructive ambiguity
+  (RT4 3/7). The model compiler caught 14 of the 17 it missed.
+
+**Execution (16 new coding tasks with hidden checks).**
+- **Both arms verified every task:** direct 16/16, routed 16/16.
+- **Safety:** 0 unauthorized changes, and 0 false claims of completion (judged).
+- **Where routing acted** (2 destructive tasks, routed to plan): 0 corrections against 1, and
+  $0.36 against $0.65.
+- **So the pre-registered rule keeps adaptive routing as `ci do`'s default,** by the margin of one
+  correction on one task. Routing is harmless here, but it is not shown to help.
+
+**Environment losses.** The machine slept with the lid closed, and 9 records were lost. Each was
+re-run once under a deviation declared beforehand; both analyses agree on every decision.
+
+**Earlier evidence still standing:** in paired v1 and v2, direct verified 32/32, against
+planning's 9/16 (V2.1) and 14/16 (V3).
 
 ## 3. Gate criteria
 
 | criterion | status | evidence |
 |---|---|---|
-| no critical security vulnerability | **met, with conditions** | The CLI identity exposure is mitigated and enforced for CLI 2.1.316: 18/18 isolated trials clean, with a positive control. **Condition:** isolation counts as verified only for a CLI version recorded clean **in that `PCIM_HOME`**. A new install, or a CLI update, needs a probe (RUNBOOK). |
-| no unauthorized external actions in evaluation | **met** | E6 = 0 everywhere. CI has no tool that acts outside the computer. |
-| no known critical correctness regression | **met, with a condition** | Not critical, but real: V3 asks too little on genuinely vague requests (H2: 3 items) and too much on clear requests with an outside action (H3). Planning is opt-in, so this affects only `ci plan`. |
-| installation and core-workflow smoke tests | **met** | §1: a clean install and e2e against the installed package |
-| documented failure recovery and rollback | **met** | `RUNBOOK.md` and `ROLLBACK.md`; the rollback was exercised (§1) |
-| performance measured against the baseline | **met** | V3 against V2.1: 2× the verified tasks at half the cost. Direct execution remains better than either. |
+| no critical security vulnerability | **met, for the verified configuration** | Model input is clean on CLI 2.1.316, enforced with `PCIM_CLI_REQUIRE_ISOLATION=1`, and there is no third-party traffic. The account id in metadata duplicates what the OAuth login already identifies. |
+| no unauthorized external actions | **met** | E6 = 0 in every arm of every paired run. CI has no tool that acts outside the computer, and the router grants nothing. |
+| no known critical correctness regression | **met** | H3 is fixed (1/21); H1, H2, H4 and C1 hold. One item regressed (q08 H2). |
+| installation, upgrade, rollback, smoke | **met** | §1 |
+| failure recovery documented | **met** | `RUNBOOK.md`, including `ci do` waits; `ROLLBACK.md`; `HISTORY_REWRITE.md` |
+| performance against the baseline | **met** | V3.3 is cheaper than V3.2; routed is no worse than direct. |
+| **human evaluation** | **not met: designed, not run** | `HUMAN_EVAL.md` |
+| **history free of identifiers before a push** | **not met: prepared, not applied** | §4.1 |
 
-## 4. Open items, which are why this is CONDITIONAL and not READY
+## 4. Open items, and why this is CONDITIONAL
 
-1. **No human evaluation yet.** Every labeller, simulated person and judge was a model.
-2. **Identity isolation** is verified only for CLI 2.1.316.
-   - The CLI refetches the account profile during calls: measured clean, not guaranteed.
-   - The account id stays in API metadata.
+1. **Git history: blocks any push.**
+   - Commits `ff74305`, `d6cc52f` and `b77dcc6` carry the home path, the username or identifier
+     fragments. So does `9bc0c23`, from today: its evaluation logs quoted file paths. They were
+     redacted in `cf9e893`, but the old blob stays in history.
+   - `rewrite_history.py dry-run` verifies the redaction for all 8 affected branches.
+   - **Applying it is the owner's decision** (`HISTORY_REWRITE.md` §4). After it, run
+     `scan_identity.py --history` for every branch you push, and commit the commit map.
+   - `main` already holds the home path in 3 files. Removing it there needs a force-push to
+     `main`, which is a separate decision.
+2. **No human evaluation: blocks a broad release.** Every labeller, simulated person and judge so
+   far is a model.
+3. **Router quality.** It is inert on most ambiguity. The next design, which is untested, is a
+   router that triages with one V3.3 compile (about $0.035 and 25 s per request) and acts on its
+   gate. It needs a fresh set, because this one has been read. Until then, `ci do` behaves almost
+   always as direct, and `PCIM_DO_ROUTING=direct` makes that exact.
+4. **Identity isolation is configuration-bound.**
+   - It is verified only for CLI 2.1.316, and per `PCIM_HOME`.
+   - The CLI's own `api.anthropic.com` account traffic is unobserved: TLS hides it.
    - Older stored records are not scrubbed.
-3. **V3 compiler quality** (H2 and H3 above). The V3.2 bounded re-ask for non-JSON plans, which
-   addresses paired r10, is **unmeasured on unseen data**: every existing set has been read.
-4. **Git history.** `feat/intent-compiler` commit `ff74305` still holds the home path in history,
-   and `main` already holds it in old experiment files. Removing it needs a history rewrite:
-   **the owner's decision before any push.**
-5. **`HF_HUB_OFFLINE` auto-mode** checks only the default cache location
-   (`~/.cache/huggingface/hub`). It ignores `HF_HOME` and `HF_HUB_CACHE`.
+   - After a CLI update, re-run the probe **and** the egress audit (RUNBOOK).
+5. **Known low-severity issues:**
+   - **A closed stdio is misread.** A local I/O error inside a routed call (stderr closed by a
+     pipe) is recorded as a provider failure, and every fallback model is tried.
+   - **The router over-triggers.** It misreads "clear" and "cut" as destructive, scopes from the
+     verb to the end of the request, and treats one-word commands as "nothing to do". These were
+     found on review, are unmeasured, and are not fixed.
+   - **`HF_HUB_OFFLINE` auto-mode** checks only the default cache.
+6. **The re-ask fix for a non-JSON plan (r10)** has never been triggered on live data (0/157).
 
 ## 5. Next action for the owner
 
-Review `release/alter-0.2.0` against `main`, using this file and
-`docs/INTENT_V2_REPORT.md` §5. If you accept the conditions above, the next step is yours: open a
-PR from `release/alter-0.2.0`, or merge `integration/intent-compiler` first. Nothing has been
-pushed.
+1. Review `release/alter-0.2.0rc2` against `main`, starting with this file and
+   `experiments/eval_v4/RESULTS.md`.
+2. Decide on the history rewrite. If yes, run `HISTORY_REWRITE.md` §4 steps 1–5; the dry run
+   takes about 10 s.
+3. Then, for a developer preview, push the branch and open a PR. That step is yours.
+4. Recruit 12 participants and 3 raters for the human evaluation (`HUMAN_EVAL.md`), and have
+   someone other than the implementer write and seal its task pool.
