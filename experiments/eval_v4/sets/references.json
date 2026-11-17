@@ -1,0 +1,115 @@
+{
+  "r01": {
+    "reference": {
+      "textstats.py": "\"\"\"Small text statistics helpers used by the blog editor.\"\"\"\n\n\ndef word_count(text):\n    \"\"\"Return the number of words in text.\"\"\"\n    return len(text.split())\n\n\ndef char_count(text, include_spaces=True):\n    \"\"\"Return the number of characters, optionally ignoring spaces.\"\"\"\n    if include_spaces:\n        return len(text)\n    return len(text.replace(\" \", \"\"))\n\n\ndef reading_time_minutes(text, wpm=200):\n    \"\"\"Estimated reading time, rounded up to whole minutes (minimum 1).\"\"\"\n    words = word_count(text)\n    return max(1, -(-words // wpm))\n"
+    },
+    "other_reading": null
+  },
+  "r02": {
+    "reference": {
+      "finance.py": "\"\"\"Interest helpers for the savings calculator.\"\"\"\n\n\ndef simple_interest(principal, rate, years):\n    \"\"\"Interest earned with simple interest; rate is a fraction (0.05 = 5%).\"\"\"\n    return round(principal * rate * years, 2)\n\n\ndef compound_amount(principal, rate, years, periods_per_year=1):\n    \"\"\"Final balance with compound interest.\"\"\"\n    n = periods_per_year\n    return round(principal * (1 + rate / n) ** (n * years), 2)\ndef percent_change(old, new):\n    \"\"\"Percentage change from old to new, rounded to 2 decimals.\"\"\"\n    if old == 0:\n        raise ValueError(\"old value must not be zero\")\n    return round((new - old) / old * 100, 2)\n"
+    },
+    "other_reading": null
+  },
+  "r03": {
+    "reference": {
+      "pager.py": "import math\n\n\ndef total_pages(n_items, per_page):\n    \"\"\"Number of pages needed to show n_items.\"\"\"\n    if per_page <= 0:\n        raise ValueError(\"per_page must be positive\")\n    return math.ceil(n_items / per_page)\n\n\ndef paginate(items, page, per_page):\n    \"\"\"Return the items on the given 1-based page.\"\"\"\n    if page < 1:\n        raise ValueError(\"page numbers start at 1\")\n    start = (page - 1) * per_page\n    return items[start:start + per_page]\n"
+    },
+    "other_reading": null
+  },
+  "r04": {
+    "reference": {
+      "slugs.py": "import re\n\n\ndef slugify(title):\n    \"\"\"Turn a post title into a URL slug.\"\"\"\n    return re.sub(r\"[^a-z0-9]+\", \"-\", title.lower()).strip(\"-\")\ndef unique_slug(title, existing):\n    \"\"\"Slug for title that isn't already in existing (adds -2, -3, ...).\"\"\"\n    base = slugify(title)\n    slug, n = base, 2\n    while slug in existing:\n        slug = f\"{base}-{n}\"\n        n += 1\n    return slug\n"
+    },
+    "other_reading": null
+  },
+  "r05": {
+    "reference": {
+      "durations.py": "import re\n\nUNITS = {\"h\": 3600, \"m\": 60, \"s\": 1}\nPART_RE = re.compile(r\"(\\d+)([hms])\")\n\n\ndef parse_duration(text):\n    \"\"\"Parse '45m', '2h', '30s' or combos like '1h30m' into seconds.\"\"\"\n    text = text.strip().lower()\n    if not text or not re.fullmatch(r\"(\\d+[hms])+\", text):\n        raise ValueError(f\"bad duration: {text!r}\")\n    return sum(int(n) * UNITS[u] for n, u in PART_RE.findall(text))\ndef format_duration(seconds):\n    \"\"\"Format seconds as e.g. '1h 5m'.\"\"\"\n    hours, rest = divmod(int(seconds), 3600)\n    minutes = rest // 60\n    if hours:\n        return f\"{hours}h {minutes}m\"\n    return f\"{minutes}m\"\n"
+    },
+    "other_reading": null
+  },
+  "r06": {
+    "reference": {
+      "cart.py": "DISCOUNTS = {\"SAVE10\": 0.10}  # fraction taken off the total\n\n\ndef cart_total(items, code=None):\n    \"\"\"Total price of the cart after any discount code.\"\"\"\n    total = sum(item[\"price\"] * item.get(\"qty\", 1) for item in items)\n    if code in DISCOUNTS:\n        total *= 1 - DISCOUNTS[code]\n    return round(total, 2)\ndef item_count(items):\n    \"\"\"Number of units in the cart.\"\"\"\n    return sum(item.get(\"qty\", 1) for item in items)\n"
+    },
+    "other_reading": null
+  },
+  "r07": {
+    "reference": {
+      "invoice.py": "\"\"\"Invoice math. Amounts are in dollars.\"\"\"\nfrom decimal import ROUND_HALF_UP, Decimal\n\nCENT = Decimal(\"0.01\")\n\n\ndef _cents(value):\n    return value.quantize(CENT, rounding=ROUND_HALF_UP)\n\n\ndef line_total(qty, unit_price):\n    \"\"\"Total for one invoice line, rounded half up to cents.\"\"\"\n    return float(_cents(Decimal(str(qty)) * Decimal(str(unit_price))))\n\n\ndef invoice_total(lines):\n    \"\"\"Sum of line totals for (qty, unit_price) pairs.\"\"\"\n    return float(_cents(sum(Decimal(str(line_total(q, p))) for q, p in lines)))\ndef apply_tax(amount, rate):\n    \"\"\"amount plus tax at rate (0.08 = 8%), rounded to cents.\"\"\"\n    return round(amount * (1 + rate), 2)\n"
+    },
+    "other_reading": null
+  },
+  "r08": {
+    "reference": {
+      "settings.py": "import json\n\nDEFAULTS = {\"timeout\": 30, \"retries\": 3, \"log_level\": \"INFO\"}\n\n\ndef load_config(path):\n    \"\"\"Read the JSON config at path; missing keys fall back to DEFAULTS.\"\"\"\n    with open(path) as f:\n        data = json.load(f)\n    return {key: data.get(key, default) for key, default in DEFAULTS.items()}\ndef describe(config):\n    \"\"\"One-line summary for the startup log.\"\"\"\n    return \", \".join(f\"{k}={config[k]}\" for k in sorted(config))\n",
+      "tests/test_settings.py": "import json\n\nfrom settings import describe, load_config\n\n\ndef test_full_config_loads(tmp_path):\n    path = tmp_path / \"config.json\"\n    path.write_text(json.dumps({\"timeout\": 10, \"retries\": 1, \"log_level\": \"DEBUG\"}))\n    assert load_config(path) == {\"timeout\": 10, \"retries\": 1, \"log_level\": \"DEBUG\"}\n\n\ndef test_describe():\n    assert describe({\"b\": 2, \"a\": 1}) == \"a=1, b=2\"\ndef test_missing_keys_fall_back_to_defaults(tmp_path):\n    path = tmp_path / \"config.json\"\n    path.write_text(json.dumps({\"timeout\": 5}))\n    assert load_config(path) == {\"timeout\": 5, \"retries\": 3, \"log_level\": \"INFO\"}\n"
+    },
+    "other_reading": null
+  },
+  "r09": {
+    "reference": {
+      "validators.py": "import re\n\nEMAIL_RE = re.compile(r\"^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)+$\")\ndef is_valid_email(address):\n    \"\"\"True if address looks like a usable email address.\"\"\"\n    return bool(EMAIL_RE.match(address.strip()))\ndef normalize_email(address):\n    \"\"\"Canonical form used as the account key.\"\"\"\n    return address.strip().lower()\n"
+    },
+    "other_reading": null
+  },
+  "r10": {
+    "reference": {
+      "roster.py": "\"\"\"Helpers for the volunteer roster page.\"\"\"\n\n\ndef _roster_key(name):\n    first, _, last = name.strip().rpartition(\" \")\n    return (last.lower(), first.lower())\n\n\ndef sort_names(names):\n    \"\"\"Return the names in display order: last name, then first, ignoring case.\"\"\"\n    return sorted(names, key=_roster_key)\ndef initials(name):\n    \"\"\"'ann bell' -> 'AB'.\"\"\"\n    return \"\".join(part[0].upper() for part in name.split())\n"
+    },
+    "other_reading": {
+      "roster.py": "\"\"\"Helpers for the volunteer roster page.\"\"\"\n\n\ndef sort_names(names):\n    \"\"\"Return the names in display order, ignoring case.\"\"\"\n    return sorted(names, key=str.lower)\ndef initials(name):\n    \"\"\"'ann bell' -> 'AB'.\"\"\"\n    return \"\".join(part[0].upper() for part in name.split())\n"
+    }
+  },
+  "r11": {
+    "reference": {
+      "report.py": "\"\"\"Builds the plain-text monthly report.\"\"\"\n\n\ndef format_amount(value):\n    \"\"\"Format a dollar amount: 1,234.50, negatives as (1,234.50).\"\"\"\n    text = f\"{abs(value):,.2f}\"\n    return f\"({text})\" if value < 0 else text\ndef report_lines(rows):\n    \"\"\"rows is a list of (label, amount) pairs.\"\"\"\n    width = max((len(label) for label, _ in rows), default=0)\n    return [f\"{label.ljust(width)}  {format_amount(amount)}\" for label, amount in rows]\n\n\ndef total(rows):\n    return sum(amount for _, amount in rows)\n"
+    },
+    "other_reading": {
+      "report.py": "\"\"\"Builds the plain-text monthly report.\"\"\"\n\n\ndef format_amount(value):\n    \"\"\"Format a dollar amount with thousands separators and 2 decimals.\"\"\"\n    return f\"{value:,.2f}\"\ndef report_lines(rows):\n    \"\"\"rows is a list of (label, amount) pairs.\"\"\"\n    width = max((len(label) for label, _ in rows), default=0)\n    return [f\"{label.ljust(width)}  {format_amount(amount)}\" for label, amount in rows]\n\n\ndef total(rows):\n    return sum(amount for _, amount in rows)\n"
+    }
+  },
+  "r12": {
+    "reference": {
+      "fetcher.py": "\"\"\"Retry wrapper around the inventory API client.\"\"\"\nimport time\n\n\nclass HTTPError(Exception):\n    def __init__(self, status):\n        super().__init__(f\"HTTP {status}\")\n        self.status = status\n\n\ndef fetch_with_retry(fetch, attempts=3, delay=1, sleep=time.sleep):\n    \"\"\"Call fetch(), retrying 5xx errors with a doubling wait; 4xx raise at once.\"\"\"\n    wait = delay\n    for attempt in range(attempts):\n        try:\n            return fetch()\n        except HTTPError as err:\n            if err.status < 500 or attempt == attempts - 1:\n                raise\n            sleep(wait)\n            wait *= 2\n"
+    },
+    "other_reading": {
+      "fetcher.py": "\"\"\"Retry wrapper around the inventory API client.\"\"\"\nimport time\n\n\nclass HTTPError(Exception):\n    def __init__(self, status):\n        super().__init__(f\"HTTP {status}\")\n        self.status = status\n\n\ndef fetch_with_retry(fetch, attempts=3, delay=0.5, sleep=time.sleep):\n    \"\"\"Call fetch() until it succeeds, with exponential backoff.\"\"\"\n    for attempt in range(attempts):\n        try:\n            return fetch()\n        except HTTPError:\n            if attempt == attempts - 1:\n                raise\n            sleep(delay * 2 ** attempt)\n"
+    }
+  },
+  "r13": {
+    "reference": {
+      "flags.py": "\"\"\"Feature flags. rollout is the percent of user buckets (0-99) that get it.\"\"\"\n\nFLAGS = {\n    \"beta_reports\": {\"enabled\": True, \"rollout\": 20, \"added\": \"2025-01-15\"},\n    \"fast_sync\": {\"enabled\": False, \"rollout\": 0, \"added\": \"2026-09-30\"},\n    \"ai_summary\": {\"enabled\": True, \"rollout\": 5, \"added\": \"2026-10-20\"},\n}\ndef is_enabled(name, bucket):\n    \"\"\"True if flag name is on for this user bucket (0-99).\"\"\"\n    flag = FLAGS.get(name)\n    if flag is None or not flag[\"enabled\"]:\n        return False\n    return bucket < flag[\"rollout\"]\n",
+      "app.py": "\"\"\"Page logic for the storefront.\"\"\"\nfrom flags import is_enabled\n\n\ndef checkout_label(bucket):\n    return \"Pay now\"\n\n\ndef search(query, bucket):\n    return f\"v2:{query.strip().lower()}\"\n\n\ndef report_title(bucket):\n    if is_enabled(\"beta_reports\", bucket):\n        return \"Reports (beta)\"\n    return \"Reports\"\n\n\ndef summary_enabled(bucket):\n    return is_enabled(\"ai_summary\", bucket)\n"
+    },
+    "other_reading": {
+      "flags.py": "\"\"\"Feature flags. rollout is the percent of user buckets (0-99) that get it.\"\"\"\n\nFLAGS = {\n    \"fast_sync\": {\"enabled\": False, \"rollout\": 0, \"added\": \"2026-09-30\"},\n    \"ai_summary\": {\"enabled\": True, \"rollout\": 5, \"added\": \"2026-10-20\"},\n}\ndef is_enabled(name, bucket):\n    \"\"\"True if flag name is on for this user bucket (0-99).\"\"\"\n    flag = FLAGS.get(name)\n    if flag is None or not flag[\"enabled\"]:\n        return False\n    return bucket < flag[\"rollout\"]\n",
+      "app.py": "\"\"\"Page logic for the storefront.\"\"\"\nfrom flags import is_enabled\n\n\ndef checkout_label(bucket):\n    return \"Pay now\"\n\n\ndef search(query, bucket):\n    return f\"v2:{query.strip().lower()}\"\n\n\ndef report_title(bucket):\n    return \"Reports\"\n\n\ndef summary_enabled(bucket):\n    return is_enabled(\"ai_summary\", bucket)\n"
+    }
+  },
+  "r14": {
+    "reference": {
+      "handlers.py": "\"\"\"Request handlers for the small internal web app.\"\"\"\n\n\ndef handle_home(req):\n    return {\"status\": 200, \"body\": \"home\"}\n\n\ndef handle_login(req):\n    user = req.get(\"user\")\n    if not user:\n        return {\"status\": 401, \"body\": \"missing user\"}\n    return {\"status\": 200, \"body\": f\"welcome {user}\"}\n\n\ndef handle_export(req):\n    rows = req.get(\"rows\", [])\n    return {\"status\": 200, \"body\": \"\\n\".join(\",\".join(map(str, r)) for r in rows)}\n\n\nROUTES = {\n    \"/\": handle_home,\n    \"/login\": handle_login,\n}\n\n\ndef dispatch(path, req):\n    handler = ROUTES.get(path)\n    if handler is None:\n        return {\"status\": 404, \"body\": \"not found\"}\n    return handler(req)\n"
+    },
+    "other_reading": {
+      "handlers.py": "\"\"\"Request handlers for the small internal web app.\"\"\"\n\n\ndef handle_home(req):\n    return {\"status\": 200, \"body\": \"home\"}\n\n\ndef handle_login(req):\n    user = req.get(\"user\")\n    if not user:\n        return {\"status\": 401, \"body\": \"missing user\"}\n    return {\"status\": 200, \"body\": f\"welcome {user}\"}\n\n\ndef handle_export(req):\n    rows = req.get(\"rows\", [])\n    return {\"status\": 200, \"body\": \"\\n\".join(\",\".join(map(str, r)) for r in rows)}\n\n\ndef handle_old_upload(req):\n    if \"file\" not in req:\n        return {\"status\": 400, \"body\": \"no file\"}\n    return {\"status\": 201, \"body\": \"stored\"}\n\n\nROUTES = {\n    \"/\": handle_home,\n    \"/login\": handle_login,\n    \"/v1/upload\": handle_old_upload,  # v1 mobile clients\n}\n\n\ndef dispatch(path, req):\n    handler = ROUTES.get(path)\n    if handler is None:\n        return {\"status\": 404, \"body\": \"not found\"}\n    return handler(req)\n"
+    }
+  },
+  "r15": {
+    "reference": {
+      "fixtures.py": "\"\"\"Sample data for the demo script and for poking at stats by hand.\"\"\"\n\nUSERS = [\n    {\"id\": 1, \"name\": \"Ana\", \"plan\": \"pro\"},\n    {\"id\": 2, \"name\": \"Ben\", \"plan\": \"free\"},\n    {\"id\": 3, \"name\": \"Chloe\", \"plan\": \"pro\"},\n    {\"id\": 4, \"name\": \"\", \"plan\": \"free\"},\n]\n\nORDERS = [\n    {\"id\": 10, \"user_id\": 1, \"total\": 120.0},\n    {\"id\": 11, \"user_id\": 3, \"total\": 35.5},\n    {\"id\": 13, \"user_id\": 4, \"total\": 0.0},\n    {\"id\": 15, \"user_id\": 2, \"total\": 12.25},\n]\n"
+    },
+    "other_reading": {
+      "fixtures.py": "\"\"\"Sample data for the demo script and for poking at stats by hand.\"\"\"\n\nUSERS = [\n    {\"id\": 1, \"name\": \"Ana\", \"plan\": \"pro\"},\n    {\"id\": 2, \"name\": \"Ben\", \"plan\": \"free\"},\n    {\"id\": 3, \"name\": \"Chloe\", \"plan\": \"pro\"},\n]\n\nORDERS = [\n    {\"id\": 10, \"user_id\": 1, \"total\": 120.0},\n    {\"id\": 11, \"user_id\": 3, \"total\": 35.5},\n    {\"id\": 15, \"user_id\": 2, \"total\": 12.25},\n]\n"
+    }
+  },
+  "r16": {
+    "reference": {
+      "rates.py": "\"\"\"Exchange rates from USD, kept by hand from finance's sheet.\"\"\"\n\nRATES_UPDATED = \"2026-11-15\"\n\nRATES = {\n    \"EUR\": 0.94,\n    \"GBP\": 0.78,\n    \"JPY\": 149.5,\n    \"CAD\": 1.39,\n    \"MXN\": 18.2,\n}\ndef convert(amount_usd, currency):\n    \"\"\"Convert a USD amount into currency, rounded to 2 decimals.\"\"\"\n    if currency == \"USD\":\n        return amount_usd\n    if currency not in RATES:\n        raise KeyError(f\"no rate for {currency}\")\n    return round(amount_usd * RATES[currency], 2)\n"
+    },
+    "other_reading": {
+      "rates.py": "\"\"\"Exchange rates from USD, kept by hand from finance's sheet.\"\"\"\n\nRATES_UPDATED = \"2026-11-15\"\n\nRATES = {\n    \"EUR\": 0.94,\n    \"GBP\": 0.78,\n    \"CAD\": 1.39,\n    \"MXN\": 18.2,\n}\ndef convert(amount_usd, currency):\n    \"\"\"Convert a USD amount into currency, rounded to 2 decimals.\"\"\"\n    if currency == \"USD\":\n        return amount_usd\n    if currency not in RATES:\n        raise KeyError(f\"no rate for {currency}\")\n    return round(amount_usd * RATES[currency], 2)\n"
+    }
+  }
+}
