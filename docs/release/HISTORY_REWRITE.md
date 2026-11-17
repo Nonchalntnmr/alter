@@ -1,7 +1,28 @@
 # History rewrite: remove this machine's identifiers before any push
 
-**Status: prepared and rehearsed, not executed.** Executing it is the owner's decision. Nothing
-here has been pushed.
+**Status: executed on 2026-11-17, approved by the owner** (stamp `pre-rewrite-20261117-185237`).
+Nothing has been pushed.
+
+**Verification, independent of the script's own checks:**
+- **Refs.** A snapshot of all 41 refs before and after shows exactly the 8 intended branches
+  moved. Nothing was removed. The only additions are the 8 `refs/backup/pre-rewrite-…/*` refs.
+- **History.** `scan_identity.py --history origin/main --head <branch>` exits 0 for every
+  rewritten branch, with 0 identifiers in added lines, messages and new blobs. Author and
+  committer lines still carry git's user.name and user.email, as every pushed commit on `main`
+  does.
+- **Content.** The suite passes (539) on the rewritten `release/alter-0.2.0rc2`, whose tree is
+  byte-identical to the pre-rewrite `bcc1d14`. All 8 worktrees are clean on their new heads.
+
+**Backups**, outside the repository:
+- `~/projects/ci-backups/contextual-intelligence-all-refs-2026-11-17-pre-rewrite.bundle`: every
+  ref, verified.
+- `~/projects/ci-backups/rewrite-2026-11-17/`: the script's bundle, the mirror and the commit map.
+
+**Ids.** Old → new ids are in `HISTORY_REWRITE_MAP.txt`. For example, rc1 `dd3dcda` → `ec4363b`,
+the rc2 eval's frozen code `a46b960` → `5c7fcfd`, and its freeze `363214f` → `ec70175`.
+
+**Rollback.** `rewrite_history.py rollback --stamp pre-rewrite-20261117-185237`. Never push
+`refs/backup/*`.
 
 ## 1. What is in the history
 
