@@ -209,7 +209,8 @@ class Agent:
              % ",".join("?" * len(self._CONTEXT_EVENTS)))
         return self.store.query(q, (user_id, *self._CONTEXT_EVENTS))[0]["s"] or 0
 
-    def _new_session(self, user_id: str, project_id: str, provider: str, model: str | None) -> tuple[str, dict]:
+    def _new_session(self, user_id: str, project_id: str, provider: str, model: str | None,
+                     directives: str | None = None) -> tuple[str, dict]:
         prev = self.open_session(user_id, project_id)
         if prev:
             self.close_session(user_id, project_id, prev)
@@ -218,6 +219,8 @@ class Agent:
         prefs = self._collab_prefs(user_id, project_id, provider, ad.model, ref=sid)
         system = SYSTEM + (("\n\nHow this person has asked you to work with them:\n" +
                             "\n".join(f"- {_clean(p.content)}" for p in prefs)) if prefs else "")
+        if directives:
+            system += "\n\n" + directives
         st = {"provider": provider, "model": model, "system": system, "messages": [], "pending": None,
               "display": [], "cost_usd": 0.0, "cost_unknown": False, "reflection": None, "briefing_sent": False,
               "system_memory_items": [p.id for p in prefs], "context_epoch": self._context_epoch(user_id)}
@@ -230,7 +233,9 @@ class Agent:
 
     # ------------------------------------------------------------------ the loop
     def send(self, user_id: str, project_id: str, text: str, provider: str = "mock", model: str | None = None,
-             new_session: bool = False) -> AgentTurn:
+             new_session: bool = False, directives: str | None = None) -> AgentTurn:
+        """`directives` are appended to the system prompt of a session this call creates; an
+        existing session keeps the instructions it began with."""
         if not text.strip():
             raise ValueError("empty message")
         vendor = self.ws.require_provider(user_id, project_id, provider)  # before anything is read or sent
@@ -244,7 +249,7 @@ class Agent:
             elif st.get("context_epoch", 0) != self._context_epoch(user_id) and not st["pending"]:
                 sid = None  # consent or memory changed since this session began
         if not sid:
-            sid, st = self._new_session(user_id, project_id, provider, model)
+            sid, st = self._new_session(user_id, project_id, provider, model, directives)
             st = self._load(user_id, project_id, sid)
         with self._lock(sid):
             st = self._load(user_id, project_id, sid)  # again under the lock: a concurrent turn may have advanced it

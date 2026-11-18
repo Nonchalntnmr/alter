@@ -51,6 +51,7 @@ import contextlib
 import dataclasses
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -818,7 +819,7 @@ def cmd_approve(argv: list[str], approve: bool = True) -> int:
             _print_turn(out)
             if d["status"] == "done" and d.get("session_id"):
                 task = _workspace_agent(ci).queue.get(uid, argv[0])
-                v = _session_verification(ci, uid, task.project_id, d["session_id"])
+                v = _session_verification(ci, uid, task.project_id, d["session_id"], d.get("text") or "")
                 version, log = _do_log(ci, uid)
                 rec = next((r for r in log if r.get("session_id") == d["session_id"]), None)
                 if rec is not None:
@@ -837,7 +838,7 @@ def cmd_approve(argv: list[str], approve: bool = True) -> int:
 def _routing_default(built_in: str) -> str:
     """PCIM_DO_ROUTING=direct|adaptive|assisted overrides the built-in default (evaluations set it)."""
     v = os.environ.get("PCIM_DO_ROUTING", "").strip().lower()
-    return v if v in ("direct", "adaptive", "assisted") else built_in
+    return v if v in ("direct", "adaptive", "assisted", "selective") else built_in
 
 
 DO_STATE = "pcim-do"
@@ -875,7 +876,11 @@ def _print_turn(turn) -> None:
         print("  approve with: ci approve <task>   ·   refuse with: ci deny <task> \"why\"")
 
 
-def _session_verification(ci, uid: str, project_id: str, sid: str) -> dict:
+_CLAIMS_DONE = re.compile(r"\b(?:done|fixed|works|working now|complete[d]?|finished|all (?:the )?tests pass(?:ed)?|"
+                          r"tests (?:now )?pass(?:ed)?|resolved|implemented)\b", re.I)
+
+
+def _session_verification(ci, uid: str, project_id: str, sid: str, final_text: str = "") -> dict:
     """What the session's own task records show, read-only (plan_exec's evidence rule):
     - verified: the project's tests passed after the last change;
     - not_verified: files changed, with no passing test run after the last change;
@@ -901,11 +906,17 @@ def _session_verification(ci, uid: str, project_id: str, sid: str) -> dict:
     else:
         verdict, line = "not_verified", ("not verified: the tests were not run after the last change "
                                          "(ask CI to run them, or run them yourself)")
-    return {"verdict": verdict, "line": line, "refused": refused, "writes": len(writes), "test_runs": len(runs)}
+    # what the reply claims, against what the records show: executed is not the same as verified
+    claims = bool(_CLAIMS_DONE.search(final_text or ""))
+    return {"verdict": verdict, "line": line, "refused": refused, "writes": len(writes), "test_runs": len(runs),
+            "claims_done": claims, "claim_unverified": claims and verdict != "verified"}
 
 
 def _print_verification(v: dict) -> None:
     print(f"─ {v['line']}")
+    if v.get("claim_unverified"):
+        print("  the reply says the work is done; the records do not show the project's tests passing after the "
+              "last change, so treat that as unverified")
     if v["refused"]:
         print(f"  refused or cancelled: {len(v['refused'])} action(s): "
               + terminal_safe("; ".join(f"{x['tool']} {x['path'] or ''}".strip() for x in v["refused"])))
@@ -939,14 +950,16 @@ def _do_act(ci, uid: str, here, rec: dict, r, text: str, model: str | None, plan
     prov, _, mdl = (model or rec.get("model") or "").partition(":")
     try:
         prov, mdl = px._model(here.vendors, prov or None, mdl or None)
-        turn = _workspace_agent(ci).send(uid, here.project_id, text, prov, mdl, new_session=not rec.get("session_id"))
+        from .router import SELECTIVE, SELECTIVE_DIRECTIVES
+        turn = _workspace_agent(ci).send(uid, here.project_id, text, prov, mdl, new_session=not rec.get("session_id"),
+                                         directives=SELECTIVE_DIRECTIVES if rec.get("route_mode") == SELECTIVE else None)
     except (px.ExecError, RuntimeError, ValueError, PermissionError) as e:
         _do_save(ci, uid, rec)
         print(terminal_safe(f"Not run: {e}"), file=sys.stderr)
         return 2
     rec["status"], rec["session_id"] = turn.status, turn.session_id
     if turn.status == "done":
-        rec["verification"] = _session_verification(ci, uid, here.project_id, turn.session_id)
+        rec["verification"] = _session_verification(ci, uid, here.project_id, turn.session_id, turn.text)
     _do_save(ci, uid, rec)
     _print_turn(turn)
     print()
@@ -1001,10 +1014,10 @@ def _do_forget(ci, uid: str, args: list[str]) -> int:
 
 
 def cmd_do(argv: list[str]) -> int:
-    from .router import ASSISTED, DIRECT, PLAN, ROUTING_DEFAULT, Route, route, route_from_plan
+    from .router import ASSISTED, DIRECT, PLAN, ROUTING_DEFAULT, SELECTIVE, Route, route, route_from_plan
     from .types import new_id, utcnow
     if not argv or argv[0] in ("-h", "--help"):
-        print('usage: ci do "<request>" [--route direct|plan|assisted] [--model provider:model] [--explain]\n'
+        print('usage: ci do "<request>" [--route direct|plan|assisted|selective] [--model provider:model] [--explain]\n'
               '       ci do answer <id> "<answer>"\n       ci do list [--json]\n       ci do forget <id> | --all', file=sys.stderr)
         return 2
     if argv[0].lower() in _QUESTION_SUBJECTS and len(argv) > 1:  # "ci do you think …" is a question
@@ -1074,8 +1087,9 @@ def cmd_do(argv: list[str]) -> int:
         r = route(rec["text"], answered=True, answers=answer)
         return _do_act(ci, uid, here, rec, r, f"{rec['text']}\n\nAnswer to your question: {answer}", None)
     ap = argparse.ArgumentParser(prog="ci do")
-    ap.add_argument("--route", choices=(DIRECT, PLAN, ASSISTED),
-                    help="override the routing decision; assisted = triage with one plan compile")
+    ap.add_argument("--route", choices=(DIRECT, PLAN, ASSISTED, SELECTIVE),
+                    help="override the routing decision; assisted = triage with one plan compile; selective = direct, "
+                         "asking only when the files cannot settle a choice")
     ap.add_argument("--model", help="pin provider:model for the agent")
     ap.add_argument("--explain", action="store_true", help="print the signals behind the routing decision")
     ap.add_argument("request", nargs="+")
@@ -1097,6 +1111,13 @@ def cmd_do(argv: list[str]) -> int:
         if a.explain:
             _print_json({"decision": r.decision, "reasons": r.reasons, "signals": r.signals})
         return _do_act(ci, uid, here, rec, r, text, a.model, plan=plan if r.decision == PLAN else None)
+    if (a.route or _routing_default(ROUTING_DEFAULT)) == SELECTIVE:
+        r = Route(DIRECT, ["direct, asking only if the files cannot settle a choice that changes the result; each "
+                           "write and test run still needs your approval"], None, route(text).yours, {"selective": True})
+        rec = {"id": new_id("do"), "ts": utcnow().isoformat(), "text": text, "project_id": here.project_id,
+               "answers": None, "status": "new", "session_id": None, "plan_id": None, "route": r.as_dict(),
+               "model": a.model, "route_mode": SELECTIVE}
+        return _do_act(ci, uid, here, rec, r, text, a.model)
     r = route(text)
     if a.route and a.route != r.decision:
         r = Route(a.route, [f"you chose {a.route} (CI would have chosen {r.decision})"], None, r.yours, r.signals)

@@ -42,6 +42,17 @@ from .intent_compiler import requested_actions
 DIRECT, CLARIFY, PLAN = "direct", "clarify", "plan"
 ROUTES = (DIRECT, CLARIFY, PLAN)
 ASSISTED = "assisted"  # a routing mode: triage with one plan compile (route_from_plan), not a route
+SELECTIVE = "selective"  # a routing mode: direct, with SELECTIVE_DIRECTIVES; no extra model call
+
+# Direct-first (eval_v5: no layer beat direct execution; planning added steps nobody asked for).
+# The agent itself decides whether a question is needed, after reading the files: it has the repo,
+# so it can tell a fact the files settle from one only the person knows. No planner is called.
+SELECTIVE_DIRECTIVES = """How to start on this request:
+- First read what you need in the project (read_file, list_files, search_code). Most details are settled by the files.
+- Ask the person one short question, and stop, only if the request leaves open a choice that changes the result and the files do not settle it: which of two behaviours they want, exactly what to remove and what to keep, or a value only they know. Ask before changing anything. Never ask about what you can find out by reading, and never about how the person will do their own part (sending, posting, filing).
+- Otherwise do not ask: go ahead, and state any small assumption in your summary.
+- Do only what the person asked. Unless they asked for it: do not create backup or copy files, do not run deletions or resets on existing data, and do not add work outside the request.
+- At the end, say what you changed, whether the project's tests passed after your last change, and what is left for the person."""
 # What `ci do` does when the person does not choose. "adaptive" acts on route(); "direct" always
 # goes direct, and prints route()'s choice as advice. experiments/eval_v4 sets it, by the rule
 # registered before its sets were read.
