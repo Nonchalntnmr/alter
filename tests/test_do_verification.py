@@ -106,3 +106,28 @@ def test_a_passing_run_followed_by_another_change_is_not_verified(term, capsys):
                                               {"text": "All done."}]))
     rc, out = _drive(terminal, capsys, ["do", "--model", "mock", "fix add() in calc.py"])
     assert "not verified: the tests were not run after the last change" in out
+
+
+def test_a_same_size_fix_written_within_a_second_is_tested_as_the_new_code(tmp_path):
+    """CPython reuses a .pyc whose source has the same size and whole-second mtime. A test run
+    straight after a same-size rewrite must still see the new code."""
+    import sys
+    from pcim.engine import PersonalCI
+    from pcim.governor import Governor
+    from pcim.tasks import TaskQueue
+    from pcim.workspace import Workspace
+    ci = PersonalCI(tmp_path / "data", seed=0)
+    ci.onboard("u", "U", providers=("mock",))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    ws = Workspace(ci)
+    p = ws.create_project("u", "Calc")
+    ws.authorize_workspace("u", p.id, str(repo), allow_write=True, run_argv=[
+        sys.executable, "-c", "import sys; sys.path.insert(0, '.'); import calc; sys.exit(0 if calc.add(2, 3) == 5 else 1)"])
+    q = TaskQueue(ws, Governor(ws))
+    for content, expect_pass in (("def add(a, b):\n    return a * b\n", False), ("def add(a, b):\n    return a + b\n", True)):
+        (repo / "calc.py").write_text(content)  # same size, same second
+        t = q.propose("u", p.id, "run_tests", {"reason": "check"})
+        q.approve("u", t.id)
+        t = q.get("u", t.id)
+        assert (not t.reason) is expect_pass, (content, t.reason)

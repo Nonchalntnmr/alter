@@ -265,8 +265,12 @@ class Executor:
         if tool == "run_tests":
             argv, timeout = spec["run_argv"], int(spec.get("run_timeout_s", 300))
             t0 = time.time()
-            proc = subprocess.Popen(argv, cwd=root, env=scrubbed_env(), stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE, text=True, start_new_session=True)
+            # No bytecode: a fix the same size as the code it replaces, written within the same
+            # second, would otherwise be tested as the stale .pyc of the old code (CPython checks
+            # whole-second mtime and size). That verifies code that is no longer on disk.
+            proc = subprocess.Popen(argv, cwd=root, env={**scrubbed_env(), "PYTHONDONTWRITEBYTECODE": "1"},
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                    start_new_session=True)
             with self._lock:
                 self._procs[task_id] = proc
                 cancelled_early = task_id in self._cancelled
