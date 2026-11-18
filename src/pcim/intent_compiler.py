@@ -192,6 +192,8 @@ def requested_actions(text: str) -> list[dict]:
             continue
         if fl.endswith(("s", "es")) and _NOUN_PREP_FOLLOW.match(r):
             continue
+        if fl.endswith("s") and not r and fl not in ACTION_VERBS and fl not in DESTRUCTIVE_VERBS:
+            continue  # V3.4 (eval_v5 P12-t17): "…names and emails" is a noun, not a request to email
         hit = _verb(first)
         other = _OTHER_SENSE.get(first.lower())
         if hit and other and other.search(rest):
@@ -499,11 +501,71 @@ def validate(d: dict, sent_notes: list[str], request: str | None = None, answers
         "unsupported": [],
         "flags": flags,
     }
-    spec["levels"] = topo_levels(steps) if steps else []
+    if request:
+        _keep_to_the_request(spec, request, answers)
+    spec["levels"] = topo_levels(spec["steps"]) if spec["steps"] else []
     _annotate_outcomes(spec)
     if request:
         preserve(spec, request, answers)
     return spec
+
+
+_BACKUP = re.compile(r"\b(?:back(?:ing)?[ -]?ups?|backed up|copy of|copies of|a copy|snapshot|\.bak\b|\.orig\b|"
+                     r"original (?:file )?(?:is |stays |remains )?(?:preserved|kept|untouched))", re.I)
+# phrasal removals that requested_actions' single-verb reading misses, at the start of a clause
+_DESTROY_PHRASE = re.compile(r"^(?:get rid of|clean (?:up|out)|clear out|strip out|throw (?:away|out)|"
+                             r"(?:take|get) (?:\w+ ){0,3}out of)\b", re.I)
+
+
+def _asks_to_destroy(text: str) -> bool:
+    """Does the person ask, as a request, for something to be deleted, reset or overwritten now?
+    "I want it to wipe everything" describes a feature, and "don't delete anything else" forbids:
+    neither asks. Clause-initial imperatives only, as for requested_actions."""
+    if any(a["kind"] == "destructive_change" for a in requested_actions(text)):
+        return True
+    for clause in _CLAUSES.split(text or ""):
+        c = _POLITE.sub("", clause.strip()).strip()
+        if c and not _INFORMATIONAL.match(c) and _DESTROY_PHRASE.match(c):
+            return True
+    return False
+
+
+def _keep_to_the_request(spec: dict, request: str, answers: str | None) -> None:
+    """V3.4 (eval_v5): the plan does what the person asked, and no more. Each removal is flagged.
+
+    - A destructive outcome the person's words do not ask for is the planner's invention. A reset
+      command is code to write, not "wipe the entries now" (P06-t08, P10-t07). It is kept as a
+      deliverable, so nothing is silently dropped.
+    - Backup or copy steps, and criteria that demand them, are dropped unless the person asked
+      for a backup (P12-t17, P02-t03). Those writes were refused, and the session then stopped.
+    """
+    said = f"{request} {answers or ''}"
+    asked_destroy = _asks_to_destroy(said)
+    if not asked_destroy:
+        for o in spec["outcomes"]:
+            if o["kind"] == "destructive_change":
+                o["kind"] = "deliverable"
+                spec["flags"].append(f"outcome {o['id']} was planned as deleting or overwriting something now, which was "
+                                     f"not asked for; kept as work to do, not as an action to run: {o['text'][:90]}")
+    if _BACKUP.search(said):
+        return
+    gone = {st["id"] for st in spec["steps"] if _BACKUP.search(st["action"])}
+    for st in spec["steps"]:
+        if st["id"] in gone:
+            spec["flags"].append(f"dropped step {st['id']}, a backup or copy you did not ask for: {st['action'][:90]}")
+    spec["steps"] = [st for st in spec["steps"] if st["id"] not in gone]
+    for st in spec["steps"]:
+        st["depends_on"] = [d for d in st["depends_on"] if d not in gone]
+    for key in ("success_criteria", "constraints"):
+        kept = []
+        for x in spec[key]:
+            text = x["text"] if isinstance(x, dict) else x
+            if _BACKUP.search(text):
+                spec["flags"].append(f"dropped a {key.replace('_', ' ')[:-1] if key.endswith('s') else key} that "
+                                     f"demands a backup you did not ask for: {text[:90]}")
+            else:
+                kept.append(x)
+        spec[key] = kept
 
 
 def missing_permissions(spec: dict, workspace: dict | None) -> list[str]:
@@ -554,8 +616,7 @@ def gate(spec: dict, request: str | None = None, *, after_answer: bool = False) 
     ci_work = any(o.get("by") != "you" and o["kind"] == "deliverable" for o in spec["outcomes"])
     has_consequential_outcome = any(o["kind"] in ("external_action", "destructive_change")
                                     and (o.get("by") != "you" or not ci_work) for o in spec["outcomes"])
-    defer_to_assumed = after_answer and not has_consequential_outcome and not spec["conflicts"] and bool(
-        spec.get("steps") or spec["outcomes"])
+    defer_to_assumed = after_answer and not has_consequential_outcome and bool(spec.get("steps") or spec["outcomes"])
     interps = spec.get("interpretations") or []
     top = interps[0]["p"] if interps and interps[0]["p"] is not None else None
     second = interps[1]["p"] if len(interps) > 1 and interps[1]["p"] is not None else 0.0
@@ -599,9 +660,11 @@ def gate(spec: dict, request: str | None = None, *, after_answer: bool = False) 
                        f"{'unknown' if a['confidence'] is None else format(a['confidence'], '.2f')}: {a['text']}")
     if risky and not spec.get("questions"):
         questions += [f"Is this right: {a['text']}?" for a in risky[:3]]
-    for c in spec["conflicts"]:
+    # V3.4 (eval_v5 P06-t23): the person was asked about the conflicts once and answered; asking again
+    # about the same conflict looped until nothing was done. After an answer they are shown, not asked.
+    for c in spec["conflicts"] if not after_answer else []:
         reasons.append(f"conflicting constraints: {c}")
-    if spec["conflicts"] and not spec.get("questions"):
+    if spec["conflicts"] and not after_answer and not spec.get("questions"):
         questions.append("These constraints cannot all hold — which one gives way? " + "; ".join(spec["conflicts"][:2]))
     if not spec.get("steps") and not spec["outcomes"]:
         reasons.append("the plan has no steps")

@@ -42,7 +42,6 @@ def _plan(request, outcomes, steps=None, **kw):
 
 
 # 1. P06-t08 PA: "add a reset command" is code. The planner added "running reset wipes the entries".
-@pytest.mark.xfail(strict=True, reason="eval_v5 failure, not yet fixed")
 def test_an_invented_destructive_outcome_does_not_make_a_code_change_a_plan():
     req = _request("P06-t08")
     rec = _plan(req, [{"id": "o1", "kind": "deliverable", "text": "A working reset command that keeps goal and unit"},
@@ -54,7 +53,6 @@ def test_an_invented_destructive_outcome_does_not_make_a_code_change_a_plan():
 
 
 # 2. P10-t07 PA: "change it so each person only shows up once" was planned as deleting rows from a file.
-@pytest.mark.xfail(strict=True, reason="eval_v5 failure, not yet fixed")
 def test_a_code_change_described_as_removing_rows_is_not_a_destructive_plan():
     req = _request("P10-t07")
     rec = _plan(req, [{"id": "o1", "kind": "destructive_change",
@@ -71,7 +69,6 @@ def test_a_requested_removal_stays_destructive_and_is_still_planned():
 
 
 # 3. P12-t17 P: "normal-looking names and emails" is not a request to email anyone.
-@pytest.mark.xfail(strict=True, reason="eval_v5 failure, not yet fixed")
 def test_a_plural_noun_is_not_read_as_an_outside_action():
     req = _request("P12-t17")
     assert [a for a in ic.requested_actions(req) if a["kind"] == "external_action"] == []
@@ -80,7 +77,6 @@ def test_a_plural_noun_is_not_read_as_an_outside_action():
 
 
 # 4. P12-t17 P, P02-t03 P: nobody asked for backups. The plan's backup steps and criteria are not CI's work.
-@pytest.mark.xfail(strict=True, reason="eval_v5 failure, not yet fixed")
 def test_an_unrequested_backup_step_and_criterion_are_dropped_and_flagged():
     req = _request("P12-t17")
     rec = _plan(req, [{"id": "o1", "kind": "destructive_change", "text": "pre-March test accounts removed"}],
@@ -104,7 +100,6 @@ def test_a_backup_the_person_asks_for_is_kept():
 
 
 # 5. The contract execution is told, in words, not to add backups, copies or unrequested destructive runs.
-@pytest.mark.xfail(strict=True, reason="eval_v5 failure, not yet fixed")
 def test_the_contract_message_forbids_unrequested_backups_and_destructive_runs():
     rec = _plan("fix add() in calc.py", [{"id": "o1", "kind": "deliverable", "text": "add() adds"}])
     rec["id"] = "plan_x"
@@ -113,7 +108,6 @@ def test_the_contract_message_forbids_unrequested_backups_and_destructive_runs()
 
 
 # 6. P06-t23 P: after the person answered, the same conflict blocked the plan again, three times.
-@pytest.mark.xfail(strict=True, reason="eval_v5 failure, not yet fixed")
 def test_after_an_answer_a_conflict_the_person_was_asked_about_does_not_block_again():
     req = _request("P06-t23")
     d = {"goal": "g", "interpretations": [{"goal": "g", "p": 0.9}],
