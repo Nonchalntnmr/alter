@@ -79,3 +79,30 @@ def test_ci_do_forget_removes_the_request_and_its_conversation_and_keeps_the_act
     assert ci.audit.verify()[0]
     assert terminal.main(["do", "forget", "--all"]) == 0
     assert terminal._do_log(ci, "u")[1] == []
+
+
+def test_a_failed_run_then_a_fix_then_a_passing_run_is_verified(term, capsys):
+    """The common sequence: change, tests fail, fix, tests pass. Only the runs after the last change count."""
+    import sys
+    terminal, ci, ws, agent, p, repo = term
+    ws.authorize_workspace("u", p.id, str(repo), allow_write=True, run_argv=[
+        sys.executable, "-c", "import sys; sys.path.insert(0, '.'); import calc; sys.exit(0 if calc.add(2, 3) == 5 else 1)"])
+    wrong = {"id": "w1", "name": "write_file", "input": {"path": "calc.py", "content": "def add(a, b):\n    return a * b\n",
+                                                          "reason": "first try"}}
+    agent.set_adapter("mock", None, Scripted([{"text": "Trying.", "tool_uses": [wrong]},
+                                              {"text": "Testing.", "tool_uses": [{"id": "r1", "name": "run_tests", "input": {"reason": "check"}}]},
+                                              {"text": "Fixing.", "tool_uses": [WRITE]},
+                                              {"text": "Testing again.", "tool_uses": [{"id": "r2", "name": "run_tests", "input": {"reason": "check"}}]},
+                                              {"text": "Done: add() fixed and the tests pass."}]))
+    rc, out = _drive(terminal, capsys, ["do", "--model", "mock", "fix add() in calc.py"])
+    assert "verified: the project's tests passed after the last change" in out, out[-600:]
+
+
+def test_a_passing_run_followed_by_another_change_is_not_verified(term, capsys):
+    terminal, ci, ws, agent, p, repo = term
+    agent.set_adapter("mock", None, Scripted([{"text": "Fixing.", "tool_uses": [WRITE]},
+                                              {"text": "Testing.", "tool_uses": [TEST]},
+                                              {"text": "One more tweak.", "tool_uses": [{**WRITE, "id": "t3"}]},
+                                              {"text": "All done."}]))
+    rc, out = _drive(terminal, capsys, ["do", "--model", "mock", "fix add() in calc.py"])
+    assert "not verified: the tests were not run after the last change" in out

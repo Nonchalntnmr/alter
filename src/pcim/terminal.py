@@ -881,22 +881,22 @@ def _session_verification(ci, uid: str, project_id: str, sid: str) -> dict:
     - not_verified: files changed, with no passing test run after the last change;
     - unchanged: no file was changed.
     It never changes an outcome. It says what the record supports, apart from what the agent says."""
-    from . import plan_exec as px
     from .governor import Governor
     from .tasks import TaskQueue
     ws = Workspace(ci)
     ts = sorted((t.public() for t in TaskQueue(ws, Governor(ws)).list(uid, project_id, limit=1000) if t.session_id == sid),
                 key=lambda t: t["created_at"])
-    a = px._analyze_tasks(ts, require_tests_after_write=True)
     writes = [i for i, t in enumerate(ts) if t["tool"] == "write_file" and t["status"] == "succeeded"]
-    runs = [i for i, t in enumerate(ts) if t["tool"] == "run_tests" and t["status"] == "succeeded"]
+    # a test run that ran is "succeeded" as a tool call; a failing suite carries a reason ("tests exited 1")
+    runs = [(i, not t.get("reason")) for i, t in enumerate(ts) if t["tool"] == "run_tests" and t["status"] == "succeeded"]
     refused = [{"tool": t["tool"], "path": (t.get("args") or {}).get("path"), "status": t["status"]}
                for t in ts if t["status"] in ("denied", "cancelled", "expired")]
+    after = [passed for i, passed in runs if writes and i > writes[-1]]  # only what ran after the last change counts
     if not writes:
         verdict, line = "unchanged", "no file was changed"
-    elif a["tests_after_write"] and not [p for p in a["problems"] if not p.startswith(("write_file denied", "run_tests denied"))]:
+    elif after and after[-1]:
         verdict, line = "verified", "verified: the project's tests passed after the last change"
-    elif runs and runs[-1] > writes[-1]:
+    elif after:
         verdict, line = "not_verified", "not verified: the last test run after the change did not pass"
     else:
         verdict, line = "not_verified", ("not verified: the tests were not run after the last change "
