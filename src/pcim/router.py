@@ -41,6 +41,7 @@ from .intent_compiler import requested_actions
 
 DIRECT, CLARIFY, PLAN = "direct", "clarify", "plan"
 ROUTES = (DIRECT, CLARIFY, PLAN)
+ASSISTED = "assisted"  # a routing mode: triage with one plan compile (route_from_plan), not a route
 # What `ci do` does when the person does not choose. "adaptive" acts on route(); "direct" always
 # goes direct, and prints route()'s choice as advice. experiments/eval_v4 sets it, by the rule
 # registered before its sets were read.
@@ -165,3 +166,39 @@ def route(text: str, *, answered: bool = False, answers: str | None = None) -> R
     if yours:
         why.append(f"{len(yours)} action(s) outside the computer stay yours; CI does its part and says what is left")
     return Route(DIRECT, why, None, yours, s)
+
+
+def route_from_plan(rec: dict | None, *, answered: bool = False) -> Route:
+    """Planning-assisted routing: the first move, read from one compiled V3.3 plan.
+
+    The keyword rules above miss most ambiguity: in held-out v3 they asked on 4 of the 21
+    requests that needed a question, while V3.3's compiler asked on 14 of the 17 they missed.
+    So this mode spends one plan compile (about $0.035 and 25 s on CLI 2.1.316) to triage:
+    - the plan's gate asks (`clarify`) → ask its questions, once;
+    - an outcome removes, overwrites or resets something, or the plan is blocked → plan: show
+      it for approval;
+    - otherwise → direct: the agent gets the request. The plan's outside actions are the
+      person's, and are listed.
+    A compile that fails (an invalid plan) goes direct. The agent is governed either way.
+    """
+    if not rec or rec.get("status") == "invalid" or not rec.get("spec") or not rec.get("gate"):
+        why = (rec or {}).get("error") or "no plan"
+        return Route(DIRECT, [f"the planning triage failed ({why}); going direct, and every write still waits "
+                              "for your approval"], None, [], {"plan": (rec or {}).get("id"), "gate": None})
+    g, s = rec["gate"], rec["spec"]
+    sig = {"plan": rec["id"], "gate": g["decision"], "assisted": True}
+    yours = [y.split(": ", 1)[-1] for y in g.get("yours_to_do") or []]
+    destructive = [o for o in s.get("outcomes", []) if o.get("kind") == "destructive_change"]
+    if g["decision"] == "clarify" and not answered:
+        q = "\n".join(g.get("questions") or []) or "What should the result be?"
+        return Route(CLARIFY, ["the plan has something only you can settle: " + "; ".join(g.get("reasons") or [])],
+                     q, yours, sig)
+    if destructive or g["decision"] == "blocked":
+        what = destructive[0]["text"] if destructive else "; ".join(g.get("reasons") or [])
+        return Route(PLAN, [f"it removes, overwrites or resets something ({what}): you see the plan and approve it "
+                            "before anything is touched" if destructive else f"the plan is blocked: {what}"],
+                     None, yours, sig)
+    why = ["the plan has nothing to ask and nothing destructive; each write and test run still needs your approval"]
+    if yours:
+        why.append(f"{len(yours)} action(s) outside the computer stay yours; CI does its part and says what is left")
+    return Route(DIRECT, why, None, yours, sig)

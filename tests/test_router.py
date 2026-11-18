@@ -257,3 +257,99 @@ def test_an_answer_never_lands_in_another_requests_conversation(term, capsys):
     st = agent._load("u", p.id, after["session_id"])
     user_text = " ".join(m["content"] if isinstance(m["content"], str) else "" for m in st["messages"] if m["role"] == "user")
     assert "rename the helper in calc.py" in user_text and "the add helper" in user_text
+
+
+# ---------------------------------------------------------------------- planning-assisted routing
+def _plan(decision, outcomes, questions=(), reasons=("r",), yours=()):
+    return {"id": new_id("plan"), "status": {"clarify": "needs_answers", "blocked": "blocked"}.get(decision, "awaiting_approval"),
+            "spec": {"outcomes": outcomes}, "error": None,
+            "gate": {"decision": decision, "questions": list(questions), "reasons": list(reasons),
+                     "yours_to_do": list(yours), "auto_resolved": [], "needs_approval": []}}
+
+
+def test_assisted_routing_reads_the_plans_gate():
+    code = [{"id": "o1", "kind": "deliverable", "text": "fixed"}]
+    gone = [{"id": "o1", "kind": "destructive_change", "text": "old flags removed"}]
+    r = router.route_from_plan(_plan("clarify", code, questions=["Which report?"]))
+    assert r.decision == router.CLARIFY and r.question == "Which report?"
+    assert router.route_from_plan(_plan("clarify", code), answered=True).decision == router.DIRECT  # asks once
+    assert router.route_from_plan(_plan("clarify", gone), answered=True).decision == router.PLAN
+    assert router.route_from_plan(_plan("approval", gone)).decision == router.PLAN
+    assert router.route_from_plan(_plan("blocked", code)).decision == router.PLAN
+    r = router.route_from_plan(_plan("approval", code, yours=["o2: tell Sam"]))
+    assert r.decision == router.DIRECT and r.yours == ["tell Sam"]
+
+
+def test_a_failed_triage_compile_goes_direct_and_says_so():
+    r = router.route_from_plan({"id": "p", "status": "invalid", "error": "the model did not return a JSON plan",
+                                "spec": None, "gate": None})
+    assert r.decision == router.DIRECT and "triage failed" in r.reasons[0]
+    assert router.route_from_plan(None).decision == router.DIRECT
+
+
+def test_ci_do_assisted_asks_the_plans_question_then_routes_the_answer_through_the_plan(term, capsys, monkeypatch):
+    terminal, ci, ws, agent, p, repo = term
+    mock = Scripted([{"text": "Done: add() fixed."}])
+    agent.set_adapter("mock", None, mock)
+    calls = {"compile": 0, "answer": 0}
+
+    def fake_compile(ci_, uid, text, **kw):
+        calls["compile"] += 1
+        rec = _plan("clarify", [{"id": "o1", "kind": "deliverable", "text": "fixed"}], questions=["Fix which helper?"])
+        rec["text"] = text
+        ic._save(ci_, uid, rec)
+        return rec
+
+    def fake_answer(ci_, uid, plan_id, answers, **kw):
+        calls["answer"] += 1
+        rec = _plan("approval", [{"id": "o1", "kind": "deliverable", "text": "fixed"}])
+        ic._save(ci_, uid, rec)
+        return rec
+
+    monkeypatch.setattr(ic, "compile_intent", fake_compile)
+    monkeypatch.setattr(ic, "answer", fake_answer)
+    assert terminal.main(["do", "--route", "assisted", "--model", "mock", "fix the helper"]) == 6
+    out = capsys.readouterr().out
+    assert "Fix which helper?" in out and "─ clarify:" in out and mock.calls == 0 and calls["compile"] == 1
+    rid = terminal._do_log(ci, "u")[1][-1]["id"]
+    assert terminal.main(["do", "answer", rid, "add() in calc.py"]) == 0
+    assert calls == {"compile": 1, "answer": 1} and mock.calls == 1
+    rec = terminal._do_log(ci, "u")[1][-1]
+    assert rec["route"]["decision"] == "direct" and rec["route_mode"] == "assisted"
+
+
+def test_ci_do_assisted_shows_the_triage_plan_without_compiling_twice(term, capsys, monkeypatch):
+    terminal, ci, ws, agent, p, repo = term
+    mock = Scripted([])
+    agent.set_adapter("mock", None, mock)
+    n = {"compile": 0}
+
+    def fake_compile(ci_, uid, text, **kw):
+        n["compile"] += 1
+        spec = ic.validate({"goal": "remove the old flags", "interpretations": [{"goal": "g", "p": 0.9}],
+                            "outcomes": [{"id": "o1", "text": "old flags removed", "kind": "destructive_change"}],
+                            "steps": [{"id": "s1", "action": "edit flags.json", "kind": "write", "serves": ["o1"]}]},
+                           [], request=text)
+        rec = {"id": new_id("plan"), "ts": utcnow().isoformat(), "text": text, "answers": None, "parent": None,
+               "interaction": None, "served_by": "test", "project_id": kw.get("project_id"), "context_items": [],
+               "spec": spec, "gate": ic.gate(spec, text).as_dict(), "error": None, "status": "awaiting_approval",
+               "steps_state": {}, "outcomes_state": {}}
+        ic._save(ci_, uid, rec)
+        return rec
+
+    monkeypatch.setattr(ic, "compile_intent", fake_compile)
+    before = (repo / "calc.py").read_text()
+    assert terminal.main(["do", "--route", "assisted", "remove the old flags"]) == 0
+    out = capsys.readouterr().out
+    assert "─ plan:" in out and "Approve with: ci plan approve" in out
+    assert n["compile"] == 1 and mock.calls == 0 and (repo / "calc.py").read_text() == before
+
+
+def test_ci_do_assisted_goes_direct_when_the_triage_compile_fails(term, capsys, monkeypatch):
+    terminal, ci, ws, agent, p, repo = term
+    mock = Scripted([{"text": "Done."}])
+    agent.set_adapter("mock", None, mock)
+    monkeypatch.setattr(ic, "compile_intent", lambda *a, **k: {"id": "p0", "status": "invalid", "spec": None,
+                                                                "gate": None, "error": "the model did not return a JSON plan"})
+    assert terminal.main(["do", "--route", "assisted", "--model", "mock", "fix add()"]) == 0
+    assert "triage failed" in capsys.readouterr().out and mock.calls == 1

@@ -825,9 +825,9 @@ def cmd_approve(argv: list[str], approve: bool = True) -> int:
 
 
 def _routing_default(built_in: str) -> str:
-    """PCIM_DO_ROUTING=direct|adaptive overrides the built-in default (the human evaluation sets it)."""
+    """PCIM_DO_ROUTING=direct|adaptive|assisted overrides the built-in default (evaluations set it)."""
     v = os.environ.get("PCIM_DO_ROUTING", "").strip().lower()
-    return v if v in ("direct", "adaptive") else built_in
+    return v if v in ("direct", "adaptive", "assisted") else built_in
 
 
 DO_STATE = "pcim-do"
@@ -865,8 +865,9 @@ def _print_turn(turn) -> None:
         print("  approve with: ci approve <task>   ·   refuse with: ci deny <task> \"why\"")
 
 
-def _do_act(ci, uid: str, here, rec: dict, r, text: str, model: str | None) -> int:
-    """Carry out a route: ask, plan, or hand the request to the governed agent."""
+def _do_act(ci, uid: str, here, rec: dict, r, text: str, model: str | None, plan: dict | None = None) -> int:
+    """Carry out a route: ask, plan, or hand the request to the governed agent. With `plan`
+    (planning-assisted routing), the plan already compiled is shown rather than compiled again."""
     from . import intent_compiler as ic
     from . import plan_exec as px
     from .router import CLARIFY, PLAN
@@ -881,8 +882,9 @@ def _do_act(ci, uid: str, here, rec: dict, r, text: str, model: str | None) -> i
         print(f'  answer with: ci do answer {rec["id"]} "…"')
         return 6
     if r.decision == PLAN:
-        plan = ic.compile_intent(ci, uid, rec["text"], answers=rec.get("answers"), pinned=model,
-                                 project_id=here.project_id, project_vendors=here.vendors)
+        if plan is None:
+            plan = ic.compile_intent(ci, uid, rec["text"], answers=rec.get("answers"), pinned=model,
+                                     project_id=here.project_id, project_vendors=here.vendors)
         rec["status"], rec["plan_id"] = "planned", plan["id"]
         _do_save(ci, uid, rec)
         print(terminal_safe(ic.render(plan)))
@@ -908,10 +910,10 @@ def _do_act(ci, uid: str, here, rec: dict, r, text: str, model: str | None) -> i
 
 
 def cmd_do(argv: list[str]) -> int:
-    from .router import DIRECT, PLAN, ROUTING_DEFAULT, Route, route
+    from .router import ASSISTED, DIRECT, PLAN, ROUTING_DEFAULT, Route, route, route_from_plan
     from .types import new_id, utcnow
     if not argv or argv[0] in ("-h", "--help"):
-        print('usage: ci do "<request>" [--route direct|plan] [--model provider:model] [--explain]\n'
+        print('usage: ci do "<request>" [--route direct|plan|assisted] [--model provider:model] [--explain]\n'
               '       ci do answer <id> "<answer>"\n       ci do list [--json]', file=sys.stderr)
         return 2
     if argv[0].lower() in _QUESTION_SUBJECTS and len(argv) > 1:  # "ci do you think …" is a question
@@ -961,15 +963,41 @@ def cmd_do(argv: list[str]) -> int:
             print(f"{rec['id']} is {rec['status']}" + (f"; {hint}" if hint else ""), file=sys.stderr)
             return 2
         rec["answers"] = answer
+        if rec.get("assist_plan"):  # planning-assisted: the answer goes to the plan, which routes again
+            from . import intent_compiler as ic
+            from .router import route_from_plan
+            plan2 = ic.answer(ci, uid, rec["assist_plan"], answer, pinned=rec.get("model"),
+                              project_vendors=here.vendors)
+            rec["assist_plan"] = plan2["id"]
+            r = route_from_plan(plan2, answered=True)
+            return _do_act(ci, uid, here, rec, r, f"{rec['text']}\n\nAnswer to your question: {answer}", None,
+                           plan=plan2 if r.decision == PLAN else None)
         r = route(rec["text"], answered=True, answers=answer)
         return _do_act(ci, uid, here, rec, r, f"{rec['text']}\n\nAnswer to your question: {answer}", None)
     ap = argparse.ArgumentParser(prog="ci do")
-    ap.add_argument("--route", choices=(DIRECT, PLAN), help="override the routing decision")
+    ap.add_argument("--route", choices=(DIRECT, PLAN, ASSISTED),
+                    help="override the routing decision; assisted = triage with one plan compile")
     ap.add_argument("--model", help="pin provider:model for the agent")
     ap.add_argument("--explain", action="store_true", help="print the signals behind the routing decision")
     ap.add_argument("request", nargs="+")
     a = ap.parse_args(argv)
     text = " ".join(" ".join(a.request).split())
+    if (a.route or _routing_default(ROUTING_DEFAULT)) == ASSISTED:
+        from . import intent_compiler as ic
+        rec = {"id": new_id("do"), "ts": utcnow().isoformat(), "text": text, "project_id": here.project_id,
+               "answers": None, "status": "new", "session_id": None, "plan_id": None, "model": a.model,
+               "route_mode": ASSISTED}
+        try:
+            plan = ic.compile_intent(ci, uid, text, pinned=a.model, project_id=here.project_id,
+                                     project_vendors=here.vendors)
+        except (RoutingError, ValueError) as e:
+            plan = {"id": None, "status": "invalid", "error": str(e)[:200], "spec": None, "gate": None}
+        rec["assist_plan"] = plan.get("id")
+        r = route_from_plan(plan)
+        rec["route"] = r.as_dict()
+        if a.explain:
+            _print_json({"decision": r.decision, "reasons": r.reasons, "signals": r.signals})
+        return _do_act(ci, uid, here, rec, r, text, a.model, plan=plan if r.decision == PLAN else None)
     r = route(text)
     if a.route and a.route != r.decision:
         r = Route(a.route, [f"you chose {a.route} (CI would have chosen {r.decision})"], None, r.yours, r.signals)
