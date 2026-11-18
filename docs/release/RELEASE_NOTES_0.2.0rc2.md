@@ -1,7 +1,31 @@
-# Release Notes: `0.2.0rc2`
+# Release Notes: `0.2.0rc2`, restricted developer preview
 
 **Package:** `contextual-intelligence` `0.2.0rc2` (`ci`, `pcim`, `pcim-mcp`)
 **Branch:** `release/alter-0.2.0rc2`. It is not merged to `main`, not pushed and not published.
+**Publication is held** until the owner decides.
+
+## Who and what this preview is for
+
+- **Who.** The owner, and invited developers, on a **verified configuration**:
+  - macOS, with `claude` CLI 2.1.316;
+  - `PCIM_CLI_REQUIRE_ISOLATION=1`;
+  - an identity probe recorded in the same `PCIM_HOME`
+    (`python -m pcim.adapters.cli_probe --trials 4 --record`).
+
+  On any other CLI version, calls are refused until a probe is recorded.
+- **What to try:**
+  - `ci do` and `ci plan` in a throwaway or version-controlled project folder;
+  - read what CI says it will do, and approve each write yourself.
+- **What this preview does not claim.** It does not claim that routing (`ci do`) or planning
+  (`ci plan`) does better than direct execution. In every evaluation so far, direct execution
+  verified every coding task. Routing and planning are offered for how they handle ambiguity and
+  approvals, not as faster or more successful. The human evaluation (`HUMAN_EVAL.md`) has to
+  establish any such claim first.
+- **What to report.** Any of these:
+  - a change you did not approve;
+  - anything sent that you did not expect (`ci audit` shows what was sent);
+  - a question that wasted your time;
+  - a question CI should have asked.
 
 ## New
 
@@ -16,12 +40,20 @@
   - `plan`: for a removal or overwrite with a broad scope, the intent compiler shows the plan for
     approval. Then `ci plan approve` and `ci execute`.
 
-  **The router misses most ambiguity** (see Evaluation). In practice `ci do` almost always goes
-  direct, and the agent asks its own questions.
+  **The keyword router misses most ambiguity** (see Evaluation). In practice `ci do` almost always
+  goes direct, and the agent asks its own questions.
 
-  Other forms: `ci do list`, `ci do --route direct|plan`, `ci do --explain`. With
+  **Planning-assisted routing** is opt-in: `ci do --route assisted`, or
+  `PCIM_DO_ROUTING=assisted`. One V3.3 plan compile triages the request, for about $0.035 and 25 s
+  per request:
+  - it asks the plan's questions, once;
+  - it shows the plan for approval when something would be removed or overwritten;
+  - otherwise it goes direct.
+
+  It is being evaluated in `experiments/eval_v5/`.
+
+  Other forms: `ci do list`, `ci do --route direct|plan|assisted`, `ci do --explain`. With
   `PCIM_DO_ROUTING=direct`, `ci do` always goes direct and prints the router's choice as advice.
-  The evaluation's rule decides the built-in default (below).
 - **Intent compiler V3.3.** These rules were written after reading the V3 results and are tested
   on new data below.
   - An assumption about an action the person carries out themselves is shown under "check when
@@ -52,12 +84,17 @@
 - **The identity-probe record** is replaced atomically, so a call that reads it never sees it
   half-written.
 - **The version test** checks that the package and `pyproject.toml` agree.
+- **The invalid-JSON recovery path** now has deterministic regression tests
+  (`tests/test_reask_recovery.py`). They cover recovery in one re-ask, the bound of two calls, an
+  invalid plan never being approvable, and the re-ask after an answer. Mutation-checked: removing
+  the re-ask, or making it unbounded, makes them fail.
 
 ## Corrected documentation
 
 - **rc1's "direct execution remains the default (`ci "…"`)".** `ci "…"` is a text answer.
-- **rc1's statement that only `ff74305` holds an identifier in history.** Three unpushed commits
-  do: `ff74305`, `d6cc52f` and `b77dcc6` (`docs/release/HISTORY_REWRITE.md`).
+- **rc1's statement that only `ff74305` holds an identifier in history.** Four unpushed commits
+  did. History has now been rewritten with the owner's approval, and every branch scans clean
+  (`docs/release/HISTORY_REWRITE.md`; ids in `HISTORY_REWRITE_MAP.txt`).
 
 ## Evaluation (`experiments/eval_v4/RESULTS.md`; sets frozen before they were read)
 
@@ -71,8 +108,11 @@
   catches what it misses.
 - **Execution, on 16 new coding tasks.**
   - Direct and routed each verified 16/16, with no unauthorized change.
-  - Routing acted on 2 tasks, with one fewer correction and lower cost.
-  - So the registered rule keeps adaptive routing as `ci do`'s default, by a thin margin.
+  - Routing changed what happened on 2 tasks.
+  - The registered rule keeps the keyword router as the preview's default. **No performance
+    advantage is claimed:** the difference rests on one correction on one task.
+- **eval_v5** (12 simulated users, 4 arms, 3 blinded judges): see
+  `experiments/eval_v5/RESULTS.md`. It is engineering validation, not a release claim.
 
 ## Known limitations
 
