@@ -26,3 +26,17 @@
   of any failing test.
 - Commits are gated with `&&` on the check's exit code.
 - If it recurs, its name will be in the log, and this file gets the test and its cause.
+
+## Leading hypothesis (2026-11-18): stale bytecode in test runs. Plausible, not confirmed.
+
+While reviewing the verification branch, a deterministic test exposed a real bug.
+- **The bug.** A module rewritten to the same byte size within the same second, such as
+  `return a * b` to `return a + b`, was imported from the stale `.pyc` by the next test run.
+  CPython checks whole-second mtime and size. It reproduces in isolation.
+- **Why it fits.** Suite tests that write a wrong version and then the fix of a module, and run
+  it in between, would fail only when no second boundary fell between the two writes. That
+  matches a rare, timing-dependent failure that a quiet replay does not reproduce.
+- **The fix (`690d562`).** `run_tests` now runs the person's test command with
+  `PYTHONDONTWRITEBYTECODE=1`, and a regression test covers it.
+- **Why it stays unconfirmed.** The failing test's name was never captured, so this remains a
+  hypothesis. If the failure recurs after `690d562`, it is something else.
