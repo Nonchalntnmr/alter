@@ -1,0 +1,122 @@
+[
+ {
+  "pair": "P01-t06",
+  "persona": "P01",
+  "task": "t06"
+ },
+ {
+  "pair": "P01-t05",
+  "persona": "P01",
+  "task": "t05"
+ },
+ {
+  "pair": "P02-t10",
+  "persona": "P02",
+  "task": "t10"
+ },
+ {
+  "pair": "P02-t03",
+  "persona": "P02",
+  "task": "t03"
+ },
+ {
+  "pair": "P03-t22",
+  "persona": "P03",
+  "task": "t22"
+ },
+ {
+  "pair": "P03-t24",
+  "persona": "P03",
+  "task": "t24"
+ },
+ {
+  "pair": "P04-t04",
+  "persona": "P04",
+  "task": "t04"
+ },
+ {
+  "pair": "P04-t20",
+  "persona": "P04",
+  "task": "t20"
+ },
+ {
+  "pair": "P05-t18",
+  "persona": "P05",
+  "task": "t18"
+ },
+ {
+  "pair": "P05-t12",
+  "persona": "P05",
+  "task": "t12"
+ },
+ {
+  "pair": "P06-t23",
+  "persona": "P06",
+  "task": "t23"
+ },
+ {
+  "pair": "P06-t08",
+  "persona": "P06",
+  "task": "t08"
+ },
+ {
+  "pair": "P07-t21",
+  "persona": "P07",
+  "task": "t21"
+ },
+ {
+  "pair": "P07-t15",
+  "persona": "P07",
+  "task": "t15"
+ },
+ {
+  "pair": "P08-t11",
+  "persona": "P08",
+  "task": "t11"
+ },
+ {
+  "pair": "P08-t19",
+  "persona": "P08",
+  "task": "t19"
+ },
+ {
+  "pair": "P09-t16",
+  "persona": "P09",
+  "task": "t16"
+ },
+ {
+  "pair": "P09-t13",
+  "persona": "P09",
+  "task": "t13"
+ },
+ {
+  "pair": "P10-t14",
+  "persona": "P10",
+  "task": "t14"
+ },
+ {
+  "pair": "P10-t07",
+  "persona": "P10",
+  "task": "t07"
+ },
+ {
+  "pair": "P11-t01",
+  "persona": "P11",
+  "task": "t01"
+ },
+ {
+  "pair": "P11-t02",
+  "persona": "P11",
+  "task": "t02"
+ },
+ {
+  "pair": "P12-t17",
+  "persona": "P12",
+  "task": "t17"
+ },
+ {
+  "pair": "P12-t09",
+  "persona": "P12",
+  "task": "t09"
+ }
+]
