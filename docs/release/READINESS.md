@@ -100,6 +100,19 @@ blinded judges; frozen at `c5da87a`; `experiments/eval_v5/RESULTS.md`):
   - only 3 of 24 requests needed a question, so clarification recall rests on n = 3;
   - judge κ ranges from 0.31 (rating) to 0.68.
 
+**eval_v6** (2026-11-18; 24 new tasks, 12 of which need a question by design; frozen at
+`5a007fb`; `experiments/eval_v6/RESULTS.md`):
+
+| arm | verified | first-time success | asked when needed |
+|---|---|---|---|
+| direct | 24/24 | 18/24 | 8/14 |
+| keyword router | 24/24 | 17/24 | 6/14 |
+| selective clarification | 24/24 | 17/24 | 6/14 |
+
+- **Selective is not shown to be better than direct.**
+- **Clarification is unsolved:** every arm misses about half the questions that are needed.
+- **Secondary, to be confirmed:** selective cost 25% less and was faster.
+
 **Earlier evidence still standing:** in paired v1 and v2, direct verified 32/32, against
 planning's 9/16 (V2.1) and 14/16 (V3).
 
