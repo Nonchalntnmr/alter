@@ -566,6 +566,12 @@ class PersonalCI:
                 return self.ask(user_id, task, c.entry.provider, c.entry.model or None, budget_tokens,
                                 _mode=md, project_id=project_id, route=info)
             except fallback_errors() as e:
+                if isinstance(e, BrokenPipeError):
+                    # This process's own stdout or stderr was closed (`ci … | head -1`), not the
+                    # provider failing. Adapters raise ProviderError or httpx errors for their
+                    # transport, and the CLI adapter's subprocess absorbs a broken pipe to its child.
+                    # Falling back would record a provider failure for every model and still fail.
+                    raise
                 # Every failure still falls back: another vendor or model is a different request. A
                 # non-retryable failure is not retried in place (the SDKs already retry transient ones).
                 kind, status = getattr(e, "kind", "unknown"), getattr(e, "status", None)
