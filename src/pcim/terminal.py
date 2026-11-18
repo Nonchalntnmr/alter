@@ -27,6 +27,7 @@
     ci do "fix the flaky date test"                           work in this project folder: CI routes it
                                                               (direct, clarify or plan) and says why
     ci do answer <id> "…" · ci do list [--json]               answer its question, or continue the session
+    ci do forget <id> | --all                                 remove routed requests and their conversations
     ci approve <task> · ci deny <task> ["why"]                resolve an action the agent is waiting on
     ci halt · ci resume                                       Stop-all: cancel every pending or running action
     ci learn "…"                                              same as ci -l
@@ -958,16 +959,59 @@ def _do_act(ci, uid: str, here, rec: dict, r, text: str, model: str | None, plan
     return 0 if turn.status == "done" else 6 if turn.status == "awaiting_approval" else 4
 
 
+def _do_forget(ci, uid: str, args: list[str]) -> int:
+    """Remove routed requests: their text, answers, route and verification, and the agent
+    conversation each one started. The record of each action approved, refused or run stays (it
+    is the audit of what happened to your files), and so does any plan a request led to."""
+    from .intent_compiler import resolve_id
+    if not args:
+        print('usage: ci do forget <id> | ci do forget --all', file=sys.stderr)
+        return 2
+    version, log = _do_log(ci, uid)
+    if args[0] == "--all":
+        gone = list(log)
+    else:
+        try:
+            rid = resolve_id([r["id"] for r in log], args[0], "request")
+        except KeyError:
+            print(f"no request {args[0]}", file=sys.stderr)
+            return 2
+        except ValueError as e:
+            print(str(e), file=sys.stderr)
+            return 2
+        gone = [r for r in log if r["id"] == rid]
+    keep = [r for r in log if r not in gone]
+    if version is not None:
+        if keep:
+            ci.store.overwrite_policy_state(uid, DO_STATE, version, json.dumps(keep).encode())
+        else:
+            ci.store.delete_policy_states(uid, DO_STATE)
+    sessions = 0
+    for r in gone:
+        if r.get("session_id"):
+            sessions += ci.store.execute("DELETE FROM sessions WHERE id=? AND user_id=?",
+                                         (r["session_id"], uid)).rowcount
+    ci.store.flush_deleted()  # secure_delete is on; the WAL is truncated so nothing lingers there
+    ci.audit.append(uid, "do.forget", requests=len(gone), sessions=sessions)
+    print(f"Forgot {len(gone)} request(s) and {sessions} agent conversation(s): the text, answers, route and "
+          "verification are gone.")
+    print("Kept: the record of each action you approved, refused or ran (ci audit), and any plan a request led "
+          "to (ci plan list).")
+    return 0
+
+
 def cmd_do(argv: list[str]) -> int:
     from .router import ASSISTED, DIRECT, PLAN, ROUTING_DEFAULT, Route, route, route_from_plan
     from .types import new_id, utcnow
     if not argv or argv[0] in ("-h", "--help"):
         print('usage: ci do "<request>" [--route direct|plan|assisted] [--model provider:model] [--explain]\n'
-              '       ci do answer <id> "<answer>"\n       ci do list [--json]', file=sys.stderr)
+              '       ci do answer <id> "<answer>"\n       ci do list [--json]\n       ci do forget <id> | --all', file=sys.stderr)
         return 2
     if argv[0].lower() in _QUESTION_SUBJECTS and len(argv) > 1:  # "ci do you think …" is a question
         return cmd_ask(["do", *argv])
     ci, uid = _open()
+    if argv[0] == "forget":
+        return _do_forget(ci, uid, argv[1:])
     if argv[0] == "list":
         log = _do_log(ci, uid)[1]
         if "--json" in argv:

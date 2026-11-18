@@ -59,3 +59,23 @@ def test_a_question_only_turn_reports_no_change(term, capsys):
     agent.set_adapter("mock", None, Scripted([{"text": "Which helper do you mean?"}]))
     rc, out = _drive(terminal, capsys, ["do", "--model", "mock", "fix the helper in calc.py"])
     assert "no file was changed" in out and rc == 0
+
+
+def test_ci_do_forget_removes_the_request_and_its_conversation_and_keeps_the_action_record(term, capsys):
+    terminal, ci, ws, agent, p, repo = term
+    agent.set_adapter("mock", None, Scripted([{"text": "Fixing.", "tool_uses": [WRITE]}, {"text": "Done."},
+                                              {"text": "Listing."}]))
+    _drive(terminal, capsys, ["do", "--model", "mock", "fix add() in calc.py, my secret project"])
+    terminal.main(["do", "--model", "mock", "list the files"])
+    capsys.readouterr()
+    first, second = terminal._do_log(ci, "u")[1]
+    tasks_before = ci.store.query("SELECT COUNT(*) AS n FROM tasks WHERE user_id='u'")[0]["n"]
+    assert terminal.main(["do", "forget", first["id"]]) == 0
+    assert "Forgot 1 request(s) and 1 agent conversation(s)" in capsys.readouterr().out
+    log = terminal._do_log(ci, "u")[1]
+    assert [r["id"] for r in log] == [second["id"]]
+    assert not ci.store.query("SELECT id FROM sessions WHERE id=?", (first["session_id"],))
+    assert ci.store.query("SELECT COUNT(*) AS n FROM tasks WHERE user_id='u'")[0]["n"] == tasks_before  # the action record stays
+    assert ci.audit.verify()[0]
+    assert terminal.main(["do", "forget", "--all"]) == 0
+    assert terminal._do_log(ci, "u")[1] == []
