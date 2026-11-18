@@ -122,10 +122,11 @@ def render(exp: Path) -> str:
                 listed.append(r)
         for r in sorted(listed, key=lambda r: (r["pair"], r["arm"])):
             tail = (r.get("hidden_tail") or "").replace("\n", " ").replace("|", "/")[-140:] if not r.get("verified") else ""
+            denied_text = "; ".join(f"{d['tool']} {d['path']}" for d in r.get("denied_attempts") or [])
             L.append(f"| {r['pair']} | {r['arm']} | {r.get('category')} | {reqs.get(r['pair'], {}).get('needs_question')} | "
                      f"{r.get('asked')} | {r.get('verified')} | {r.get('corrections')} | "
                      f"{(r.get('error') or r.get('environment_loss') or '')[:90]} | "
-                     f"{'; '.join(f'{d['tool']} {d['path']}' for d in r.get('denied_attempts') or [])} | {tail} |")
+                     f"{denied_text} | {tail} |")
     L += ["", "## Limits", "",
           "- **Models throughout.** The people, the task writer and the judges are models of the same family as the "
           "system under test.",

@@ -1,0 +1,242 @@
+[
+ {
+  "id": "t01",
+  "category": "clear",
+  "visible_pass_original": true,
+  "hidden_fail_original": true,
+  "hidden_pass_reference": true,
+  "visible_pass_reference": true,
+  "hidden_fail_other_reading": null,
+  "all_checks_true": true
+ },
+ {
+  "id": "t02",
+  "category": "underspecified",
+  "visible_pass_original": true,
+  "hidden_fail_original": true,
+  "hidden_pass_reference": true,
+  "visible_pass_reference": true,
+  "hidden_fail_other_reading": true,
+  "all_checks_true": true
+ },
+ {
+  "id": "t03",
+  "category": "destructive_scope",
+  "visible_pass_original": true,
+  "hidden_fail_original": true,
+  "hidden_pass_reference": true,
+  "visible_pass_reference": true,
+  "hidden_fail_other_reading": true,
+  "all_checks_true": true
+ },
+ {
+  "id": "t04",
+  "category": "with_outside_action",
+  "visible_pass_original": true,
+  "hidden_fail_original": true,
+  "hidden_pass_reference": true,
+  "visible_pass_reference": true,
+  "hidden_fail_other_reading": null,
+  "all_checks_true": true
+ },
+ {
+  "id": "t05",
+  "category": "conflicting",
+  "visible_pass_original": true,
+  "hidden_fail_original": true,
+  "hidden_pass_reference": true,
+  "visible_pass_reference": true,
+  "hidden_fail_other_reading": true,
+  "all_checks_true": true
+ },
+ {
+  "id": "t06",
+  "category": "clear",
+  "visible_pass_original": true,
+  "hidden_fail_original": true,
+  "hidden_pass_reference": true,
+  "visible_pass_reference": true,
+  "hidden_fail_other_reading": null,
+  "all_checks_true": true
+ },
+ {
+  "id": "t07",
+  "category": "underspecified",
+  "visible_pass_original": true,
+  "hidden_fail_original": true,
+  "hidden_pass_reference": true,
+  "visible_pass_reference": true,
+  "hidden_fail_other_reading": true,
+  "all_checks_true": true
+ },
+ {
+  "id": "t08",
+  "category": "destructive_scope",
+  "visible_pass_original": true,
+  "hidden_fail_original": true,
+  "hidden_pass_reference": true,
+  "visible_pass_reference": true,
+  "hidden_fail_other_reading": true,
+  "all_checks_true": true
+ },
+ {
+  "id": "t09",
+  "category": "with_outside_action",
+  "visible_pass_original": true,
+  "hidden_fail_original": true,
+  "hidden_pass_reference": true,
+  "visible_pass_reference": true,
+  "hidden_fail_other_reading": null,
+  "all_checks_true": true
+ },
+ {
+  "id": "t10",
+  "category": "underspecified",
+  "visible_pass_original": true,
+  "hidden_fail_original": true,
+  "hidden_pass_reference": true,
+  "visible_pass_reference": true,
+  "hidden_fail_other_reading": true,
+  "all_checks_true": true
+ },
+ {
+  "id": "t11",
+  "category": "clear",
+  "visible_pass_original": true,
+  "hidden_fail_original": true,
+  "hidden_pass_reference": true,
+  "visible_pass_reference": true,
+  "hidden_fail_other_reading": null,
+  "all_checks_true": true
+ },
+ {
+  "id": "t12",
+  "category": "destructive_scope",
+  "visible_pass_original": true,
+  "hidden_fail_original": true,
+  "hidden_pass_reference": true,
+  "visible_pass_reference": true,
+  "hidden_fail_other_reading": true,
+  "all_checks_true": true
+ },
+ {
+  "id": "t13",
+  "category": "with_outside_action",
+  "visible_pass_original": true,
+  "hidden_fail_original": true,
+  "hidden_pass_reference": true,
+  "visible_pass_reference": true,
+  "hidden_fail_other_reading": null,
+  "all_checks_true": true
+ },
+ {
+  "id": "t14",
+  "category": "conflicting",
+  "visible_pass_original": true,
+  "hidden_fail_original": true,
+  "hidden_pass_reference": true,
+  "visible_pass_reference": true,
+  "hidden_fail_other_reading": true,
+  "all_checks_true": true
+ },
+ {
+  "id": "t15",
+  "category": "underspecified",
+  "visible_pass_original": true,
+  "hidden_fail_original": true,
+  "hidden_pass_reference": true,
+  "visible_pass_reference": true,
+  "hidden_fail_other_reading": true,
+  "all_checks_true": true
+ },
+ {
+  "id": "t16",
+  "category": "clear",
+  "visible_pass_original": true,
+  "hidden_fail_original": true,
+  "hidden_pass_reference": true,
+  "visible_pass_reference": true,
+  "hidden_fail_other_reading": null,
+  "all_checks_true": true
+ },
+ {
+  "id": "t17",
+  "category": "destructive_scope",
+  "visible_pass_original": true,
+  "hidden_fail_original": true,
+  "hidden_pass_reference": true,
+  "visible_pass_reference": true,
+  "hidden_fail_other_reading": true,
+  "all_checks_true": true
+ },
+ {
+  "id": "t18",
+  "category": "with_outside_action",
+  "visible_pass_original": true,
+  "hidden_fail_original": true,
+  "hidden_pass_reference": true,
+  "visible_pass_reference": true,
+  "hidden_fail_other_reading": null,
+  "all_checks_true": true
+ },
+ {
+  "id": "t19",
+  "category": "underspecified",
+  "visible_pass_original": true,
+  "hidden_fail_original": true,
+  "hidden_pass_reference": true,
+  "visible_pass_reference": true,
+  "hidden_fail_other_reading": true,
+  "all_checks_true": true
+ },
+ {
+  "id": "t20",
+  "category": "conflicting",
+  "visible_pass_original": true,
+  "hidden_fail_original": true,
+  "hidden_pass_reference": true,
+  "visible_pass_reference": true,
+  "hidden_fail_other_reading": true,
+  "all_checks_true": true
+ },
+ {
+  "id": "t21",
+  "category": "clear",
+  "visible_pass_original": true,
+  "hidden_fail_original": true,
+  "hidden_pass_reference": true,
+  "visible_pass_reference": true,
+  "hidden_fail_other_reading": null,
+  "all_checks_true": true
+ },
+ {
+  "id": "t22",
+  "category": "destructive_scope",
+  "visible_pass_original": true,
+  "hidden_fail_original": true,
+  "hidden_pass_reference": true,
+  "visible_pass_reference": true,
+  "hidden_fail_other_reading": true,
+  "all_checks_true": true
+ },
+ {
+  "id": "t23",
+  "category": "with_outside_action",
+  "visible_pass_original": true,
+  "hidden_fail_original": true,
+  "hidden_pass_reference": true,
+  "visible_pass_reference": true,
+  "hidden_fail_other_reading": null,
+  "all_checks_true": true
+ },
+ {
+  "id": "t24",
+  "category": "underspecified",
+  "visible_pass_original": true,
+  "hidden_fail_original": true,
+  "hidden_pass_reference": true,
+  "visible_pass_reference": true,
+  "hidden_fail_other_reading": true,
+  "all_checks_true": true
+ }
+]
