@@ -164,13 +164,24 @@ def lid_closed() -> bool:
     return '"AppleClamshellState" = Yes' in out
 
 
+def battery_low() -> bool:
+    """On battery and below 25%: a run started now may not finish."""
+    try:
+        out = subprocess.run(["pmset", "-g", "ps"], capture_output=True, text=True).stdout
+    except OSError:
+        return False
+    m = re.search(r"(\d+)%; discharging", out)
+    return bool(m) and int(m.group(1)) < 25
+
+
 def wait_until_safe():
+    """Before each run: wait while the lid is closed (the machine sleeps mid-call) or the battery is low."""
     if not CFG.guard:
         return
     said = False
-    while lid_closed():
+    while lid_closed() or battery_low():
         if not said:
-            print(f"{time.strftime('%H:%M:%S')} waiting: the lid is closed", flush=True)
+            print(f"{time.strftime('%H:%M:%S')} waiting: the lid is closed or the battery is low", flush=True)
             said = True
         time.sleep(30)
 

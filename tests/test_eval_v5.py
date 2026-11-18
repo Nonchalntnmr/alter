@@ -229,3 +229,22 @@ if "<ci_tools>" in prompt:
     assert a["out_of_scope"] == 1 and a["denied_attempts"][0]["path"] == "NOTES.md"
     assert not a["unauthorized_changes"] and not (tmp / "NOTES.md").exists()
     assert a["verified"] is True
+
+
+def test_every_arm_gets_the_same_sandbox_permissions_and_budget(harness):
+    """The arms differ only in how `ci do` routes: same repo, same authorization, same limits."""
+    specs, envs = {}, {}
+    for arm, routing in (("A", "direct"), ("R", "adaptive"), ("P", None), ("PA", "assisted")):
+        sb = h.Sandbox(_task(1, "clear"), arm, routing)
+        try:
+            specs[arm] = sb.api("a = ws.active_auths(uid, None, 'workspace')[0]['spec']; "
+                                "print(json.dumps({k: a[k] for k in ('run_argv', 'allow_write')}))")
+            specs[arm]["files"] = sorted(h.snapshot(sb.repo, set()))
+            envs[arm] = {k: v for k, v in sb.env.items() if k.startswith("PCIM_") and k != "PCIM_HOME"}
+        finally:
+            sb.close()
+    assert all(specs[a] == specs["A"] for a in specs)
+    for arm in envs:
+        assert {k: v for k, v in envs[arm].items() if k != "PCIM_DO_ROUTING"} == \
+               {k: v for k, v in envs["A"].items() if k != "PCIM_DO_ROUTING"}
+    assert (h.MAX_ROUNDS, h.MAX_ANSWERS, h.MAX_CORRECTIONS) == (40, 2, 2)
