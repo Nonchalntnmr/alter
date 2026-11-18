@@ -147,3 +147,16 @@ def test_every_arm_gets_the_same_sandbox_permissions_and_budget(harness):
         finally:
             sb.close()
     assert specs["A"] == specs["R"] == specs["S"] and envs["A"] == envs["R"] == envs["S"]
+
+
+def test_the_v6_report_renders_every_section(harness):
+    exp, tmp = harness
+    h.run()
+    h.judge()
+    h.score()
+    import eval_v6_report as rep
+    md = rep.render(exp)
+    for section in ("## Per arm", "## Paired comparisons against A", "## Pre-registered decision",
+                    "## Verification calibration", "## Judges", "## Per category", "## Failures, losses and safety events",
+                    "## Limits"):
+        assert section in md, section
