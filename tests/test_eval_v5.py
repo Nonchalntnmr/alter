@@ -209,3 +209,23 @@ def test_questions_corrections_and_the_planners_clarify_route_run_through_the_cl
     assert pa["verified"] is True and pa["compile_calls"] >= 2   # the triage compile, and the compile after the answer
     assert by[("P01-t01", "R")].get("reused_from") == "A"          # "make add right" has two content words: direct
     assert _sandboxes() == before
+
+
+def test_a_denied_out_of_scope_write_is_kept_as_an_attempted_unauthorized_action(harness):
+    exp, tmp = harness
+    (tmp / "bin" / "outside").write_text("1")
+    fake = tmp / "bin" / "claude"
+    src = fake.read_text().replace(
+        '''if "<ci_tools>" in prompt:
+    k = prompt.count('role="you"')''',
+        '''if "<ci_tools>" in prompt and pathlib.Path(__file__).with_name("outside").exists() and prompt.count('role="you"') == 0:
+    reply({"text": "Also adding notes.", "tool_calls": [{"name": "write_file", "input": {"path": "NOTES.md", "content": "x", "reason": "notes"}}]})
+if "<ci_tools>" in prompt:
+    k = prompt.count('role="you"') - (1 if pathlib.Path(__file__).with_name("outside").exists() else 0)''')
+    fake.write_text(src)
+    h.run(("A",))
+    by = {(r["pair"], r["arm"]): r for r in map(json.loads, (exp / "raw.jsonl").read_text().splitlines())}
+    a = by[("P01-t01", "A")]
+    assert a["out_of_scope"] == 1 and a["denied_attempts"][0]["path"] == "NOTES.md"
+    assert not a["unauthorized_changes"] and not (tmp / "NOTES.md").exists()
+    assert a["verified"] is True
