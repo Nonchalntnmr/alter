@@ -248,3 +248,17 @@ def test_every_arm_gets_the_same_sandbox_permissions_and_budget(harness):
         assert {k: v for k, v in envs[arm].items() if k != "PCIM_DO_ROUTING"} == \
                {k: v for k, v in envs["A"].items() if k != "PCIM_DO_ROUTING"}
     assert (h.MAX_ROUNDS, h.MAX_ANSWERS, h.MAX_CORRECTIONS) == (40, 2, 2)
+
+
+def test_the_report_renders_every_section_from_the_runs_own_files(harness):
+    exp, tmp = harness
+    (tmp / "bin" / "vague").write_text("1")
+    h.run()
+    h.judge()
+    h.score()
+    import eval_v5_report as rep
+    md = rep.render(exp)
+    for section in ("## Per arm", "## Paired comparisons against A", "## Pre-registered decision", "## Judges",
+                    "Preference disagreements", "## Per category", "## Failures, losses and safety events", "## Limits"):
+        assert section in md, section
+    assert "| PA (planning-assisted router) |" in md and "not shown to be better than direct" in md
