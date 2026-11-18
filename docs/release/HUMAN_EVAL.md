@@ -21,17 +21,26 @@ The model-run evaluations cannot answer these:
 
 ## 2. Design
 
-**Within-participant comparison.** The two conditions are both `ci do`, set by the facilitator's
-script:
-- **D (direct):** `router.ROUTING_DEFAULT = "direct"`.
-- **R (routed):** `"adaptive"`.
+**Within-participant comparison.** Both conditions are `ci do`. The facilitator's script sets
+`PCIM_DO_ROUTING`, and the person types the same command either way:
+- **D, direct:** `PCIM_DO_ROUTING=direct`.
+- **X, ALTER's candidate:** the routing mode eval_v5 recommends. That is `assisted` if
+  planning-assisted routing passes its rule there, and otherwise `adaptive`.
 
-The participant is told only that there are two configurations, A and B. Which is which is
-randomized per participant.
+X is fixed in `experiments/human_eval/SEALED.txt` **before the first session** and is not changed
+after.
 
-**Participants.** n ≥ 12 people who write code weekly, have not used CI, and are not on the
-project. This is a **pilot**: its intervals will be wide. It can find large problems and set the
-size of a confirmatory study. It cannot show that two conditions are equivalent.
+The participant is told only that there are two configurations, A and B. Which is which is drawn
+per participant from the sealed assignment.
+
+**Participants.** 12 people who write code weekly, have not used CI, and are not on the project.
+They are recruited by the owner. **Raters:** 3 people who are neither participants nor the
+implementer, and who did not write the task pool.
+
+**What 12 participants can show** (§8). With 12 × 8 = 96 task attempts, every task is done under
+both conditions by different participants. That gives 48 rateable D-versus-X pairs. It can
+establish a large advantage, and it cannot establish a small one or equivalence. A null result
+means "not shown", and it sets the size of a confirmatory study.
 
 **Tasks.** Each participant does 8 tasks: 4 under each condition, in a Latin-square order.
 - They come from the pool in `experiments/human_eval/tasks.md`: 2 clear, 2 vague, 2 with an
@@ -67,14 +76,19 @@ size of a confirmatory study. It cannot show that two conditions are equivalent.
 **Stopping rule.** An unauthorized change (M4 above 0), or an identifier in the model input (M6),
 stops the session. It is reported before any further session runs.
 
-## 4. Offline rating, of the paired v3 runs
+## 4. Blinded rating by three raters
 
-**What raters see.** Once `experiments/eval_v4/paired` exists, `scripts/human_eval.py packets`
-builds one packet per task. Each packet holds:
-- the request;
-- arms A and R, in random order, labelled 1 and 2: the final message, the files changed and the
-  questions asked;
+**What raters see.** `scripts/human_eval.py packets` builds one packet per task, from the sessions'
+logs. For each task it pairs a D attempt with an X attempt by two different participants. Each
+packet holds:
+- the card's goal;
+- the participant's request, one for each;
+- the two outputs in random order, labelled 1 and 2: the exchange (questions, answers,
+  corrections), the final message, the files changed and the diff;
 - nothing else.
+
+The same tool can also build packets from the model-run evaluations (`experiments/eval_v4`,
+`experiments/eval_v5`). Those are a dry run for the raters, and are not part of the decision.
 
 The key that maps 1 and 2 back to arms is written to a separate file, which raters never receive.
 
@@ -99,11 +113,24 @@ they answer four questions:
   is found.
 - **The rest.** M7–M10: medians and per-participant paired differences.
 
-**Decision rule, stated now.** Routing is worth making the default for people only if both hold:
-1. M1 is not worse under R. The lower end of the interval for R − D is above −0.15.
-2. Under R, needless plus missing questions are fewer than under D.
+**Blinded preference (primary for "better").** For each D–X pair, the raters' majority
+preference is taken. The test is an exact sign test, X-preferred against D-preferred, ties
+excluded.
 
-Otherwise direct stays the default. A null result is reported as a null result, not as
+**Decision rule, stated now.** ALTER (X) is **demonstrably better than direct execution for
+people** only if all of these hold:
+1. **Safety:** 0 unauthorized changes and 0 identifiers in the model input (M4, M6).
+2. **Success is not worse:** the lower bound of the 95% interval for X − D in M1 is above −0.10.
+3. **Better:** X is preferred over D by the raters' majority, with an exact sign-test p < 0.05.
+   With 48 pairs and no ties, that means at least 32 of 48.
+4. **The person's cost is bounded:** median M8 person-time under X ≤ 1.25 × D.
+
+**Supporting evidence for condition 3,** which must not contradict it:
+- fewer needless plus missing questions under X (M3);
+- higher M10 trust.
+
+If any of conditions 1–4 fails, the result is "not shown to be better than direct". Direct stays
+the default, and no performance claim is made. A null result is reported as a null result, not as
 equivalence.
 
 ## 6. Consent and data
@@ -118,6 +145,25 @@ equivalence.
 - **Storage.** Raw logs stay on the facilitator's machine. Only the coded results go into the
   repository, under `experiments/human_eval/`. The identity scan runs on them before they are
   committed.
+
+## 8. Power, stated before the sessions
+
+**Preference.** 48 pairs. Exact two-sided sign test, α = 0.05; X needs at least 32 of 48 (67%).
+
+| true rate of preferring X | power |
+|---|---|
+| 0.75 | about 0.85 |
+| 0.70 | about 0.65 |
+| 0.60 | under 0.25 |
+
+So this pilot can find a large advantage only.
+
+**If the pilot is not significant but leans toward X:** a confirmatory study sized for p = 0.6
+needs about 260 pairs at 80% power. That is about 65 participants at 8 tasks each.
+
+**Success (M1).** With 48 attempts per condition, a 95% interval for a difference in proportions is
+about ±0.15 near 85% success. Non-inferiority at −0.10 is therefore reachable only if the two are
+truly close and high.
 
 ## 7. Files
 
