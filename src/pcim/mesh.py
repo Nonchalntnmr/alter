@@ -200,10 +200,10 @@ def bench_embed(sentences: int = 64, reps: int = 3) -> dict | None:
         if cached:  # a cached model needs no network; without this the loader checks the Hub for updates
             os.environ.setdefault("HF_HUB_OFFLINE", "1")
         emb = SentenceEmbedder(DEFAULT_SEMANTIC_MODEL)
+        texts = [f"note {i}: the person prefers concise answers about topic {i % 7}" for i in range(sentences)]
+        emb.embed(texts[:4])  # warm-up; the model loads lazily, so this is where a missing extra shows
     except Exception:  # noqa: BLE001 - not installed / not cached: nothing to measure
         return None
-    texts = [f"note {i}: the person prefers concise answers about topic {i % 7}" for i in range(sentences)]
-    emb.embed(texts[:4])  # warm-up and lazy load
     rates = [sentences / t for t in _timed(lambda: emb.embed(texts), reps)]
     return _summary(rates, "sentences/s", reps, f"{DEFAULT_SEMANTIC_MODEL}, batch of {sentences}")
 

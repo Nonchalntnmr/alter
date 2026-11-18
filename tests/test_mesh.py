@@ -2,6 +2,7 @@
 
 import json
 import os
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -112,3 +113,12 @@ def test_the_local_provider_is_on_device_and_the_host_is_not_a_service(env, tmp_
     assert local and all(r.location == "on-device" and r.ceiling is Sensitivity.SENSITIVE for r in local)
     assert res["device"].workloads == ()
     assert "device" not in [mesh.place(list(res.values()), "embed").chosen] + mesh.place(list(res.values()), "embed").fallbacks
+
+
+def test_bench_without_the_semantic_extra_skips_the_embed_measurement(tmp_path, monkeypatch):
+    # CI installs no `semantic` extra. The embedder loads lazily, so the warm-up is where it fails,
+    # and that failure must mean "nothing to measure", not a crash of the whole bench.
+    monkeypatch.setitem(sys.modules, "sentence_transformers", None)  # import now raises ImportError
+    assert mesh.bench_embed() is None
+    out = mesh.bench(tmp_path, [], live=False)
+    assert "local-embed" not in out["results"] and out["results"]["device"]["reps"] == 5
