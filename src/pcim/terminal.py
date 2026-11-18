@@ -27,6 +27,7 @@
     ci do "fix the flaky date test"                           work in this project folder: CI routes it
                                                               (direct, clarify or plan) and says why
     ci do answer <id> "…" · ci do list [--json]               answer its question, or continue the session
+    ci do forget <id> | --all                                 remove routed requests and their conversations
     ci approve <task> · ci deny <task> ["why"]                resolve an action the agent is waiting on
     ci halt · ci resume                                       Stop-all: cancel every pending or running action
     ci learn "…"                                              same as ci -l
@@ -815,6 +816,15 @@ def cmd_approve(argv: list[str], approve: bool = True) -> int:
         print(f"{'Approved' if approve else 'Denied'}. Session {d['status']}.")
         if not pid:  # a plan's turn is reported by `ci execute`; a `ci do` session is reported here
             _print_turn(out)
+            if d["status"] == "done" and d.get("session_id"):
+                task = _workspace_agent(ci).queue.get(uid, argv[0])
+                v = _session_verification(ci, uid, task.project_id, d["session_id"])
+                version, log = _do_log(ci, uid)
+                rec = next((r for r in log if r.get("session_id") == d["session_id"]), None)
+                if rec is not None:
+                    rec["verification"], rec["status"] = v, "done"
+                    _do_save(ci, uid, rec)
+                _print_verification(v)
         elif d.get("text"):
             print(terminal_safe(d["text"][:300]))
     else:
@@ -865,6 +875,42 @@ def _print_turn(turn) -> None:
         print("  approve with: ci approve <task>   ·   refuse with: ci deny <task> \"why\"")
 
 
+def _session_verification(ci, uid: str, project_id: str, sid: str) -> dict:
+    """What the session's own task records show, read-only (plan_exec's evidence rule):
+    - verified: the project's tests passed after the last change;
+    - not_verified: files changed, with no passing test run after the last change;
+    - unchanged: no file was changed.
+    It never changes an outcome. It says what the record supports, apart from what the agent says."""
+    from .governor import Governor
+    from .tasks import TaskQueue
+    ws = Workspace(ci)
+    ts = sorted((t.public() for t in TaskQueue(ws, Governor(ws)).list(uid, project_id, limit=1000) if t.session_id == sid),
+                key=lambda t: t["created_at"])
+    writes = [i for i, t in enumerate(ts) if t["tool"] == "write_file" and t["status"] == "succeeded"]
+    # a test run that ran is "succeeded" as a tool call; a failing suite carries a reason ("tests exited 1")
+    runs = [(i, not t.get("reason")) for i, t in enumerate(ts) if t["tool"] == "run_tests" and t["status"] == "succeeded"]
+    refused = [{"tool": t["tool"], "path": (t.get("args") or {}).get("path"), "status": t["status"]}
+               for t in ts if t["status"] in ("denied", "cancelled", "expired")]
+    after = [passed for i, passed in runs if writes and i > writes[-1]]  # only what ran after the last change counts
+    if not writes:
+        verdict, line = "unchanged", "no file was changed"
+    elif after and after[-1]:
+        verdict, line = "verified", "verified: the project's tests passed after the last change"
+    elif after:
+        verdict, line = "not_verified", "not verified: the last test run after the change did not pass"
+    else:
+        verdict, line = "not_verified", ("not verified: the tests were not run after the last change "
+                                         "(ask CI to run them, or run them yourself)")
+    return {"verdict": verdict, "line": line, "refused": refused, "writes": len(writes), "test_runs": len(runs)}
+
+
+def _print_verification(v: dict) -> None:
+    print(f"─ {v['line']}")
+    if v["refused"]:
+        print(f"  refused or cancelled: {len(v['refused'])} action(s): "
+              + terminal_safe("; ".join(f"{x['tool']} {x['path'] or ''}".strip() for x in v["refused"])))
+
+
 def _do_act(ci, uid: str, here, rec: dict, r, text: str, model: str | None, plan: dict | None = None) -> int:
     """Carry out a route: ask, plan, or hand the request to the governed agent. With `plan`
     (planning-assisted routing), the plan already compiled is shown rather than compiled again."""
@@ -899,9 +945,13 @@ def _do_act(ci, uid: str, here, rec: dict, r, text: str, model: str | None, plan
         print(terminal_safe(f"Not run: {e}"), file=sys.stderr)
         return 2
     rec["status"], rec["session_id"] = turn.status, turn.session_id
+    if turn.status == "done":
+        rec["verification"] = _session_verification(ci, uid, here.project_id, turn.session_id)
     _do_save(ci, uid, rec)
     _print_turn(turn)
     print()
+    if rec.get("verification") and turn.status == "done":
+        _print_verification(rec["verification"])
     print(f"─ direct: {terminal_safe('; '.join(r.reasons))}")
     if r.yours:
         print("  yours to do (CI cannot act outside the computer): " + terminal_safe("; ".join(r.yours)))
@@ -909,16 +959,59 @@ def _do_act(ci, uid: str, here, rec: dict, r, text: str, model: str | None, plan
     return 0 if turn.status == "done" else 6 if turn.status == "awaiting_approval" else 4
 
 
+def _do_forget(ci, uid: str, args: list[str]) -> int:
+    """Remove routed requests: their text, answers, route and verification, and the agent
+    conversation each one started. The record of each action approved, refused or run stays (it
+    is the audit of what happened to your files), and so does any plan a request led to."""
+    from .intent_compiler import resolve_id
+    if not args:
+        print('usage: ci do forget <id> | ci do forget --all', file=sys.stderr)
+        return 2
+    version, log = _do_log(ci, uid)
+    if args[0] == "--all":
+        gone = list(log)
+    else:
+        try:
+            rid = resolve_id([r["id"] for r in log], args[0], "request")
+        except KeyError:
+            print(f"no request {args[0]}", file=sys.stderr)
+            return 2
+        except ValueError as e:
+            print(str(e), file=sys.stderr)
+            return 2
+        gone = [r for r in log if r["id"] == rid]
+    keep = [r for r in log if r not in gone]
+    if version is not None:
+        if keep:
+            ci.store.overwrite_policy_state(uid, DO_STATE, version, json.dumps(keep).encode())
+        else:
+            ci.store.delete_policy_states(uid, DO_STATE)
+    sessions = 0
+    for r in gone:
+        if r.get("session_id"):
+            sessions += ci.store.execute("DELETE FROM sessions WHERE id=? AND user_id=?",
+                                         (r["session_id"], uid)).rowcount
+    ci.store.flush_deleted()  # secure_delete is on; the WAL is truncated so nothing lingers there
+    ci.audit.append(uid, "do.forget", requests=len(gone), sessions=sessions)
+    print(f"Forgot {len(gone)} request(s) and {sessions} agent conversation(s): the text, answers, route and "
+          "verification are gone.")
+    print("Kept: the record of each action you approved, refused or ran (ci audit), and any plan a request led "
+          "to (ci plan list).")
+    return 0
+
+
 def cmd_do(argv: list[str]) -> int:
     from .router import ASSISTED, DIRECT, PLAN, ROUTING_DEFAULT, Route, route, route_from_plan
     from .types import new_id, utcnow
     if not argv or argv[0] in ("-h", "--help"):
         print('usage: ci do "<request>" [--route direct|plan|assisted] [--model provider:model] [--explain]\n'
-              '       ci do answer <id> "<answer>"\n       ci do list [--json]', file=sys.stderr)
+              '       ci do answer <id> "<answer>"\n       ci do list [--json]\n       ci do forget <id> | --all', file=sys.stderr)
         return 2
     if argv[0].lower() in _QUESTION_SUBJECTS and len(argv) > 1:  # "ci do you think …" is a question
         return cmd_ask(["do", *argv])
     ci, uid = _open()
+    if argv[0] == "forget":
+        return _do_forget(ci, uid, argv[1:])
     if argv[0] == "list":
         log = _do_log(ci, uid)[1]
         if "--json" in argv:
@@ -940,10 +1033,16 @@ def cmd_do(argv: list[str]) -> int:
             print('usage: ci do answer <id> "<answer>"', file=sys.stderr)
             return 2
         log = _do_log(ci, uid)[1]
-        rec = next((r for r in log if r["id"] == argv[1] or r["id"].endswith(argv[1])), None)
-        if rec is None:
+        from .intent_compiler import resolve_id
+        try:
+            rid = resolve_id([r["id"] for r in log], argv[1], "request")
+        except KeyError:
             print(f"no request {argv[1]}", file=sys.stderr)
             return 2
+        except ValueError as e:  # ambiguous: never answer whichever request came first
+            print(str(e), file=sys.stderr)
+            return 2
+        rec = next(r for r in log if r["id"] == rid)
         if rec["project_id"] != here.project_id:
             print("that request belongs to another project folder", file=sys.stderr)
             return 2

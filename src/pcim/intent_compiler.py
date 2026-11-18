@@ -646,11 +646,33 @@ def records(ci, uid: str) -> list[dict]:
     return _log(ci, uid)[1]
 
 
+MIN_ID_SUFFIX = 4
+
+
+def resolve_id(ids: list[str], ref: str, what: str = "plan") -> str:
+    """An exact id, or a suffix of at least MIN_ID_SUFFIX characters that matches exactly one.
+
+    It never returns "the first of several". `ci plan approve <id>` is consent: approving whichever
+    old plan happened to end in the same characters is not what the person said."""
+    ref = (ref or "").strip()
+    if ref in ids:
+        return ref
+    hits = [i for i in ids if i.endswith(ref)] if ref else []
+    if not hits:
+        raise KeyError(ref)
+    if len(ref) < MIN_ID_SUFFIX:
+        raise ValueError(f"{ref!r} is too short to pick a {what} safely: use the full id, or at least "
+                         f"{MIN_ID_SUFFIX} of its last characters")
+    if len(hits) > 1:
+        raise ValueError(f"{ref!r} matches {len(hits)} {what}s ({', '.join(hits[:4])}"
+                         + (", …" if len(hits) > 4 else "") + "): use more of the id")
+    return hits[0]
+
+
 def get(ci, uid: str, plan_id: str) -> dict:
-    for r in records(ci, uid):
-        if r["id"] == plan_id or r["id"].endswith(plan_id):
-            return r
-    raise KeyError(plan_id)
+    recs = records(ci, uid)
+    rid = resolve_id([r["id"] for r in recs], plan_id, "plan")
+    return next(r for r in recs if r["id"] == rid)
 
 
 def _save(ci, uid: str, rec: dict) -> None:
