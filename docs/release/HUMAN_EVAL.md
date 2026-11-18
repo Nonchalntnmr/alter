@@ -37,7 +37,7 @@ per participant from the sealed assignment.
 They are recruited by the owner. **Raters:** 3 people who are neither participants nor the
 implementer, and who did not write the task pool.
 
-**What 12 participants can show** (§8). With 12 × 8 = 96 task attempts, every task is done under
+**What 12 participants can show** (§7). With 12 × 8 = 96 task attempts, every task is done under
 both conditions by different participants. That gives 48 rateable D-versus-X pairs. It can
 establish a large advantage, and it cannot establish a small one or equivalence. A null result
 means "not shown", and it sets the size of a confirmatory study.
@@ -146,26 +146,29 @@ equivalence.
   repository, under `experiments/human_eval/`. The identity scan runs on them before they are
   committed.
 
-## 8. Power, stated before the sessions
+## 7. Power, computed before the sessions (exact binomial)
 
-**Preference.** 48 pairs. Exact two-sided sign test, α = 0.05; X needs at least 32 of 48 (67%).
+**Preference.** 48 pairs. Exact two-sided sign test, α = 0.05: X needs at least 32 of 48 (p = 0.029;
+31 of 48 gives p = 0.060).
 
 | true rate of preferring X | power |
 |---|---|
-| 0.75 | about 0.85 |
-| 0.70 | about 0.65 |
-| 0.60 | under 0.25 |
+| 0.75 | 0.93 |
+| 0.70 | 0.75 |
+| 0.65 | 0.47 |
+| 0.60 | 0.21 |
 
-So this pilot can find a large advantage only.
+So this pilot can establish a large advantage only.
 
-**If the pilot is not significant but leans toward X:** a confirmatory study sized for p = 0.6
-needs about 260 pairs at 80% power. That is about 65 participants at 8 tasks each.
+**If the pilot is not significant but leans toward X:** a confirmatory study sized for a true rate
+of 0.60 needs 204 pairs for 80% power (critical count 117). That is about 51 participants at 8
+tasks each.
 
-**Success (M1).** With 48 attempts per condition, a 95% interval for a difference in proportions is
-about ±0.15 near 85% success. Non-inferiority at −0.10 is therefore reachable only if the two are
-truly close and high.
+**Success (M1).** With 48 attempts per condition near 85% success, the 95% interval for an
+unpaired difference is about ±0.14. Non-inferiority at −0.10 is therefore reachable only if the
+two conditions are truly close and high.
 
-## 7. Files
+## 8. Files
 
 | file | what |
 |---|---|
