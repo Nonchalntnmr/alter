@@ -815,6 +815,15 @@ def cmd_approve(argv: list[str], approve: bool = True) -> int:
         print(f"{'Approved' if approve else 'Denied'}. Session {d['status']}.")
         if not pid:  # a plan's turn is reported by `ci execute`; a `ci do` session is reported here
             _print_turn(out)
+            if d["status"] == "done" and d.get("session_id"):
+                task = _workspace_agent(ci).queue.get(uid, argv[0])
+                v = _session_verification(ci, uid, task.project_id, d["session_id"])
+                version, log = _do_log(ci, uid)
+                rec = next((r for r in log if r.get("session_id") == d["session_id"]), None)
+                if rec is not None:
+                    rec["verification"], rec["status"] = v, "done"
+                    _do_save(ci, uid, rec)
+                _print_verification(v)
         elif d.get("text"):
             print(terminal_safe(d["text"][:300]))
     else:
@@ -865,6 +874,42 @@ def _print_turn(turn) -> None:
         print("  approve with: ci approve <task>   ·   refuse with: ci deny <task> \"why\"")
 
 
+def _session_verification(ci, uid: str, project_id: str, sid: str) -> dict:
+    """What the session's own task records show, read-only (plan_exec's evidence rule):
+    - verified: the project's tests passed after the last change;
+    - not_verified: files changed, with no passing test run after the last change;
+    - unchanged: no file was changed.
+    It never changes an outcome. It says what the record supports, apart from what the agent says."""
+    from . import plan_exec as px
+    from .governor import Governor
+    from .tasks import TaskQueue
+    ws = Workspace(ci)
+    ts = sorted((t.public() for t in TaskQueue(ws, Governor(ws)).list(uid, project_id, limit=1000) if t.session_id == sid),
+                key=lambda t: t["created_at"])
+    a = px._analyze_tasks(ts, require_tests_after_write=True)
+    writes = [i for i, t in enumerate(ts) if t["tool"] == "write_file" and t["status"] == "succeeded"]
+    runs = [i for i, t in enumerate(ts) if t["tool"] == "run_tests" and t["status"] == "succeeded"]
+    refused = [{"tool": t["tool"], "path": (t.get("args") or {}).get("path"), "status": t["status"]}
+               for t in ts if t["status"] in ("denied", "cancelled", "expired")]
+    if not writes:
+        verdict, line = "unchanged", "no file was changed"
+    elif a["tests_after_write"] and not [p for p in a["problems"] if not p.startswith(("write_file denied", "run_tests denied"))]:
+        verdict, line = "verified", "verified: the project's tests passed after the last change"
+    elif runs and runs[-1] > writes[-1]:
+        verdict, line = "not_verified", "not verified: the last test run after the change did not pass"
+    else:
+        verdict, line = "not_verified", ("not verified: the tests were not run after the last change "
+                                         "(ask CI to run them, or run them yourself)")
+    return {"verdict": verdict, "line": line, "refused": refused, "writes": len(writes), "test_runs": len(runs)}
+
+
+def _print_verification(v: dict) -> None:
+    print(f"─ {v['line']}")
+    if v["refused"]:
+        print(f"  refused or cancelled: {len(v['refused'])} action(s): "
+              + terminal_safe("; ".join(f"{x['tool']} {x['path'] or ''}".strip() for x in v["refused"])))
+
+
 def _do_act(ci, uid: str, here, rec: dict, r, text: str, model: str | None, plan: dict | None = None) -> int:
     """Carry out a route: ask, plan, or hand the request to the governed agent. With `plan`
     (planning-assisted routing), the plan already compiled is shown rather than compiled again."""
@@ -899,9 +944,13 @@ def _do_act(ci, uid: str, here, rec: dict, r, text: str, model: str | None, plan
         print(terminal_safe(f"Not run: {e}"), file=sys.stderr)
         return 2
     rec["status"], rec["session_id"] = turn.status, turn.session_id
+    if turn.status == "done":
+        rec["verification"] = _session_verification(ci, uid, here.project_id, turn.session_id)
     _do_save(ci, uid, rec)
     _print_turn(turn)
     print()
+    if rec.get("verification") and turn.status == "done":
+        _print_verification(rec["verification"])
     print(f"─ direct: {terminal_safe('; '.join(r.reasons))}")
     if r.yours:
         print("  yours to do (CI cannot act outside the computer): " + terminal_safe("; ".join(r.yours)))
