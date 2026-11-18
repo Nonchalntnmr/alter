@@ -353,3 +353,14 @@ def test_ci_do_assisted_goes_direct_when_the_triage_compile_fails(term, capsys, 
                                                                 "gate": None, "error": "the model did not return a JSON plan"})
     assert terminal.main(["do", "--route", "assisted", "--model", "mock", "fix add()"]) == 0
     assert "triage failed" in capsys.readouterr().out and mock.calls == 1
+
+
+def test_session_directives_apply_only_to_a_session_they_create(term):
+    terminal, ci, ws, agent, p, repo = term
+    agent.set_adapter("mock", None, Scripted([{"text": "One."}, {"text": "Two."}]))
+    t1 = agent.send("u", p.id, "first", "mock", None, new_session=True, directives="EXTRA RULE")
+    st = agent._load("u", p.id, t1.session_id)
+    assert st["system"].endswith("EXTRA RULE")
+    t2 = agent.send("u", p.id, "second", "mock", None, directives="ANOTHER RULE")  # continues the session
+    assert t2.session_id == t1.session_id
+    assert "ANOTHER RULE" not in agent._load("u", p.id, t1.session_id)["system"]

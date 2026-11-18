@@ -131,3 +131,51 @@ def test_a_same_size_fix_written_within_a_second_is_tested_as_the_new_code(tmp_p
         q.approve("u", t.id)
         t = q.get("u", t.id)
         assert (not t.reason) is expect_pass, (content, t.reason)
+
+
+class Recording(Scripted):
+    def __init__(self, script):
+        super().__init__(script)
+        self.systems = []
+
+    def agent_step(self, system, messages, tools, max_tokens=None):
+        self.systems.append(system)
+        return super().agent_step(system, messages, tools, max_tokens=max_tokens)
+
+
+def test_selective_mode_adds_its_directives_and_direct_does_not(term, capsys, monkeypatch):
+    terminal, ci, ws, agent, p, repo = term
+    from pcim import router
+    for route, expect in (("selective", True), ("direct", False)):
+        mock = Recording([{"text": "Which helper do you mean?"}])
+        agent.set_adapter("mock", None, mock)
+        terminal.main(["do", "--route", route, "--model", "mock", "tidy the helper in calc.py"])
+        capsys.readouterr()
+        assert (router.SELECTIVE_DIRECTIVES in mock.systems[0]) is expect, route
+        assert mock.calls == 1  # no planner or triage call: the agent itself decides whether to ask
+    rec = terminal._do_log(ci, "u")[1][-2]
+    assert rec["route_mode"] == "selective"
+
+
+def test_pcim_do_routing_selective_selects_the_mode(term, capsys, monkeypatch):
+    terminal, ci, ws, agent, p, repo = term
+    from pcim import router
+    monkeypatch.setenv("PCIM_DO_ROUTING", "selective")
+    mock = Recording([{"text": "Done."}])
+    agent.set_adapter("mock", None, mock)
+    terminal.main(["do", "--model", "mock", "fix add() in calc.py"])
+    assert router.SELECTIVE_DIRECTIVES in mock.systems[0]
+
+
+def test_a_done_claim_without_test_evidence_is_flagged_and_a_verified_one_is_not(term, capsys):
+    terminal, ci, ws, agent, p, repo = term
+    agent.set_adapter("mock", None, Scripted([{"text": "Fixing.", "tool_uses": [WRITE]},
+                                              {"text": "Fixed add(); it works now."}]))
+    rc, out = _drive(terminal, capsys, ["do", "--model", "mock", "fix add() in calc.py"])
+    assert "the reply says the work is done" in out
+    assert terminal._do_log(ci, "u")[1][-1]["verification"]["claim_unverified"] is True
+    agent.set_adapter("mock", None, Scripted([{"text": "Fixing.", "tool_uses": [{**WRITE, "id": "t5"}]},
+                                              {"text": "Testing.", "tool_uses": [{**TEST, "id": "t6"}]},
+                                              {"text": "Fixed; the tests pass."}]))
+    rc, out = _drive(terminal, capsys, ["do", "--model", "mock", "fix add() again"])
+    assert "verified: the project's tests passed" in out and "the reply says the work is done" not in out

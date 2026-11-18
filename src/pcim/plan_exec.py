@@ -120,6 +120,9 @@ def _contract_message(rec: dict) -> str:
     parts.append("Complete the CI outcomes in this session. Use tools to read the code, make the needed changes, "
                  "and run tests to verify. End by summarizing what you verified with tool evidence and what remains "
                  "for the person.")
+    parts.append("Do only what the person asked. Unless they asked for it: do not create backup or copy files, do "
+                 "not run deletions or resets on existing data, and do not add work or prerequisites outside the "
+                 "request. If something you would need is missing, say so instead of working around it.")
     return "\n\n".join(parts)
 
 

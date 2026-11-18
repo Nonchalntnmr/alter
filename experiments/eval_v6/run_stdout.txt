@@ -1,0 +1,96 @@
+request P01-t10: needs_question=True (170 chars)
+request P01-t23: needs_question=False (223 chars)
+request P02-t03: needs_question=True (75 chars)
+request P02-t21: needs_question=True (63 chars)
+request P03-t05: needs_question=True (220 chars)
+request P03-t18: needs_question=False (306 chars)
+request P04-t12: needs_question=True (586 chars)
+request P04-t22: needs_question=False (624 chars)
+request P05-t09: needs_question=True (372 chars)
+request P05-t20: needs_question=False (303 chars)
+request P06-t08: needs_question=True (337 chars)
+request P06-t17: needs_question=False (336 chars)
+request P07-t07: needs_question=True (138 chars)
+request P07-t14: needs_question=False (288 chars)
+request P08-t01: needs_question=True (335 chars)
+request P08-t13: needs_question=False (333 chars)
+request P09-t02: needs_question=True (290 chars)
+request P09-t16: needs_question=True (205 chars)
+request P10-t06: needs_question=True (392 chars)
+request P10-t15: needs_question=False (372 chars)
+request P11-t04: needs_question=True (279 chars)
+request P11-t19: needs_question=False (165 chars)
+request P12-t11: needs_question=True (276 chars)
+request P12-t24: needs_question=False (449 chars)
+P01-t10 S route=direct verified=True asked=True need=True corr=0 $0.098 30.6s
+P01-t10 A route=direct verified=True asked=True need=True corr=0 $0.207 63.1s
+P01-t10 R route=direct verified=None asked=None need=True corr=None $0.000 0s
+P01-t23 S route=direct verified=True asked=False need=False corr=0 $0.096 30.0s
+P01-t23 R route=direct verified=None asked=None need=False corr=None $0.000 0s
+P01-t23 A route=direct verified=True asked=False need=False corr=0 $0.091 31.0s
+P02-t03 A route=direct verified=True asked=False need=True corr=1 $0.256 60.8s
+P02-t03 R route=direct verified=None asked=None need=True corr=None $0.000 0s
+P02-t03 S route=direct verified=True asked=False need=True corr=1 $0.198 47.3s
+P02-t21 S route=direct verified=True asked=False need=True corr=2 $0.292 64.7s
+P02-t21 A route=direct verified=True asked=True need=True corr=1 $0.383 77.6s
+P02-t21 R route=direct verified=None asked=None need=True corr=None $0.000 0s
+P03-t05 S route=direct verified=True asked=False need=True corr=1 $0.242 64.9s
+P03-t05 A route=direct verified=True asked=True need=True corr=0 $0.534 126.0s
+P03-t05 R route=plan verified=True asked=False need=True corr=1 $0.478 115.1s
+P03-t18 R route=direct verified=True asked=True need=False corr=0 $0.133 44.8s
+P03-t18 A route=direct verified=True asked=False need=False corr=0 $0.100 28.5s
+P03-t18 S route=direct verified=True asked=False need=False corr=0 $0.122 36.9s
+P04-t12 A route=direct verified=True asked=False need=True corr=1 $0.305 66.1s
+P04-t12 R route=direct verified=None asked=None need=True corr=None $0.000 0s
+P04-t12 S route=direct verified=True asked=False need=True corr=1 $0.274 69.2s
+P04-t22 S route=direct verified=True asked=False need=False corr=0 $0.082 26.7s
+P04-t22 R route=direct verified=None asked=None need=False corr=None $0.000 0s
+P04-t22 A route=direct verified=True asked=False need=False corr=0 $0.096 28.8s
+P05-t09 A route=direct verified=True asked=False need=True corr=1 $0.364 83.0s
+P05-t09 R route=direct verified=None asked=None need=True corr=None $0.000 0s
+P05-t09 S route=direct verified=True asked=False need=True corr=1 $0.244 58.1s
+P05-t20 S route=direct verified=True asked=False need=False corr=0 $0.093 28.1s
+P05-t20 A route=direct verified=True asked=False need=False corr=0 $0.144 45.5s
+P05-t20 R route=plan verified=True asked=False need=False corr=0 $0.155 56.0s
+P06-t08 R route=plan verified=True asked=False need=True corr=0 $0.196 69.5s
+P06-t08 S route=direct verified=True asked=False need=True corr=0 $0.093 27.5s
+P06-t08 A route=direct verified=True asked=False need=True corr=0 $0.140 35.4s
+P06-t17 R route=direct verified=None asked=None need=False corr=None $0.000 0s
+P06-t17 S route=direct verified=True asked=False need=False corr=0 $0.097 24.5s
+P06-t17 A route=direct verified=True asked=False need=False corr=0 $0.108 30.6s
+P07-t07 S route=direct verified=True asked=False need=True corr=1 $0.226 56.4s
+P07-t07 A route=direct verified=True asked=False need=True corr=1 $0.286 64.1s
+P07-t07 R route=direct verified=None asked=None need=True corr=None $0.000 0s
+P07-t14 S route=direct verified=True asked=False need=False corr=0 $0.107 28.5s
+P07-t14 R route=direct verified=None asked=None need=False corr=None $0.000 0s
+P07-t14 A route=direct verified=True asked=False need=False corr=0 $0.098 29.0s
+P08-t01 S route=direct verified=True asked=True need=True corr=0 $0.194 47.8s
+P08-t01 A route=direct verified=True asked=True need=True corr=0 $0.208 62.1s
+P08-t01 R route=plan verified=True asked=False need=True corr=1 $0.531 122.1s
+P08-t13 R route=direct verified=None asked=None need=False corr=None $0.000 0s
+P08-t13 A route=direct verified=True asked=False need=False corr=0 $0.116 34.0s
+P08-t13 S route=direct verified=True asked=False need=False corr=0 $0.102 28.3s
+P09-t02 S route=direct verified=True asked=True need=True corr=0 $0.127 35.1s
+P09-t02 R route=direct verified=None asked=None need=True corr=None $0.000 0s
+P09-t02 A route=direct verified=True asked=True need=True corr=0 $0.225 55.4s
+P09-t16 R route=plan verified=True asked=False need=True corr=0 $0.200 61.8s
+P09-t16 S route=direct verified=True asked=False need=True corr=1 $0.215 64.7s
+P09-t16 A route=direct verified=True asked=True need=True corr=0 $0.250 68.6s
+P10-t06 A route=direct verified=True asked=True need=True corr=0 $0.268 69.5s
+P10-t06 R route=direct verified=None asked=None need=True corr=None $0.000 0s
+P10-t06 S route=direct verified=True asked=True need=True corr=0 $0.271 54.1s
+P10-t15 S route=direct verified=True asked=False need=False corr=0 $0.123 27.6s
+P10-t15 R route=direct verified=None asked=None need=False corr=None $0.000 0s
+P10-t15 A route=direct verified=True asked=False need=False corr=0 $0.112 31.7s
+P11-t04 S route=direct verified=True asked=True need=True corr=0 $0.140 40.3s
+P11-t04 A route=direct verified=True asked=False need=True corr=1 $0.263 72.5s
+P11-t04 R route=direct verified=True asked=True need=True corr=0 $0.182 51.8s
+P11-t19 A route=direct verified=True asked=False need=False corr=0 $0.135 37.1s
+P11-t19 R route=direct verified=None asked=None need=False corr=None $0.000 0s
+P11-t19 S route=direct verified=True asked=False need=False corr=0 $0.095 25.2s
+P12-t11 R route=direct verified=None asked=None need=True corr=None $0.000 0s
+P12-t11 S route=direct verified=True asked=True need=True corr=0 $0.135 32.9s
+P12-t11 A route=direct verified=True asked=True need=True corr=0 $0.194 51.1s
+P12-t24 S route=direct verified=True asked=False need=False corr=0 $0.116 30.0s
+P12-t24 A route=direct verified=True asked=False need=False corr=0 $0.172 45.6s
+P12-t24 R route=direct verified=None asked=None need=False corr=None $0.000 0s
