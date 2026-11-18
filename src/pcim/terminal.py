@@ -989,10 +989,16 @@ def cmd_do(argv: list[str]) -> int:
             print('usage: ci do answer <id> "<answer>"', file=sys.stderr)
             return 2
         log = _do_log(ci, uid)[1]
-        rec = next((r for r in log if r["id"] == argv[1] or r["id"].endswith(argv[1])), None)
-        if rec is None:
+        from .intent_compiler import resolve_id
+        try:
+            rid = resolve_id([r["id"] for r in log], argv[1], "request")
+        except KeyError:
             print(f"no request {argv[1]}", file=sys.stderr)
             return 2
+        except ValueError as e:  # ambiguous: never answer whichever request came first
+            print(str(e), file=sys.stderr)
+            return 2
+        rec = next(r for r in log if r["id"] == rid)
         if rec["project_id"] != here.project_id:
             print("that request belongs to another project folder", file=sys.stderr)
             return 2
