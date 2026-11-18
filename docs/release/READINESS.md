@@ -9,8 +9,9 @@
 - **Not proposed:** making planning the default for every request. Direct execution stays the
   path for clear work.
 
-**Branch.** `release/alter-0.2.0rc2` @ `08f011e`. Nothing is pushed, merged into `main` or
-published.
+**Branch.** `release/alter-0.2.0rc2`, pushed to `origin` after the history rewrite, and open as
+PR #7 against `main`. CI is green on the head: ruff, plus pytest on Ubuntu 3.12, Ubuntu 3.14 and
+macOS 3.14. Nothing is merged into `main` or published to a package index.
 
 **Sources.** Every result below was produced on 2026-11-17 by a command that ran to completion.
 - The evaluation's own numbers are in `experiments/eval_v4/RESULTS.md`.
@@ -20,6 +21,7 @@ published.
 
 | check | result |
 |---|---|
+| full suite, **on the pushed head** (`a9f3600`) | **589 passed, 4 skipped** with `scripts/check.sh`. In a venv like CI's (no `semantic` extra): 588 passed, 5 skipped. GitHub Actions: all 4 checks green. |
 | full suite | **539 passed, 4 skipped**. Skipped: the live probe test (opt-in), and the 3 history-rewrite tests, which pass (3/3) with `FILTER_REPO` set. |
 | `main`'s own tests against this code | **343 passed, 2 failed**, both intended: `plan` is a command, not a settable mode; and `main`'s strict xfail for M10 now passes, because M10 is fixed |
 | `scripts/e2e_terminal.py`, this checkout | **37 / 37**, including `ci do`: direct waits for approval before writing, clarify makes no model call, plan changes nothing |
@@ -127,19 +129,18 @@ planning's 9/16 (V2.1) and 14/16 (V3).
 | failure recovery documented | **met** | `RUNBOOK.md`, including `ci do` waits; `ROLLBACK.md`; `HISTORY_REWRITE.md` |
 | performance against the baseline | **met** | V3.3 is cheaper than V3.2; routed is no worse than direct. |
 | **human evaluation** | **not met: designed, not run** | `HUMAN_EVAL.md` |
-| **history free of identifiers before a push** | **not met: prepared, not applied** | §4.1 |
+| **history free of identifiers before a push** | **met for the pushed branch** | §4.1. The rewrite was applied to the 8 affected branches with the owner's approval, and `scan_identity.py --history` was clean before the push. `main` is not rewritten. |
 
 ## 4. Open items, and why this is CONDITIONAL
 
-1. **Git history: blocks any push.**
-   - Commits `ff74305`, `d6cc52f` and `b77dcc6` carry the home path, the username or identifier
-     fragments. So does `9bc0c23`, from today: its evaluation logs quoted file paths. They were
-     redacted in `cf9e893`, but the old blob stays in history.
-   - `rewrite_history.py dry-run` verifies the redaction for all 8 affected branches.
-   - **Applying it is the owner's decision** (`HISTORY_REWRITE.md` §4). After it, run
-     `scan_identity.py --history` for every branch you push, and commit the commit map.
+1. **Git history: resolved for this branch, not for `main`.**
+   - Four commits carried the home path, the username or identifier fragments. The rewrite
+     (`HISTORY_REWRITE.md` §4) was applied on 2026-11-18, with the owner's approval, to the 8
+     affected branches only. Old→new ids are in `HISTORY_REWRITE_MAP.txt`, and the backups are
+     outside the repository.
+   - Before any other branch is pushed, run `scan_identity.py --history` on it.
    - `main` already holds the home path in 3 files. Removing it there needs a force-push to
-     `main`, which is a separate decision.
+     `main`, which is a separate decision and has not been done.
 2. **No human evaluation: blocks a broad release.** Every labeller, simulated person and judge so
    far is a model.
 3. **Router quality.** It is inert on most ambiguity. The next design, which is untested, is a
@@ -162,10 +163,10 @@ planning's 9/16 (V2.1) and 14/16 (V3).
 
 ## 5. Next action for the owner
 
-1. Review `release/alter-0.2.0rc2` against `main`, starting with this file and
-   `experiments/eval_v4/RESULTS.md`.
-2. Decide on the history rewrite. If yes, run `HISTORY_REWRITE.md` §4 steps 1–5; the dry run
-   takes about 10 s.
-3. Then, for a developer preview, push the branch and open a PR. That step is yours.
+1. Review PR #7 (`release/alter-0.2.0rc2` → `main`), starting with this file and the three
+   `RESULTS.md` files.
+2. Merging it into `main` is your decision. It makes the restricted preview the default branch;
+   it does not publish a package.
+3. Decide separately whether to force-push `main` to remove the 3 inherited home-path files.
 4. Recruit 12 participants and 3 raters for the human evaluation (`HUMAN_EVAL.md`), and have
    someone other than the implementer write and seal its task pool.

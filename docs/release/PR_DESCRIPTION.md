@@ -38,7 +38,7 @@ execution.** The evidence so far does not show that (see Evidence).
 
 | area | what |
 |---|---|
-| `tests/` (19 files, +3,276) | 588 passed, 4 skipped |
+| `tests/` (19 files, +3,276) | 589 passed, 4 skipped |
 | `scripts/` | the evaluation harnesses (v3, v4, v5, v6) and their report generators, `e2e_terminal.py` (37 checks), `scan_identity.py`, `rewrite_history.py`, `audit_egress.py`, `human_eval.py` |
 | `experiments/` | pre-registrations, frozen hashes, raw records, results and the released sets, for the dev, held-out v1, paired v1, V3 (v3), rc2 (v4), eval_v5 and eval_v6 evaluations |
 | `docs/` | `docs/release/` (readiness, release notes, install, config, runbook, rollback, smoke, history rewrite, human evaluation), `SECURITY_WHAT_LEAVES.md`, the reports |
@@ -92,7 +92,7 @@ Full results: `experiments/eval_v6/RESULTS.md`, with a separate post-hoc analysi
 
 ## Test plan, all run on the head
 
-- `scripts/check.sh` (the CI rule set: ruff `E9,F63,F7,F82`, then pytest): 588 passed, 4 skipped. The skips
+- `scripts/check.sh` (the CI rule set: ruff `E9,F63,F7,F82`, then pytest): 589 passed, 4 skipped. The skips
   are the opt-in live probe, plus the 3 rewrite tests when `git-filter-repo` is absent (they pass
   with it).
 - `python scripts/e2e_terminal.py`: 37/37, on the checkout and on the installed wheel.
@@ -100,6 +100,8 @@ Full results: `experiments/eval_v6/RESULTS.md`, with a separate post-hoc analysi
   settable mode; M10's xfail now passes).
 - Upgrade from `main`, and rollback to rc1 and to `main`, on the same data (`SMOKE.md` §5).
 - `scripts/scan_identity.py` (the diff) and `--history`: clean.
+- GitHub Actions on the head: ruff, plus pytest on Ubuntu 3.12, Ubuntu 3.14 and macOS 3.14, all green.
+  CI installs no `semantic` extra. That exposed one crash in `ci mesh bench`, fixed in a9f3600 with a regression test.
 
 ## Reviewer guide
 
