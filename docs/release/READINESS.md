@@ -71,6 +71,35 @@ published.
 **Environment losses.** The machine slept with the lid closed, and 9 records were lost. Each was
 re-run once under a deviation declared beforehand; both analyses agree on every decision.
 
+**eval_v5** (2026-11-18; 12 simulated users, 24 new tasks, four arms through the real CLI, three
+blinded judges; frozen at `c5da87a`; `experiments/eval_v5/RESULTS.md`):
+
+| arm | verified | asked needlessly | judged preference against A |
+|---|---|---|---|
+| direct | 24/24 | 0/21 | — |
+| keyword router | 24/24 | 1/21 | 3–2, 19 ties |
+| V3.3 planning | 21/24 | 6/21 | 12–8 |
+| planning-assisted router | 22/24 | 6/21 | 9–10 |
+
+- **Cost, person-time and median latency:**
+
+  | arm | cost | person-time | median latency |
+  |---|---|---|---|
+  | direct | $3.62 | 840 s | 39 s |
+  | keyword router | $3.77 | 1,050 s | 41 s |
+  | V3.3 planning | $8.91 | 2,865 s | 64 s |
+  | planning-assisted router | $5.65 | 1,840 s | 57 s |
+
+- **No arm is shown to be better than direct** under the registered rule.
+  - Planning-assisted routing fails success non-inferiority, its cost bound and its attention bound.
+  - So it stays opt-in.
+- **Unauthorized actions:**
+  - attempted and denied: 8, all by the planning arms, writing backup files;
+  - successful: 0.
+- **Limits:**
+  - only 3 of 24 requests needed a question, so clarification recall rests on n = 3;
+  - judge κ ranges from 0.31 (rating) to 0.68.
+
 **Earlier evidence still standing:** in paired v1 and v2, direct verified 32/32, against
 planning's 9/16 (V2.1) and 14/16 (V3).
 

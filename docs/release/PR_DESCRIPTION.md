@@ -53,8 +53,14 @@ execution.** The evidence so far does not show that (see Evidence).
 - The keyword router misses most needed questions (4/21). That is why the planning-assisted
   router exists. It is being evaluated in eval_v5.
 
-**eval_v5:** 12 simulated users, 4 arms through the real CLI, 3 blinded judges. The results go here
-when complete, in `experiments/eval_v5/RESULTS.md`.
+**eval_v5** (12 simulated users, 24 new tasks, 4 arms through the real CLI, 3 blinded judges):
+- direct verified 24/24, the keyword router 24/24, V3.3 planning 21/24, planning-assisted routing
+  22/24;
+- **no arm is shown to be better than direct;**
+- the planning arms cost 1.6–2.5× as much and asked needlessly on 6/21 clear requests;
+- 0 successful unauthorized actions, and 8 denied, all from the planning arms.
+
+Full results: `experiments/eval_v5/RESULTS.md`.
 
 **Privacy (`docs/SECURITY_WHAT_LEAVES.md`):**
 - No identifier is in the model input.
