@@ -459,10 +459,11 @@ def _exit_for(g: G.Goal) -> int:
 
 
 def start_goal(ci, uid, here, objective: str, *, background: bool = False, limits: dict | None = None,
-               quiet: bool = False) -> tuple[G.Goal, int]:
+               quiet: bool = False, model: str | None = None) -> tuple[G.Goal, int]:
     r = G.GoalRunner(ci, uid, here, out=(lambda s: None) if quiet else None)
+    provider, _, name = (model or "").partition(":")
     try:
-        g = r.start(objective, **(limits or {}))
+        g = r.start(objective, provider=provider or None, model=name or None, **(limits or {}))
     except G.GoalError as e:
         print(f"alter: {e}", file=sys.stderr)
         raise SystemExit(2) from None
@@ -489,6 +490,7 @@ def cmd_goals(argv: list[str]) -> int:
     ap.add_argument("--turns", type=int)
     ap.add_argument("--budget", type=float, help="cost limit in USD")
     ap.add_argument("--minutes", type=int, help="time window")
+    ap.add_argument("--model", help="pin provider:model for the goal's agent (e.g. claude-cli:sonnet)")
     a = ap.parse_args(argv)
     ci, uid, here = _ctx()
     gs = G.GoalStore(ci)
@@ -504,7 +506,12 @@ def cmd_goals(argv: list[str]) -> int:
     if a.action == "start":
         if not _need_here(here):
             return 2
-        return start_goal(ci, uid, here, " ".join(a.rest), background=a.background, limits=_limits(a))[1]
+        from .registry import VENDOR
+        if a.model and a.model.partition(":")[0] not in VENDOR:
+            print(f"alter: --model takes provider:model, e.g. claude-cli:sonnet (got {a.model!r})", file=sys.stderr)
+            return 2
+        return start_goal(ci, uid, here, " ".join(a.rest), background=a.background, limits=_limits(a),
+                          model=a.model)[1]
     if not a.rest:
         print(f"usage: alter goals {a.action} <goal>" + (' "…"' if a.action == "say" else ""), file=sys.stderr)
         return 2
