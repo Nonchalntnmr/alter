@@ -13,7 +13,7 @@
                                            resolve what a goal waits on (no TASK: everything it waits on)
     alter tasks                            actions waiting for you, and the last actions in this project
     alter memory [forget ID | remember "…"]
-    alter permissions [vault on [--path P] | vault off | github on|off | memory on|off
+    alter permissions [vault on [--path P] | vault off | vault topic "name in the vault" … | github on|off | memory on|off
                        | provider claude-cli|anthropic|openai|… on|off
                        | autonomy grant [--actions N] [--minutes M] | autonomy revoke]
     alter vault search "…" | eval [FILE] | download
@@ -443,6 +443,12 @@ def cmd_permissions(argv: list[str]) -> int:
     from .workspace import Workspace, WorkspaceError
     ci, uid, here = _ctx()
     ws = Workspace(ci)
+    if argv[:2] == ["vault", "topic"]:
+        if not _need_here(here):
+            return 2
+        tp = thirdeye.set_topics(ws, uid, here.project_id, argv[2:])
+        print(f"{here.name} is searched in the vault as: {', '.join([here.name, *tp])}")
+        return 0
     if argv[:1] in (["vault"], ["github"]) and len(argv) >= 2 and argv[1] in ("on", "off"):
         path = argv[argv.index("--path") + 1] if "--path" in argv else None
         try:

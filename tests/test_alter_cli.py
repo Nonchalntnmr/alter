@@ -224,3 +224,16 @@ def test_placeholders_are_requested_from_icloud_before_they_are_skipped(home, mo
     monkeypatch.setattr(V, "materialize", fake_materialize)
     v = V.Vault(str(vault))
     assert asked == ["Demo.md"] and "Demo" in v.notes and v.not_downloaded == []
+
+
+def test_vault_topics_find_a_project_the_vault_knows_by_another_name(home, capsys):
+    tmp, repo, vault = home
+    alter.main(["init", "--name", "Abacus", "--tests", check_cmd()])
+    alter.main(["permissions", "vault", "on", "--path", str(vault)])
+    capsys.readouterr()
+    alter.main(["context", "release"])  # no note mentions "Abacus" or "release"
+    assert "[Calc" not in capsys.readouterr().out
+    assert alter.main(["permissions", "vault", "topic", "Calc"]) == 0
+    capsys.readouterr()
+    alter.main(["context", "release"])
+    assert "[Calc" in capsys.readouterr().out

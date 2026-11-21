@@ -99,7 +99,21 @@ class Brief:
 def settings(ws, uid: str) -> dict:
     s = ws._settings(uid).get(SETTINGS_KEY) or {}
     path = s.get("vault_path") or default_vault()
-    return {"vault": bool(s.get("vault")), "vault_path": str(path) if path else "", "github": bool(s.get("github"))}
+    return {"vault": bool(s.get("vault")), "vault_path": str(path) if path else "", "github": bool(s.get("github")),
+            "topics": dict(s.get("topics") or {})}
+
+
+def set_topics(ws, uid: str, project_id: str, topics: list[str]) -> list[str]:
+    """What a project is called in the vault, when that differs from its name in ALTER."""
+    allu = ws._settings(uid)
+    cur = dict(allu.get(SETTINGS_KEY) or {})
+    tp = dict(cur.get("topics") or {})
+    tp[project_id] = [" ".join(t.split())[:80] for t in topics if t.strip()][:5]
+    cur["topics"] = tp
+    allu[SETTINGS_KEY] = cur
+    ws.store.update_settings(uid, allu)
+    ws.audit.append(uid, "alter.vault_topics", project=project_id, n=len(tp[project_id]))
+    return tp[project_id]
 
 
 def set_source(ws, uid: str, source: str, on: bool, vault_path: str | None = None) -> dict:
@@ -231,7 +245,7 @@ def gather(ci, uid: str, here, query: str, *, use_github: bool | None = None, us
     else:
         withheld.append("github: off (alter permissions github on)")
     if s["vault"] if use_vault is None else use_vault:
-        e, w = _vault(s["vault_path"], f"{here.name} {query}")
+        e, w = _vault(s["vault_path"], " ".join([here.name, *s["topics"].get(here.project_id, []), query]))
         evidence += e
         withheld += w
     else:
