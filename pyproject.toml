@@ -48,3 +48,4 @@ pcim = ["dashboard/*", "data/routing_model.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["slow: builds and installs the package in a new venv; needs PyPI (-m 'not slow' leaves it out)"]
