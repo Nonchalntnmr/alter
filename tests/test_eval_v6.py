@@ -95,6 +95,18 @@ def harness(tmp_path, monkeypatch):
     return exp, tmp_path
 
 
+@pytest.fixture(autouse=True)
+def _private_tmp(tmp_path, monkeypatch):
+    """Sandboxes go in this test's own temp folder, in-process and for every child process. The
+    leak check below lists that folder; listing the machine-wide temp folder failed whenever
+    another test run created or removed its own sandboxes meanwhile (reproduced by two staggered
+    runs sharing TMPDIR)."""
+    d = tmp_path / "tmp"
+    d.mkdir()
+    monkeypatch.setenv("TMPDIR", str(d))
+    monkeypatch.setattr(h.tempfile, "tempdir", str(d))
+
+
 def _sandboxes() -> set:
     return set(Path(h.tempfile.gettempdir()).glob("ci-v5-t0*"))
 
