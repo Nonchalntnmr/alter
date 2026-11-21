@@ -190,18 +190,28 @@ def _github(root: Path) -> tuple[list[Evidence], list[str]]:
     try:
         env = {**git_env(root), **{k: v for k, v in os.environ.items() if k in ("GH_TOKEN", "GITHUB_TOKEN", "GH_HOST")}}
         r = subprocess.run([gh, "pr", "list", "--state", "all", "--limit", "8", "--json",
-                            "number,title,state,mergedAt,updatedAt,headRefName"],
+                            "number,title,state,mergedAt,updatedAt,headRefName,author"],
                            cwd=root, capture_output=True, text=True, timeout=20, env=env)
+        o = subprocess.run([gh, "repo", "view", "--json", "owner"], cwd=root, capture_output=True, text=True,
+                           timeout=20, env=env)
     except (OSError, subprocess.SubprocessError) as e:
         return [], [f"github: not read ({type(e).__name__})"]
-    if r.returncode != 0:
-        return [], [f"github: not read ({(r.stderr or 'gh failed').strip().splitlines()[-1][:120]})"]
-    ev = []
+    if r.returncode != 0 or o.returncode != 0:
+        err = (r.stderr if r.returncode else o.stderr) or "gh failed"
+        return [], [f"github: not read ({err.strip().splitlines()[-1][:120]})"]
+    owner = ((json.loads(o.stdout or "{}").get("owner") or {}).get("login") or "").lower()
+    ev, others = [], 0
     for pr in json.loads(r.stdout or "[]"):
+        author = ((pr.get("author") or {}).get("login") or "").lower()
+        if not owner or author != owner:  # on a public repository anyone can open a PR and write its title (E10)
+            others += 1
+            continue
         when = (pr.get("mergedAt") or pr.get("updatedAt") or "")[:10] or None
         ev.append(Evidence("sourced", "github", f"pr#{pr['number']}",
-                           f"{pr['state'].lower()}: {pr['title'][:160]} (branch {pr['headRefName']})", when))
-    return ev, []
+                           f"{pr['state'].lower()}: {pr['title'][:160]} (branch {pr['headRefName']}; "
+                           f"opened by the repository owner)", when))
+    return ev, ([f"github: {others} pull request(s) opened by other people were left out (their titles are "
+                 "not the person's words)"] if others else [])
 
 
 def _vault(path: str, query: str, k: int = 6) -> tuple[list[Evidence], list[str]]:

@@ -16,6 +16,9 @@
     alter approve [TASK] · alter deny [TASK] ["why"]
                                            resolve what a goal waits on (no TASK: everything it waits on)
     alter tasks                            actions waiting for you, and the last actions in this project
+    alter undo TASK                        undo one of ALTER's writes (refused if the file changed since)
+    alter backup [DIR] [--with-key] · alter restore DIR --to NEW_FOLDER [--key KEY]
+                                           a consistent copy of ALTER's data; restore never writes over data
     alter memory [forget ID | remember "…"]
     alter config [list | get KEY | set KEY VALUE]
                                            your settings: vault, vault.path, github, memory, autonomy.mode
@@ -48,6 +51,7 @@ import shlex
 import shutil
 import sys
 import threading
+import time
 from pathlib import Path
 
 from . import __version__
@@ -57,7 +61,7 @@ from .textsafe import terminal_safe
 
 # `ci` commands that `alter` passes through unchanged (`alter ask` is ALTER's own: cited context)
 CI_COMMANDS = frozenset({"route", "mode", "prefer", "models", "outcome", "practice", "skills", "scorecard", "challenge",
-                         "plan", "mesh", "twin", "audit", "learn", "execute", "halt", "resume", "do"})
+                         "plan", "mesh", "twin", "audit", "learn", "execute", "halt", "resume", "do", "undo"})
 # A short phrase starting with one of these reads as a command typed wrong, not as work to pay for
 COMMAND_LIKE = frozenset({"stop", "list", "show", "quit", "exit", "help", "start", "kill", "pause", "cancel", "resume",
                           "run", "ls", "rm", "delete", "undo", "halt", "abort", "version", "config", "log", "logs",
@@ -819,6 +823,46 @@ def cmd_vault(argv: list[str]) -> int:
     return 2
 
 
+# --------------------------------------------------------------------------- backup, restore (safety audit R7)
+def cmd_backup(argv: list[str]) -> int:
+    from . import backup as B
+    ap = argparse.ArgumentParser(prog="alter backup", description="A consistent copy of ALTER's data folder.")
+    ap.add_argument("dest", nargs="?", help="a new folder (default: ~/alter-backup-<date>)")
+    ap.add_argument("--with-key", action="store_true", help="include master.key (it opens every record: keep the "
+                                                            "backup as safe as the key)")
+    ap.add_argument("--force", action="store_true", help="back up even while a goal runs")
+    a = ap.parse_args(argv)
+    dest = Path(a.dest).expanduser() if a.dest else Path.home() / f"alter-backup-{time.strftime('%Y%m%d-%H%M%S')}"
+    try:
+        m = B.backup(T._home(), dest, with_key=a.with_key, force=a.force)
+    except B.BackupError as e:
+        print(f"alter backup: {e}", file=sys.stderr)
+        return 2
+    print(f"Backed up {len(m['files'])} file(s) to {dest} (owner-only; MANIFEST.json lists their sha256).")
+    if not a.with_key:
+        print(f"master.key was NOT included. Keep {T._home() / 'master.key'} apart (a password manager); restoring "
+              "needs it: alter restore <backup> --to <new folder> --key <master.key>")
+    return 0
+
+
+def cmd_restore(argv: list[str]) -> int:
+    from . import backup as B
+    ap = argparse.ArgumentParser(prog="alter restore", description="Restore a backup into an empty or new folder.")
+    ap.add_argument("backup")
+    ap.add_argument("--to", required=True, help="an empty or new folder; nothing is ever written over")
+    ap.add_argument("--key", help="the master.key you kept apart (if the backup has none)")
+    a = ap.parse_args(argv)
+    try:
+        r = B.restore(Path(a.backup).expanduser(), Path(a.to).expanduser(),
+                      key=Path(a.key).expanduser() if a.key else None)
+    except B.BackupError as e:
+        print(f"alter restore: {e}", file=sys.stderr)
+        return 2
+    print(f"Restored into {r['home']}: audit chain {r['audit_chain']}, {r['memory_rows']} memory row(s). "
+          f"Use it with: export PCIM_HOME={r['home']}")
+    return 0
+
+
 # --------------------------------------------------------------------------- weekly, doctor
 def cmd_weekly(argv: list[str]) -> int:
     rc = T.cmd_weekly(argv)
@@ -1128,6 +1172,7 @@ def main(argv: list[str] | None = None) -> int:
     table = {"init": cmd_init, "setup": cmd_setup, "config": cmd_config, "status": cmd_status, "context": cmd_context, "goals": cmd_goals, "goal": cmd_goals,
              "tasks": cmd_tasks, "memory": cmd_memory, "permissions": cmd_permissions, "vault": cmd_vault,
              "weekly": cmd_weekly, "doctor": cmd_doctor, "ask": cmd_ask, "report": cmd_report,
+             "backup": cmd_backup, "restore": cmd_restore,
              "approve": lambda a: cmd_resolve(a, True), "deny": lambda a: cmd_resolve(a, False),
              "say": lambda a: cmd_event("steer", a), "pause": lambda a: cmd_event("pause", a),
              "cancel": lambda a: cmd_event("cancel", a), "ci": T.main}

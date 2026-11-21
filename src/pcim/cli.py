@@ -95,8 +95,9 @@ def main(argv=None) -> int:
         ci = _open_store(home)
         out = ci.onboard(a.user, a.name, tuple(a.providers))
         write_token(home, out["api_token"])
-        print(f"created {a.user} in {home}\nAPI token (also saved to {home/'token'}): {out['api_token']}\n"
-              f"Granted: egress of your own statements to {', '.join(a.providers)}. Nothing else.")
+        print(f"created {a.user} in {home}\nAPI token saved to {home/'token'} (owner-only; it is not printed, so it "
+              f"never lands in a terminal log)\nGranted: egress of your own statements to {', '.join(a.providers)}. "
+              "Nothing else.")
         return 0
     if a.cmd == "serve":
         import uvicorn
