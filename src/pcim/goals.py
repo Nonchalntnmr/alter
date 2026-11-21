@@ -361,11 +361,13 @@ class GoalRunner:
             raise GoalError(blocker)
         from . import thirdeye
         from .registry import vendor_of
+        requested_at = utcnow().isoformat()  # the person's wait starts here, before the brief is gathered
         # gathered before the goal exists: it cannot list itself, and a failure leaves no half-made goal
         brief = thirdeye.gather(self.ci, self.uid, self.here, objective, use_github=use_github, use_vault=use_vault,
                                 vendor=vendor_of(provider))
         g = self.gs.create(self.uid, self.here.project_id, objective, **limits)
-        g.payload.update(provider=provider, model=model, use_github=use_github, use_vault=use_vault)
+        g.payload.update(provider=provider, model=model, use_github=use_github, use_vault=use_vault,
+                         requested_at=requested_at)
         self._set_context(g, brief)
         return g
 
@@ -449,6 +451,8 @@ class GoalRunner:
         if first_turn is None and incoming == "waiting_approval" and pending_tasks(self.ci, self.uid, g):
             return g  # nothing to do until the person approves or refuses
         awaiting_answer = incoming == "waiting_answer" and first_turn is None
+        if incoming == "running" and first_turn is None:  # this process holds the lock: the last worker died mid-run
+            g.payload.setdefault("interruptions", []).append(utcnow().isoformat())
         g.status, g.worker_pid, g.payload["reason"] = "running", os.getpid(), None
         self.gs.save(g)
         self.agent.pause_check = lambda: self.gs.has_pending_event(gid)
