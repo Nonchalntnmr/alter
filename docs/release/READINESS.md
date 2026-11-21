@@ -11,7 +11,7 @@
 | Installed terminal checks | 37 of 37 passed with a simulated provider. |
 | Installed goal lifecycle | Verified a code change, cancelled a goal while its provider call was in flight, and recovered a goal after terminating its worker while it was waiting for a provider reply. The cancelled run made one provider call and left its file unchanged. The recovered run finished verified and appeared in `alter report`. |
 | Audit and pilot | The safety audit fixes are integrated. `alter report` includes identifier hits and scan coverage for goals with recorded writes. |
-| Live checks and evaluation | A sealed task pool, the live goal lifecycle check, and the human pilot are pending. The offline checks above used isolated stores and a simulated provider. |
+| Live checks and evaluation | An independent writer validated and sealed all 24 eval_v7 tasks. The inputs and code are pinned in `experiments/eval_v7/FROZEN.txt`. The live evaluation, live goal lifecycle check, and human pilot are pending. |
 
 The safety audit tracks a separate recovery issue when the worker dies while a **test process** is
 already running (R6). The installed recovery check above covered a worker waiting on its provider.
