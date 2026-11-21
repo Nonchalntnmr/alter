@@ -49,3 +49,48 @@ def test_s1_a_new_or_empty_store_still_gets_a_key(tmp_path, monkeypatch):
     (tmp_path / "empty" / "pcim.db").touch()  # a first run that stopped before writing anything
     PersonalCI(tmp_path / "empty").store.close()
     assert (tmp_path / "empty" / "master.key").is_file()
+
+
+# S2 -----------------------------------------------------------------------------------------------
+def _damage(ci, gid):
+    ct = bytearray(ci.store.query("SELECT payload_ct FROM goals WHERE id=?", (gid,))[0][0])
+    ct[-5] ^= 0xFF  # one flipped byte: the AES-GCM tag no longer matches
+    ci.store.execute("UPDATE goals SET payload_ct=? WHERE id=?", (bytes(ct), gid))
+
+
+def test_s2_one_damaged_goal_record_does_not_take_alter_down(tmp_path, monkeypatch, capsys):
+    """The old code raised InvalidTag from every command that lists goals (status, goals, doctor,
+    weekly), refused every new goal in the project, and could not forget the damaged one."""
+    from pcim import alter
+    from pcim import goals as G
+    monkeypatch.setenv("PCIM_HOME", str(tmp_path / "home"))
+    repo = tmp_path / "proj"
+    repo.mkdir()
+    monkeypatch.chdir(repo)
+    assert cli.main(["init", "--user", "u", "--providers", "mock"]) == 0
+    assert alter.main(["init", "--provider", "mock", "--tests", "true"]) == 0
+    ci, uid = T._open()
+    here = T._here(ci, uid)
+    gs = G.GoalStore(ci)
+    ok = gs.create(uid, here.project_id, "a goal whose record is intact")
+    bad = gs.create(uid, here.project_id, "a goal whose record gets damaged")
+    for g in (ok, bad):
+        g.status = "done"
+        gs.save(g)
+    _damage(ci, bad.id)
+    capsys.readouterr()
+
+    assert alter.main(["goals", "list"]) == 0
+    out = capsys.readouterr().out
+    assert ok.id in out and f"{bad.id}  unreadable" in out
+    assert alter.main(["status"]) == 0 and "1 unreadable" in capsys.readouterr().out
+    assert alter.main(["goals", "show", ok.id]) == 0 and "record is intact" in capsys.readouterr().out
+    assert alter.main(["goals", "show", bad.id]) == 2 and "cannot be read" in capsys.readouterr().err
+    alter.main(["doctor", "--json"])
+    assert "goal_records" in capsys.readouterr().out
+    # a new goal in the same project is not blocked by it
+    assert G.GoalRunner(ci, uid, here, out=lambda s: None).start("a new goal", provider="mock").status == "queued"
+    # and it can be forgotten by its id, which is all that is left of it
+    assert alter.main(["goals", "forget", bad.id]) == 0
+    assert bad.id not in [r["id"] for r in ci.store.query("SELECT id FROM goals")]
+    assert gs.list(uid) and not gs.unreadable

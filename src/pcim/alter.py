@@ -182,7 +182,8 @@ def cmd_status(argv: list[str]) -> int:
               f" · providers {', '.join(sorted(here.vendors)) or 'none'}")
         goals = gs.list(uid, here.project_id, limit=10)
     active = [g for g in goals if g.status in G.ACTIVE]
-    print(f"  goals: {len(active)} active, {len(goals) - len(active)} recent finished")
+    print(f"  goals: {len(active)} active, {len(goals) - len(active)} recent finished"
+          + (f", {len(gs.unreadable)} unreadable (alter goals)" if gs.unreadable else ""))
     for g in active:
         print(terminal_safe(f"    {g.id}  {gs.shown_status(g):17} {g.objective[:70]}"))
         for t in G.pending_tasks(ci, uid, g):
@@ -273,11 +274,13 @@ def cmd_goals(argv: list[str]) -> int:
     pid = here.project_id if here and not a.all else None
     if a.action == "list":
         gl = gs.list(uid, pid, limit=30)
-        if not gl:
+        if not gl and not gs.unreadable:
             print("No goals yet." + ("" if here else " (Not in a project folder: showing every project.)"))
         for g in gl:
             v = (g.payload.get("verification") or {}).get("verdict") or ""
             print(terminal_safe(f"{g.id}  {gs.shown_status(g):17} {v:12} {g.created_at[:10]}  {g.objective[:60]}"))
+        for gid in gs.unreadable:
+            print(f"{gid}  {'unreadable':17} its record is damaged; alter goals forget {gid} removes it")
         return 0
     if a.action == "start":
         if not _need_here(here):
@@ -286,18 +289,21 @@ def cmd_goals(argv: list[str]) -> int:
     if not a.rest:
         print(f"usage: alter goals {a.action} <goal>" + (' "…"' if a.action == "say" else ""), file=sys.stderr)
         return 2
+    if a.action == "forget":  # by id alone: a goal whose record is damaged can be forgotten too
+        try:
+            gid = gs.resolve(uid, a.rest[0], pid)
+            gs.delete(uid, gid)
+        except KeyError:
+            raise SystemExit(f"alter: no goal {a.rest[0]}") from None
+        except (ValueError, G.GoalError) as e:
+            print(f"alter: {e}", file=sys.stderr)
+            return 2
+        print(f"Forgot goal {gid} and its events. Kept: the record of each action (alter tasks, ci audit), and its "
+              "outcome in memory if one was stored (alter memory forget <id>).")
+        return 0
     g = _goal(ci, uid, a.rest[0], pid)
     if a.action == "show":
         print(G.report(ci, uid, g, gs))
-        return 0
-    if a.action == "forget":
-        try:
-            gs.delete(uid, g.id)
-        except G.GoalError as e:
-            print(f"alter: {e}", file=sys.stderr)
-            return 2
-        print(f"Forgot goal {g.id} and its events. Kept: the record of each action (alter tasks, ci audit), and its "
-              "outcome in memory if one was stored (alter memory forget <id>).")
         return 0
     if a.action in ("say", "pause", "cancel"):
         return _event(ci, uid, g, {"say": "steer"}.get(a.action, a.action), " ".join(a.rest[1:]))
@@ -648,6 +654,9 @@ def cmd_doctor(argv: list[str]) -> int:
         stale = [g.id for g in gs.list(uid, None, limit=200) if gs.shown_status(g) == "interrupted"]
         add("goals", "warn" if stale else "ok",
             f"interrupted: {', '.join(stale)} (alter goals resume <id>)" if stale else "no interrupted goal")
+        if gs.unreadable:
+            add("goal_records", "warn", f"damaged, cannot be read: {', '.join(gs.unreadable)} "
+                                        "(alter goals forget <id>, or restore pcim.db from a backup)")
         add("outcome_memory", "ok", "on" if G.has_outcome_grant(ci, uid) else "off (alter permissions memory on)")
     blocking = any(c["status"] == "fail" for c in checks)
     if "--json" in argv:

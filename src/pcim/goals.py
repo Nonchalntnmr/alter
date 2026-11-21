@@ -95,6 +95,10 @@ class GoalBusy(GoalError):
     pass
 
 
+class GoalUnreadable(GoalError):
+    """The goal's sealed record cannot be opened (damaged ciphertext or wrapped key, or not JSON)."""
+
+
 @dataclasses.dataclass
 class Goal:
     id: str
@@ -118,13 +122,22 @@ class GoalStore:
         for stmt in SCHEMA:
             self.store.execute(stmt)
         self.dir = Path(self.store.path).parent / "goals" if self.store.path != ":memory:" else None
+        self.unreadable: list[str] = []  # ids the last list() could not open: damaged records, never shown as goals
 
     def _key(self, uid: str, pid: str) -> str:
         from .workspace import Workspace
         return Workspace(self.ci).project_key(uid, pid)
 
     def _goal(self, row) -> Goal:
-        payload = self.store.open_json(self._key(row["user_id"], row["project_id"]), row["payload_ct"], row["id"])
+        from cryptography.exceptions import InvalidTag
+        key = self._key(row["user_id"], row["project_id"])  # KeyError: its project, and key, were deleted
+        try:
+            payload = self.store.open_json(key, row["payload_ct"], row["id"])
+        except (InvalidTag, ValueError, TypeError) as e:
+            # One damaged row must not take every goal command down with it: it is named, and can be
+            # forgotten, while the others keep working.
+            raise GoalUnreadable(f"goal {row['id']} cannot be read: its record is damaged ({type(e).__name__}). "
+                                 f"`alter goals forget {row['id']}` removes it; a backup of pcim.db restores it") from None
         return Goal(row["id"], row["user_id"], row["project_id"], row["created_at"], row["updated_at"], row["status"],
                     row["worker_pid"], payload)
 
@@ -152,7 +165,13 @@ class GoalStore:
     def resolve(self, uid: str, ref: str, project_id: str | None = None) -> str:
         """An exact id, a unique prefix ("goal_ebfa"), or a unique suffix of at least 4 characters."""
         from .intent_compiler import resolve_id
-        ids = [g.id for g in self.list(uid, project_id, limit=500)]
+        # ids straight from the table: a goal whose record is damaged can still be named (to forget it)
+        if project_id:
+            rows = self.store.query("SELECT id FROM goals WHERE user_id=? AND project_id=? ORDER BY created_at DESC "
+                                    "LIMIT 500", (uid, project_id))
+        else:
+            rows = self.store.query("SELECT id FROM goals WHERE user_id=? ORDER BY created_at DESC LIMIT 500", (uid,))
+        ids = [r["id"] for r in rows]
         pre = [i for i in ids if len(ref) >= 6 and i.startswith(ref)]
         if ref not in ids and len(pre) > 1:
             raise ValueError(f"{ref} matches {len(pre)} goals; give more of the id")
@@ -166,12 +185,14 @@ class GoalStore:
                                     (uid, project_id, limit))
         else:
             rows = self.store.query("SELECT * FROM goals WHERE user_id=? ORDER BY created_at DESC LIMIT ?", (uid, limit))
-        out = []
+        out, self.unreadable = [], []
         for r in rows:
             try:
                 out.append(self._goal(r))
             except KeyError:  # its project was deleted, and its key with it: nothing left to show
                 continue
+            except GoalUnreadable:
+                self.unreadable.append(r["id"])
         return out
 
     def save(self, g: Goal) -> None:
@@ -382,6 +403,9 @@ class GoalRunner:
                 return f"goal {other.id} is {other.status} in this project; pause or cancel it first"
             if other.status == "waiting_approval" and pending_tasks(self.ci, self.uid, other):
                 return f"goal {other.id} waits on your approval in this project (alter approve / alter deny)"
+        for gid in self.gs.unreadable:  # a damaged record whose worker is still alive: wait for it
+            if self.gs.is_live(gid):
+                return f"goal {gid} is running in this project, but its record cannot be read; cancel it first"
         open_sid = self.agent.open_session(self.uid, self.here.project_id)
         mine = set(g.payload["sessions"]) if g is not None else set()
         if open_sid and open_sid not in mine and self.agent._load(self.uid, self.here.project_id, open_sid).get("pending"):
