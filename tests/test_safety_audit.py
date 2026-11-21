@@ -94,3 +94,49 @@ def test_s2_one_damaged_goal_record_does_not_take_alter_down(tmp_path, monkeypat
     assert alter.main(["goals", "forget", bad.id]) == 0
     assert bad.id not in [r["id"] for r in ci.store.query("SELECT id FROM goals")]
     assert gs.list(uid) and not gs.unreadable
+
+
+# S3 -----------------------------------------------------------------------------------------------
+def _queue(tmp_path):
+    from pcim.governor import Governor
+    from pcim.tasks import TaskQueue
+    from pcim.workspace import Workspace
+    ci = PersonalCI(tmp_path / "data", seed=0)
+    ci.onboard("u", "U", providers=("mock",))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    ws = Workspace(ci)
+    p = ws.create_project("u", "P")
+    ws.authorize_workspace("u", p.id, str(repo), run_argv=["true"], allow_write=True)
+    q = TaskQueue(ws, Governor(ws))
+
+    def write(path, content):
+        return q.approve("u", q.propose("u", p.id, "write_file", {"path": path, "content": content, "reason": "r"}).id)
+    return q, repo, write
+
+
+def test_s3_undo_never_overwrites_a_change_made_after_the_write(tmp_path):
+    """The old undo restored the backup whatever the file held by then: the person's own edits since the
+    write were overwritten without a trace (and a created file was deleted with them)."""
+    from pcim.tasks import TaskStateError
+    q, repo, write = _queue(tmp_path)
+    (repo / "notes.txt").write_text("original\n")
+    w = write("notes.txt", "by the agent\n")
+    (repo / "notes.txt").write_text("by the agent\nand then by the person\n")
+    with pytest.raises(TaskStateError, match="has changed since this write"):
+        q.undo("u", w.id)
+    assert (repo / "notes.txt").read_text() == "by the agent\nand then by the person\n"
+
+    created = write("new.txt", "made by the agent\n")
+    (repo / "new.txt").write_text("made by the agent\nkept by the person\n")
+    with pytest.raises(TaskStateError):
+        q.undo("u", created.id)
+    assert (repo / "new.txt").exists()
+
+    # unchanged since the write: undo works, latest first
+    a, b = write("two.txt", "v1\n"), write("two.txt", "v2\n")
+    with pytest.raises(TaskStateError, match="undo any later write"):
+        q.undo("u", a.id)
+    q.undo("u", b.id)
+    q.undo("u", a.id)
+    assert not (repo / "two.txt").exists()

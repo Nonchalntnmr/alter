@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import dataclasses
 import datetime as dt
+import hashlib
 import logging
 import time
 
@@ -310,6 +311,12 @@ class TaskQueue:
             raise TaskStateError("halted")
         spec = self.ws.workspace_auth(user_id, t.project_id)["spec"]
         p = jail(spec["root"], t.args["path"], for_write=True)
+        # Only the version this write left may be replaced: anything since (the person's own edit, a later
+        # write) would be lost without a trace. A file that is gone has nothing to lose.
+        now = p.read_bytes() if p.is_file() else None
+        if now is not None and hashlib.sha256(now).hexdigest() != t.result.get("sha256_after"):
+            raise TaskStateError(f"{t.args['path']} has changed since this write; undoing it would overwrite those "
+                                 "changes, so nothing was done (undo any later write to it first)")
         if t.result["created"]:
             p.unlink(missing_ok=True)
         else:
