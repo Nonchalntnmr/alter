@@ -46,6 +46,44 @@
    first.
 5. **Ids resolved by suffix only.** Goal ids now resolve by unique prefix too.
 
+## Found by the live runs and the review, and fixed
+
+**From ALTER's own runs.**
+- **Silent truncation.** Tool results were cut at 20,000 characters, while a read still said
+  "truncated": false.
+  - Reads of large files now come in labelled parts.
+  - `write_file` can replace one exact passage.
+  - A cut result says so.
+- **"done" after questions.** A goal that asked questions could end "done"; it now waits for the
+  answer.
+
+**From the independent review**, all 18 issues fixed, each with a regression test.
+- **Security:**
+  - the worker no longer imports modules from the project folder (`python -P`);
+  - a symlinked README is not read;
+  - git does not run signature programs named in the repository's config;
+  - approving one task approves only that task.
+- **State machine:**
+  - a pause during an approval is kept;
+  - a pause given before the worker starts is kept;
+  - a resumed session gets the goal again after a memory change;
+  - verification follows when actions ran;
+  - the brief applies the vendor filter and is regathered on resume;
+  - a refused change is not "done".
+- **Hygiene:**
+  - the worker log holds no model text;
+  - deleting a project deletes its goals;
+  - a live goal cannot be forgotten;
+  - provider retries follow the retryable flag;
+  - CLI edges are fixed;
+  - goal output passes terminal_safe;
+  - one running goal per project.
+
+**Written by ALTER** (two commits, reviewed by hand):
+- `twin_do`: the twin may count `ci do` outcomes. It is opt-in (`ci twin include do`) and counts
+  only, and it appears in `ci weekly`.
+- **One redaction before push:** ALTER had used the owner's name as a test user.
+
 ## Install
 
 ```bash

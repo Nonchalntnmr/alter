@@ -45,7 +45,7 @@ understand ─▶ remember ─▶ act ─▶ verify ─▶ learn
 | **THIRD EYE**, contextual perception | **Brief:** repository, GitHub and vault, cited, with an explicit "not included" list. Each source is opt-in. | `thirdeye.py` |
 | | Not built: terminal history, other connected apps. | |
 | **Intent compiler** | `ci plan` (V3.4) is available, but is **not** used by goals: it was not shown to help. Goals go direct. | `intent_compiler.py` |
-| **Execution engine** | **Adapters:** filesystem, tests, git status and notes, all governed. **Approvals, autonomy grants, Stop-all, undo.** | `agent.py`, `tools.py`, `governor.py`, `tasks.py` |
+| **Execution engine** | **Adapters:** filesystem (reads of large files in labelled parts; one-passage edits), tests, git status and notes, all governed. **Approvals, autonomy grants, Stop-all, undo.** | `agent.py`, `tools.py`, `governor.py`, `tasks.py` |
 | | Not built: package installation, browser automation, external APIs, scheduled jobs. | |
 | **Intelligence router** | **Model routing and fallback** for questions. **`ci do` routing**, with direct as the default. | `routing.py`, `router.py` |
 | **Knowledge foundation** (Obsidian vault) | **Vault search:** the vault's own `nos` ranking, with identical eval numbers. **iCloud placeholders** are fetched with a time bound. **Per-project vault topics.** **`alter ask`:** answers with every statement marked remembered, sourced or recommendation. | `vault.py`, `alter.cmd_ask` |
@@ -98,7 +98,25 @@ alter <any ci command>        `ci` itself is unchanged
 
   There is no tool for any of these.
 
-## 5. Known limits (alpha)
+## 5. Evidence so far
+
+Engineering evidence only (`docs/release/READINESS.md` has the details).
+- **Live goals.** Three goals ran through the installed `alter` on this repository:
+  - one steered while it ran;
+  - one paused and resumed;
+  - one continued from ALTER's own records, after "Continue what we were building."
+  Two ended **verified**, and their code (twin_do and its CLI and weekly wiring) is in this release,
+  marked as written by ALTER.
+- **Bugs the live runs exposed.** The third goal surfaced two bugs, both fixed: silently truncated
+  tool results on large files, and a goal ending "done" after asking questions.
+- **An independent review** found 18 issues and all are fixed, each with a regression test.
+
+## 6. Known limits (alpha)
+
+- **Identifiers from context can reach files.** ALTER can write personal identifiers it saw in
+  its context into files. It did so once, using the owner's name as a test user; this was caught
+  by `scripts/scan_identity.py --history` before any push. Scan before you push. Next step: run that
+  check on a goal's changed files before it counts as done.
 
 - **No human evaluation.** Nothing here shows ALTER helps people more than direct use of a model.
 - **Weak tests weaken "verified".** It means "the project's own tests passed after the last
