@@ -375,7 +375,7 @@ Each fix has its own commit and regression test (`tests/test_safety_audit.py`). 
    exist in `~/projects/ci-backups/`. Deleting the refs and running `git gc --prune=now` removes
    the last local copies of the pre-rewrite identifiers. Never push with `--mirror` or `--all`.
 4. **This branch.** It is not pushed. Merge it into `feat/alter-alpha` (PR #9), or open its own
-   PR. Its 7 commits carry the same author email as H1, because that is git's configured
+   PR. All its commits carry the same author email as H1, because that is git's configured
    `user.email`. If you switch to the noreply address first, re-author them before pushing. That is
    a rewrite of this unpushed branch only, which this audit did not do.
 5. **Open items to schedule:** E2, E3 and E10 (the egress and autonomy design), R5 (an undo
