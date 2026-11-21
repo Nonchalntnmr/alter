@@ -61,6 +61,17 @@ class Brief:
     evidence: list[Evidence]
     withheld: list[str]
 
+    def __post_init__(self) -> None:
+        """The credential tripwire `ci ask` runs before routing (sovereignty/credentials.py), run on every
+        piece: a key in a vault note, a README, a commit subject or a PR title is replaced by
+        [REDACTED:<kind>] before the brief is shown, stored or sent to a model, and the redaction is listed."""
+        from .sovereignty.credentials import redact
+        for e in self.evidence:
+            clean, kinds = redact(e.text)
+            if kinds:
+                e.text = clean
+                self.withheld.append(f"{e.cite}: credential-shaped text redacted ({', '.join(kinds)})")
+
     def cites(self) -> list[str]:
         return [e.cite for e in self.evidence]
 

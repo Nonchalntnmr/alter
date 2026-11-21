@@ -59,8 +59,11 @@ files on `main`, which is already pushed:
 - `experiments/routing/learned_on_sealed2.txt`.
 
 Removing them from `main`'s history means a force-push to `main`, which is a separate decision for
-the owner. The repository is private. A commit that only redacts those three files would stop
-future copies, but the path would stay in the published history.
+the owner. **Correction (2026-11-21):** this file said the repository was private. It is public,
+and has been since it was created on 2026-10-17: GitHub records a `PublicEvent` at creation. So
+these three files, and every commit's author email, have been public since they were pushed. A
+commit that only redacts those three files would stop future copies, but the path would stay in
+the published history. `SAFETY_AUDIT_0.3.0a1.md` §1 has the current state and the options.
 
 ## 2. What the rewrite costs
 

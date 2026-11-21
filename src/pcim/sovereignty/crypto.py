@@ -29,6 +29,10 @@ _NONCE = 12
 _WRAP_AAD = b"pcim/dek/v1"
 
 
+class MasterKeyMissing(RuntimeError):
+    """The store exists but its master key does not. A new key could open none of its records."""
+
+
 class KeyRing:
     def __init__(self, kek: bytes):
         if len(kek) != 32:
@@ -36,7 +40,11 @@ class KeyRing:
         self._kek = AESGCM(kek)
 
     @classmethod
-    def load_or_create(cls, path: Path, env_var: str = "PCIM_MASTER_KEY") -> "KeyRing":
+    def load_or_create(cls, path: Path, env_var: str = "PCIM_MASTER_KEY", store: Path | None = None) -> "KeyRing":
+        """The key at `path`, else a new one. `store`: the database this key protects. When it
+        already holds data and the key file is gone, no key is made: every record is wrapped under
+        the lost key, and anything written under a new one would be unreadable once the original
+        is restored from a backup (a store with two keys and no record of which is which)."""
         env = os.environ.get(env_var)
         if env:
             return cls(base64.urlsafe_b64decode(env))
@@ -48,6 +56,11 @@ class KeyRing:
                     f"{path} is readable by other users (mode {oct(mode)}); run chmod 600"
                 )
             return cls(base64.urlsafe_b64decode(path.read_bytes().strip()))
+        if store is not None and Path(store).is_file() and Path(store).stat().st_size > 0:
+            raise MasterKeyMissing(
+                f"{path} is missing, but {store} holds records encrypted under it. Restore master.key from "
+                f"your backup into {path.parent} (or set {env_var}). No new key was made: it could open "
+                "nothing stored so far, and what it wrote would be unreadable once the original is back.")
         path.parent.mkdir(parents=True, exist_ok=True)
         key = AESGCM.generate_key(bit_length=256)
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)

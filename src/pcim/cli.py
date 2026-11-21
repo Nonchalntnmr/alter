@@ -37,12 +37,20 @@ def write_token(home: Path, token: str, *, exclusive: bool = False) -> Path:
     return path
 
 
+def _open_store(home: Path) -> PersonalCI:
+    from .sovereignty.crypto import MasterKeyMissing
+    try:
+        return PersonalCI(home)
+    except MasterKeyMissing as e:
+        sys.exit(f"pcim: {e}")
+
+
 def _ci() -> tuple[PersonalCI, str]:
     home = _home()
     tok = home / "token"
     if not tok.exists():
         sys.exit(f"no user yet — run `pcim init` (PCIM_HOME={home})")
-    ci = PersonalCI(home)
+    ci = _open_store(home)
     uid = ci.user_for_token(tok.read_text().strip())
     if uid is None:
         sys.exit("token in PCIM_HOME does not match any user")
@@ -84,7 +92,7 @@ def main(argv=None) -> int:
 
     if a.cmd == "init":
         home = _home()
-        ci = PersonalCI(home)
+        ci = _open_store(home)
         out = ci.onboard(a.user, a.name, tuple(a.providers))
         write_token(home, out["api_token"])
         print(f"created {a.user} in {home}\nAPI token (also saved to {home/'token'}): {out['api_token']}\n"
@@ -95,7 +103,7 @@ def main(argv=None) -> int:
         from .api import create_app
         home = _home()
         print(f"Personal CI on http://{a.host}:{a.port}  (data: {home})")
-        uvicorn.run(create_app(PersonalCI(home)), host=a.host, port=a.port, log_level="warning")
+        uvicorn.run(create_app(_open_store(home)), host=a.host, port=a.port, log_level="warning")
         return 0
 
     ci, uid = _ci()

@@ -93,7 +93,12 @@ def _open() -> tuple[PersonalCI, str]:
               "(or: pcim init --user <id> --providers claude-cli)",
               file=sys.stderr)
         raise SystemExit(2)
-    ci = PersonalCI(home)
+    from .sovereignty.crypto import MasterKeyMissing
+    try:
+        ci = PersonalCI(home)
+    except MasterKeyMissing as e:
+        print(f"ci: {e}", file=sys.stderr)
+        raise SystemExit(2) from None
     uid = ci.user_for_token(tok.read_text().strip())
     if uid is None:
         print(f"The token in {home} does not match any user.", file=sys.stderr)
@@ -1196,6 +1201,9 @@ def cmd_doctor(argv: list[str]) -> int:
         add("pcim_home", "ok", f"{home} initialized")
     else:
         add("pcim_home", "fail", f"{home} not initialized (run `pcim init`)")
+    if (home / "pcim.db").is_file() and not (home / "master.key").is_file() and not os.environ.get("PCIM_MASTER_KEY"):
+        add("master_key", "fail", f"{home / 'master.key'} is missing and the store cannot be read without it: "
+                                  "restore it from your backup (no new key is made)")
 
     # 3. claude CLI binary, version, login, and isolation
     ad = ClaudeCLIAdapter()
@@ -1225,8 +1233,8 @@ def cmd_doctor(argv: list[str]) -> int:
     else:
         add("hf_cache", "warn", f"not cached ({DEFAULT_SEMANTIC_MODEL}); HF_HUB_OFFLINE={offline_env or 'unset'}")
 
-    # 5-8. Embedder, audit chain, authorized workspaces, Stop-all (only if initialized)
-    if state_ok:
+    # 5-8. Embedder, audit chain, authorized workspaces, Stop-all (only if initialized and readable)
+    if state_ok and not any(c["name"] == "master_key" for c in checks):
         ci, uid = _open()
         try:
             from .embed import semantic_available
