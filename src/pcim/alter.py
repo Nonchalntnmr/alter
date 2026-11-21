@@ -36,7 +36,6 @@ import shlex
 import shutil
 import sys
 import threading
-import time
 from pathlib import Path
 
 from . import __version__
@@ -529,7 +528,7 @@ def cmd_permissions(argv: list[str]) -> int:
 
 def cmd_vault(argv: list[str]) -> int:
     from . import thirdeye
-    from .vault import Vault, cite, dataless, evaluate
+    from .vault import Vault, cite, dataless, evaluate, materialize
     from .workspace import Workspace
     ci, uid = T._open()
     s = thirdeye.settings(Workspace(ci), uid)
@@ -541,21 +540,11 @@ def cmd_vault(argv: list[str]) -> int:
     if argv[:1] == ["download"]:
         todo = [p for p in root.rglob("*.md") if ".obsidian" not in p.parts and dataless(p)]
         print(f"{len(todo)} note(s) are in iCloud only; reading them asks iCloud for them…")
-        done = []
-
-        def pull(p):
-            with contextlib.suppress(OSError):
-                p.read_bytes()
-                done.append(p)
-        threads = [threading.Thread(target=pull, args=(p,), daemon=True) for p in todo]
-        for t in threads:
-            t.start()
-        deadline = time.monotonic() + 120
-        for t in threads:
-            t.join(max(0.0, deadline - time.monotonic()))
+        materialize(todo, 120)
         left = sum(dataless(p) for p in todo)
         print(f"Downloaded {len(todo) - left}; {left} still in iCloud only." + (" Open the vault in Obsidian, or check "
-              "that this app may use iCloud Drive." if left else ""))
+              "that this app may use iCloud Drive." if left else "") + " macOS may evict them again; in Finder, "
+              "'Keep Downloaded' on the vault folder stops that.")
         return 0 if not left else 1
     v = Vault(str(root))
     if v.not_downloaded:

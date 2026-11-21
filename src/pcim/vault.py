@@ -6,8 +6,9 @@ without depending on a file in iCloud Documents. `alter vault eval` re-runs the 
 against this copy, so the two can be compared.
 
 What changed from nos.py: the vault root is a parameter (no default from the file's location),
-`evaluate()` returns numbers instead of printing them, and a note iCloud has not downloaded is skipped
-and listed (`not_downloaded`) instead of blocking the read. Read-only: nothing is ever written to the vault.
+`evaluate()` returns numbers instead of printing them, and notes that iCloud keeps only as placeholders
+are requested in parallel for a bounded time; any still missing are skipped and listed
+(`not_downloaded`) instead of blocking the read. Read-only: nothing is ever written to the vault.
 Notes are DATA, never instructions.
 """
 # ruff: noqa: E401, E701, E702, E731
@@ -29,6 +30,35 @@ def dataless(path) -> bool:
         return True
 
 
+def materialize(paths, timeout: float = 20.0) -> None:
+    """Ask iCloud for placeholder files by reading them, in parallel, for at most `timeout` seconds.
+    A read that has not finished by then is left running in a daemon thread and its file skipped."""
+    import threading
+    import time
+
+    def pull(p):
+        try:
+            with open(p, "rb") as f:
+                f.read(1)
+        except OSError:
+            pass
+    threads = [threading.Thread(target=pull, args=(p,), daemon=True) for p in paths]
+    for t in threads:
+        t.start()
+    deadline = time.monotonic() + timeout
+    for t in threads:
+        t.join(max(0.0, deadline - time.monotonic()))
+
+
+def _placeholders(root):
+    out = []
+    for dp, dns, fns in os.walk(root):
+        rel_dir = os.path.relpath(dp, root)
+        if any(rel_dir == s or rel_dir.startswith(s + "/") for s in SKIP): dns[:] = []; continue
+        out += [os.path.join(dp, fn) for fn in fns if fn.endswith(".md") and dataless(os.path.join(dp, fn))]
+    return out
+
+
 def toks(s): return [w for w in WORD.findall(s.lower()) if w not in STOP and len(w) > 1]
 
 def parse_fm(text):
@@ -45,9 +75,12 @@ def parse_fm(text):
 
 
 class Vault:
-    def __init__(self, root):
+    def __init__(self, root, fetch_timeout: float | None = 20.0):
         self.root = root; self.notes = {}; self.sections = []
-        self.not_downloaded = []  # iCloud placeholders: reading one can block until the file arrives
+        self.not_downloaded = []  # iCloud placeholders still not on disk after asking for them
+        if fetch_timeout:
+            todo = _placeholders(root)
+            if todo: materialize(todo, fetch_timeout)
         for dp, dns, fns in os.walk(root):
             rel_dir = os.path.relpath(dp, root)
             if any(rel_dir == s or rel_dir.startswith(s + "/") for s in SKIP): dns[:] = []; continue

@@ -210,3 +210,17 @@ def test_a_goal_never_runs_on_the_test_double_unless_asked(home, capsys, monkeyp
     assert e.value.code == 2 and "alter permissions provider claude-cli on" in capsys.readouterr().err
     assert alter.main(["permissions", "provider", "claude-cli", "on"]) == 0
     assert "anthropic" in capsys.readouterr().out
+
+
+def test_placeholders_are_requested_from_icloud_before_they_are_skipped(home, monkeypatch):
+    tmp, repo, vault = home
+    asked = []
+    state = {"Demo.md": True}  # a placeholder that arrives when it is read
+    monkeypatch.setattr(V, "dataless", lambda p: state.get(os.path.basename(str(p)), False))
+
+    def fake_materialize(paths, timeout=20.0):
+        asked.extend(os.path.basename(p) for p in paths)
+        state["Demo.md"] = False
+    monkeypatch.setattr(V, "materialize", fake_materialize)
+    v = V.Vault(str(vault))
+    assert asked == ["Demo.md"] and "Demo" in v.notes and v.not_downloaded == []
