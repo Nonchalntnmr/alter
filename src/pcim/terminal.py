@@ -89,7 +89,8 @@ def _open() -> tuple[PersonalCI, str]:
     home = _home()
     tok = home / "token"
     if not tok.exists():
-        print(f"No CI identity in {home}. Create one first:\n  pcim init --user <name> --providers claude-cli",
+        print(f"No CI identity in {home}. Create one first:\n  alter setup     "
+              "(or: pcim init --user <id> --providers claude-cli)",
               file=sys.stderr)
         raise SystemExit(2)
     ci = PersonalCI(home)

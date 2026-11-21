@@ -31,6 +31,13 @@
   - iCloud placeholders are fetched in parallel, with a time bound.
 - **Outcome memory:** each goal's outcome becomes an episode, with provenance, computed from task
   records, under an explicit grant.
+- **Installation and onboarding:**
+  - `scripts/install_alter.sh`: install, upgrade, `--rollback`, `--uninstall`; idempotent, with
+    every dependency pinned by `requirements-lock.txt` (now including the `semantic` extra's);
+  - `alter setup`: identity, claude CLI check, outcome memory and next steps, with no questions,
+    and never changing an existing identity;
+  - `alter config`: list, get and set the per-person settings (vault, GitHub, outcome memory,
+    autonomy mode).
 - **`Agent.pause_check`:** a pause or a new instruction takes effect at the next model step, with
   every action so far recorded.
 
@@ -87,13 +94,14 @@
 ## Install
 
 ```bash
-python3.14 -m venv ~/.alter/venv
-~/.alter/venv/bin/pip install "contextual_intelligence-0.3.0a1-py3-none-any.whl[semantic]"
-ln -sf ~/.alter/venv/bin/alter ~/.local/bin/alter      # and ci, pcim
-alter doctor
-cd <project> && alter init --provider claude-cli && alter
+scripts/install_alter.sh          # from a checkout; or: scripts/install_alter.sh <the .whl>
+alter setup
+cd <project> && alter init --tests "<its test command>" && alter
 ```
 
-**Upgrading from 0.2.0rc2.** The data is the same: two new tables are added (`goals`,
-`goal_events`), and older versions ignore them. To roll back, install the 0.2.0rc2 wheel. Goals
-stay in the database, unused.
+`INSTALL.md` has the details, upgrades and uninstalling.
+
+**Upgrading from 0.2.0rc2.** Run the script with the new wheel or checkout. The data is the same:
+two new tables are added on first use (`goals`, `goal_events`), and older versions ignore them. To
+roll back, `scripts/install_alter.sh --rollback` the 0.2.0rc2 wheel (`ROLLBACK.md`). Goals stay in
+the database, unused.

@@ -64,7 +64,9 @@ understand ─▶ remember ─▶ act ─▶ verify ─▶ learn
 alter                         conversation (in a project folder: goals; elsewhere: questions)
 alter "…"                     one goal, worked on now; Ctrl-C pauses it
 alter ask "…"                 one question, answered from cited context (one model call, no tools)
+alter setup                   first run: identity, claude check, outcome memory (--init: this folder too)
 alter init                    make this folder a project (--tests, --provider, --no-write, --no-memory)
+alter config [list | get K | set K V]   vault, vault.path, github, memory, autonomy.mode
 alter status · context · tasks · memory · weekly · doctor
 alter goals [list | show | start [--background] | resume | say | pause | cancel | forget]
 alter approve · alter deny    what a goal waits on

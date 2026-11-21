@@ -28,6 +28,15 @@ def _home() -> Path:
     return Path(os.environ.get("PCIM_HOME", Path.home() / ".pcim"))
 
 
+def write_token(home: Path, token: str, *, exclusive: bool = False) -> Path:
+    """The identity's API token, readable by its owner only. `exclusive`: fail if a token is there."""
+    path = home / "token"
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | (os.O_EXCL if exclusive else os.O_TRUNC), 0o600)
+    with os.fdopen(fd, "w") as fh:
+        fh.write(token)
+    return path
+
+
 def _ci() -> tuple[PersonalCI, str]:
     home = _home()
     tok = home / "token"
@@ -77,9 +86,7 @@ def main(argv=None) -> int:
         home = _home()
         ci = PersonalCI(home)
         out = ci.onboard(a.user, a.name, tuple(a.providers))
-        fd = os.open(home / "token", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as fh:
-            fh.write(out["api_token"])
+        write_token(home, out["api_token"])
         print(f"created {a.user} in {home}\nAPI token (also saved to {home/'token'}): {out['api_token']}\n"
               f"Granted: egress of your own statements to {', '.join(a.providers)}. Nothing else.")
         return 0
