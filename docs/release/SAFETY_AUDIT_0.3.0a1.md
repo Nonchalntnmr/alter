@@ -34,16 +34,17 @@ three characters (`rev…@nor…` for the author email). The scans print labels 
 | R3 | **high** | Undo overwrote changes made after the write: the person's own edits, or later writes. | **fixed** `cb70e30` (S3) |
 | R4 | **high** | Undo of a non-UTF-8 file wrote U+FFFD in place of the original bytes. The backup was lossy. | **fixed** `9af798a` (S4) |
 | E1 | **high** | The ALTER brief bypassed the credential tripwire. A key in a vault note, the README, a commit subject or a PR title reached the goal's provider. | **fixed** `1204055` (S5) |
-| H1 | medium | Every public commit's author email is the owner's university address (`rev…@nor…`). The repository has been public since it was created. | owner decision (§5) |
+| H1 | medium | Every public commit's author email is the owner's university address (`rev…@nor…`). The repository has been public since it was created. | owner decision (§6) |
 | H8 | medium | `HISTORY_REWRITE.md` said the repository was private, and the earlier decisions rested on that. | **fixed** `4d87279` (docs) |
 | H9 | medium | GitHub secret scanning and push protection are off, and `main` has no branch protection. | owner decision |
 | E2 | medium | `alter ask` outside a project sends vault excerpts to whichever vendor routing picks. The vault opt-in names no vendor. | open |
 | E3 | medium | The agent path (`ci do`, goals, `alter say`) has no credential tripwire on what the person types or on tool results. Pre-existing since rc2. | open |
+| E10 | medium | With the GitHub source on and autonomy granted, anyone's PR title on a public repository reaches the goal's first message. An injected instruction could get a test file written and then run. | open |
 | R5 | medium | No undo command exists in `alter`, `ci` or `pcim`. `ci undo <task>` is sent to the model as a question, and exits 0. | open |
 | R6 | medium | After a goal worker dies, its test process keeps running and its task stays `running` forever. Resume starts a second test run alongside it. | open |
 | R7 | medium | Backup and restore are not documented. A plain copy of `pcim.db` taken while a worker holds the store open loses committed data. | open (procedure in §4) |
-| H2 | low | The home path (`/Us…`, holding the username `nis…`) is in 3 files on `main`. | owner decision (§5) |
-| H3 | low | A model answer on `main` names the institution behind the email domain (a leak from before identity isolation). | owner decision (§5) |
+| H2 | low | The home path (`/Us…`, holding the username `nis…`) is in 3 files on `main`. | owner decision (§6) |
+| H3 | low | A model answer on `main` names the institution behind the email domain (a leak from before identity isolation). | owner decision (§6) |
 | H7 | low | The local repository holds identifiers that are not public: `refs/backup/pre-rewrite-*`, 4 unreachable blobs, and parked `agent/*` branches. | owner decision |
 | H10 | low | `scan_identity.py` never flags `main`'s own exposure, and checks only the full hostname. | open |
 | C3 | low | `pcim init` prints the API token in full. | open |
@@ -65,12 +66,13 @@ three characters (`rev…@nor…` for the author email). The scans print labels 
 |---|---|---|---|---|
 | H1 | author email `rev…@nor…` (the `git user.email` and `account email` labels) | author line of all 189 public commits, committer line of 178. The other 11 are GitHub-made merges, with GitHub's noreply address | each push, from 2026-10-17 | rewriting every commit on every branch, plus a force-push. GitHub keeps `refs/pull/1-9/head` read-only, so those old commits stay reachable unless GitHub Support purges them. GitHub's public event stream has carried the email in push payloads since the first push, and third-party archives mirror that stream |
 | H2 | home path `/Us…` (holds `username ($USER)` `nis…` and `name token 2`) | `main`: `experiments/milestone1/live-run3-2026-10-24.json` (2 paths, and a CLI scratch-directory slug built from the path); `experiments/routing/learned_on_heldout.txt` (1); `experiments/routing/learned_on_sealed2.txt` (1) | pushed with `main` | a rewrite of `main` and a force-push. A forward commit that redacts the 3 files stops new copies only |
-| H3 | the `email domain label` `nor…`, inside a model's answer ("near `nor…` in Boston"): the model echoed the account email the CLI injected before identity isolation existed | `main`: `experiments/e1/results/sonnet-exploratory/results.json` | pushed with `main` | as H2 |
+| H3 | the `email domain label` `nor…`, inside a model's answer, which suggested places near that institution. Most likely the model inferred it from the account email that the CLI put into the context before identity isolation existed | `main`: `experiments/e1/results/sonnet-exploratory/results.json` | pushed with `main` | as H2 |
 | H4 | the owner's name (`name token 1`, display and full name) | `main`: `README.md`, `pyproject.toml` (authors), `docs/RESEARCH.md`, `docs/STRATEGY.md`, `src/pcim/cli.py` (a usage example), and as a test user id in `tests/test_amplify.py`, `test_api.py`, `test_challenge.py`, `test_security_review_amplify.py` | — | intentional attribution. The test ids could be neutral |
 | H5 | GitHub login `Non…`, in the repository URL and in merge-commit subjects | everywhere | — | public by nature |
 | H6 | hostname (full, and its short label), account id, organization id and name | **none** in any public blob, message, ref name or PR, issue or comment text | — | — |
 
-PR titles and bodies (9), issues (9), comments (0) and releases (0) hold none of the 17 labels.
+The titles and bodies of the 9 PRs (the issues API lists the same 9), comments (0) and releases (0)
+hold none of the 17 labels.
 The 25 Actions runs use a read-only token and no secrets (the repository has 0 Actions secrets and
 0 artifacts).
 
@@ -173,11 +175,30 @@ a design change to the agent loop, so it is written up, not done.
 not matched, because the assignment pattern is anchored to the start of a line. Extending the
 patterns changes `ci ask` routing, so it needs a false-positive check first.
 
-**E5 (low).** Every `*.md` outside `vault.SKIP` (`vault.py:18`) can be matched and sent. Remediation:
-a configurable exclusion (folder, or `private: true` frontmatter).
+**E5 (low).** Every `*.md` outside `vault.SKIP` (`vault.py:18`) can be matched and sent. A `.md`
+symlink is read wherever it points. Remediation: a configurable exclusion (folder, or
+`private: true` frontmatter), and skip symlinks that leave the vault.
 
 **E6 (low, accepted).** Merge subjects ("Merge pull request #N from `Non…`/…") put the GitHub login
 into the brief. It is public, but CLI identity isolation does not cover the project's own content.
+
+**E10 (medium).** `gh pr list --state all` returns the last 8 PRs whoever opened them, and the
+brief does not say who wrote them. On a public repository a stranger chooses those titles (up to
+160 characters each). Vault notes can be web clippings too. The brief is fenced as data with a
+nonce, and the system prompt says only the person gives instructions. But under an autonomy grant
+(`alter permissions autonomy grant`), writes and test runs need no approval. So a model that
+followed an injected instruction could write `conftest.py` (or a test) and then run it through
+`run_tests`. That is code execution on this machine, bounded by the grant's action count and time
+limit. `ci do` under autonomy has the same exposure through any file the model reads; the GitHub
+source adds input that no collaborator wrote. Remediation:
+- list only PRs by the person or the repository's collaborators (`author_association`), or label
+  each PR's author in the brief;
+- under autonomy, keep approval for writes to test configuration (`conftest.py`, `pytest.ini`,
+  `pyproject.toml`, `package.json` scripts);
+- name `<alter_context>` in the agent's system prompt, which calls only `<project_briefing>`,
+  `<personal_context>` and tool results data (`agent.py:55`). The brief carries its own "not
+  instructions" line. The system prompt is part of the evaluated baseline, so this audit leaves it
+  unchanged.
 
 **E8 (low).** `spawn_worker` sends the worker's stderr to the same log (`goals.py:826`), so an
 unexpected exception leaves a traceback there. No model text was seen in it, and the file is 0600
@@ -354,6 +375,8 @@ Each fix has its own commit and regression test (`tests/test_safety_audit.py`). 
    exist in `~/projects/ci-backups/`. Deleting the refs and running `git gc --prune=now` removes
    the last local copies of the pre-rewrite identifiers. Never push with `--mirror` or `--all`.
 4. **This branch.** It is not pushed. Merge it into `feat/alter-alpha` (PR #9), or open its own
-   PR.
-5. **Open items to schedule:** E2 and E3 (the egress design), R5 (an undo command), R6 (orphaned
-   test runs), R7 (`pcim backup`), then the low items.
+   PR. Its 7 commits carry the same author email as H1, because that is git's configured
+   `user.email`. If you switch to the noreply address first, re-author them before pushing. That is
+   a rewrite of this unpushed branch only, which this audit did not do.
+5. **Open items to schedule:** E2, E3 and E10 (the egress and autonomy design), R5 (an undo
+   command), R6 (orphaned test runs), R7 (`pcim backup`), then the low items.
