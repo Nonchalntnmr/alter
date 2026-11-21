@@ -262,3 +262,13 @@ def test_a_new_goal_is_not_its_own_memory_and_goals_resolve_by_prefix_or_suffix(
     start(r, "another")
     with pytest.raises((ValueError, KeyError)):
         r.gs.resolve("u", "goal_")
+
+
+def test_questions_anywhere_in_a_reply_that_changed_nothing_wait_for_the_person(env):
+    ci, ws, p, repo, here = env
+    reply = ("I made no change.\nWaiting on you:\n- Do you want the wiring before the human evaluation?\n"
+             "- Which route? (1) a patch, (2) the refactor.\nMy recommendation is (1).")
+    r, _ = runner(ci, here, [{"text": reply}])
+    assert r.run(start(r, "continue").id).status == "waiting_answer"
+    r2, _ = runner(ci, here, [{"text": "add() returns the sum already. Nothing to change."}])
+    assert r2.run(start(r2, "check add").id).status == "done"

@@ -27,6 +27,7 @@ from pathlib import Path
 from .governor import is_secret, jail
 
 MAX_READ = 200_000
+MAX_READ_FILE = 5_000_000  # a file read in parts may be this large; each part is at most READ_CHARS
 MAX_WRITE = 500_000
 MAX_LIST = 500
 MAX_MATCHES = 200
@@ -35,8 +36,12 @@ _SCRUB = re.compile(r"(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH|COOKIE|S
 _SCRUB_PREFIX = ("AWS_", "GITHUB_", "GH_", "ANTHROPIC", "OPENAI", "GEMINI", "GOOGLE_", "AZURE_", "PCIM_", "HF_")
 
 TOOL_SCHEMAS = {
-    "read_file": {"description": "Read a text file inside the authorized project workspace.",
-                  "input_schema": {"type": "object", "properties": {"path": {"type": "string", "description": "path relative to the workspace root"}},
+    "read_file": {"description": "Read a text file inside the authorized project workspace. A long file comes back in parts: "
+                                 "the result says which lines it holds, the total, and next_offset to read on from.",
+                  "input_schema": {"type": "object", "properties": {
+                      "path": {"type": "string", "description": "path relative to the workspace root"},
+                      "offset": {"type": "string", "description": "optional: first line to return, 1-based (default 1)"},
+                      "limit": {"type": "string", "description": "optional: how many lines to return (default: as many as fit)"}},
                                    "required": ["path"], "additionalProperties": False}},
     "list_files": {"description": "List files in the workspace matching a glob (default **/*). Skips .git, virtualenvs, node_modules.",
                    "input_schema": {"type": "object", "properties": {"pattern": {"type": "string"}},
@@ -49,10 +54,16 @@ TOOL_SCHEMAS = {
     "run_tests": {"description": "Run the person's configured test command in the workspace. Needs approval unless an autonomous grant covers it.",
                   "input_schema": {"type": "object", "properties": {"reason": {"type": "string", "description": "one line: why run tests now"}},
                                    "required": ["reason"], "additionalProperties": False}},
-    "write_file": {"description": "Create or overwrite a text file in the workspace. Needs approval unless an autonomous grant covers it. The previous version is kept for undo.",
-                   "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"},
+    "write_file": {"description": "Change a text file in the workspace, in one of two forms. Give `content` to create a file or "
+                                  "replace all of it. Give `old` and `new` to replace one exact passage of an existing file: `old` "
+                                  "must appear in it exactly once; prefer this for any file you have not read whole. Needs approval "
+                                  "unless an autonomous grant covers it. The previous version is kept for undo.",
+                   "input_schema": {"type": "object", "properties": {"path": {"type": "string"},
+                                                                     "content": {"type": "string", "description": "the whole new file"},
+                                                                     "old": {"type": "string", "description": "the exact passage to replace"},
+                                                                     "new": {"type": "string", "description": "what replaces it"},
                                                                      "reason": {"type": "string"}},
-                                    "required": ["path", "content", "reason"], "additionalProperties": False}},
+                                    "required": ["path", "reason"], "additionalProperties": False}},
     "record_note": {"description": "Record an open question, decision, or next step on the project. It is shown to the person as model-written.",
                     "input_schema": {"type": "object", "properties": {"kind": {"type": "string", "enum": ["open_question", "decision", "next_step"]},
                                                                       "text": {"type": "string"}},
@@ -69,6 +80,30 @@ TOOL_SCHEMAS = {
 
 class ToolError(RuntimeError):
     pass
+
+
+READ_CHARS = 16_000  # what one read returns, so the result stays whole inside the agent's 20,000-character result
+
+
+def read_part(path: str, data: bytes, offset: int = 1, limit: int | None = None) -> dict:
+    """Lines [offset, offset+limit) of a file, cut at a line boundary to fit READ_CHARS. The result
+    says exactly which lines it holds, so a part is never mistaken for the whole file."""
+    lines = data[:MAX_READ_FILE].decode("utf-8", errors="replace").splitlines(keepends=True)
+    total = len(lines)
+    start = min(max(offset, 1), total + 1)
+    out, size = [], 0
+    for line in lines[start - 1:(start - 1 + limit) if limit else None]:
+        if out and size + len(line) > READ_CHARS:
+            break
+        out.append(line[:READ_CHARS])
+        size += len(out[-1])
+    end = start + len(out) - 1
+    whole = start == 1 and end >= total and len(data) <= MAX_READ_FILE
+    res = {"path": path, "bytes": len(data), "lines_total": total, "from_line": start, "to_line": max(end, start - 1),
+           "truncated": not whole, "content": "".join(out)}
+    if end < total:
+        res["next_offset"] = str(end + 1)
+    return res
 
 
 class Cancelled(RuntimeError):
@@ -91,6 +126,16 @@ def validate_args(tool: str, args: dict) -> dict:
             raise ToolError(f"{tool}.{k} must be a string")
         if "enum" in props[k] and v not in props[k]["enum"]:
             raise ToolError(f"{tool}.{k} must be one of {props[k]['enum']}")
+    if tool == "write_file":
+        whole, part = "content" in args, ("old" in args or "new" in args)
+        if whole == part or (part and not ("old" in args and "new" in args)):
+            raise ToolError("write_file takes either content, or old and new")
+        if part and not args["old"]:
+            raise ToolError("write_file.old must not be empty")
+    if tool == "read_file":
+        for k in ("offset", "limit"):
+            if k in args and (not args[k].isdigit() or int(args[k]) < 1):
+                raise ToolError(f"read_file.{k} must be a whole number of at least 1")
     return args
 
 
@@ -206,8 +251,7 @@ class Executor:
             data = p.read_bytes()
             if b"\x00" in data[:8192]:
                 raise ToolError(f"{args['path']} is binary")
-            return {"path": args["path"], "bytes": len(data), "truncated": len(data) > MAX_READ,
-                    "content": data[:MAX_READ].decode("utf-8", errors="replace")}
+            return read_part(args["path"], data, int(args.get("offset") or 1), int(args["limit"]) if args.get("limit") else None)
         if tool == "list_files":
             files = []
             for _, rel in _iter_files(root, args.get("pattern") or "**/*"):
@@ -239,11 +283,20 @@ class Executor:
                 raise ToolError(r.stderr.strip()[:500] or "not a git repository")
             return {"status": r.stdout[:20_000]}
         if tool == "write_file":
-            content = args["content"]
-            if len(content.encode()) > MAX_WRITE:
-                raise ToolError("content too large")
             p = jail(root, args["path"], for_write=True)
             before = p.read_bytes() if p.exists() else None
+            if "content" in args:
+                content = args["content"]
+            else:  # a passage of an existing file: the rest of the file is kept exactly as it is
+                if before is None:
+                    raise ToolError(f"{args['path']} does not exist; give content to create it")
+                text = before.decode("utf-8")
+                n = text.count(args["old"])
+                if n != 1:
+                    raise ToolError(f"the passage to replace appears {n} times in {args['path']}; it must appear exactly once")
+                content = text.replace(args["old"], args["new"], 1)
+            if len(content.encode()) > MAX_WRITE:
+                raise ToolError("content too large")
             p.parent.mkdir(parents=True, exist_ok=True)
             # A new temp file, never an existing name: a fixed name could already be in the
             # workspace as a symlink (a cloned repo can carry one) and take the write outside it.

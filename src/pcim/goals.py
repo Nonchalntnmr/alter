@@ -471,8 +471,9 @@ class GoalRunner:
             self._finish(g, "done", v["line"])
             return "stop"
         if v["verdict"] == "unchanged":
-            last = (turn.text or "").strip().splitlines()[-1:] or [""]
-            if last[0].rstrip().endswith("?"):
+            # Nothing changed and the reply puts a question to the person (anywhere, not only last:
+            # the live run ended with a recommendation after two questions): wait for the answer.
+            if any(line.rstrip().endswith("?") for line in (turn.text or "").splitlines()):
                 self._park(g, "waiting_answer", "ALTER asked you a question")
                 return "stop"
             self._finish(g, "done", "answered; no file was changed")
