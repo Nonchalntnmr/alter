@@ -28,6 +28,8 @@ therefore tests non-inferiority, and **no superiority is claimed whatever the nu
 
 If any item fails, the verdict is "the V1 eval gate FAILS". The release then stays CONDITIONAL, and
 the failing item is reported, not explained away.
+The decision requires both arms for every scheduled pair, including any second environment loss.
+Partial results are reported as incomplete.
 
 ## Secondary (reported, not decisive)
 

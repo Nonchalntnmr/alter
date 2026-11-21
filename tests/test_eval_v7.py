@@ -148,3 +148,23 @@ def test_every_arm_gets_the_same_sandbox_permissions_and_budget(harness):
         finally:
             sb.close()
     assert specs["A"] == specs["G"] and envs["A"] == envs["G"]
+
+
+def test_score_requires_both_arms_for_every_scheduled_pair(harness):
+    exp, _ = harness
+    (exp / "requests.jsonl").write_text(json.dumps({"pair": "P01-t01", "needs_question": True}) + "\n")
+    row = {"pair": "P01-t01", "arm": "A", "category": "choice", "verified": True}
+    (exp / "raw.jsonl").write_text(json.dumps(row) + "\n")
+
+    res = h.score()
+
+    assert (res["n_pairs"], res["n_pairs_expected"]) == (0, 2)
+    assert "INCOMPLETE" in res["decision"]["G"]["verdict"]
+
+
+def test_live_judge_requires_a_freeze_before_opening_the_pool(harness):
+    h.CFG.live = True
+    h.CFG.tasks.unlink()
+
+    with pytest.raises(SystemExit, match="freeze before running"):
+        h.judge()

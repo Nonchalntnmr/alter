@@ -1,7 +1,9 @@
 """eval_v7: ALTER goals against direct execution, the V1 release gate.
 
-    HF_HUB_OFFLINE=1 PCIM_CLI_REQUIRE_ISOLATION=1 PYTHONPATH=~/projects/alter-eval7/src \\
-        caffeinate -i -s python scripts/eval_v7.py run | judge | score
+    HF_HUB_OFFLINE=1 PCIM_CLI_REQUIRE_ISOLATION=1 PYTHONPATH=src \\
+        caffeinate -i -s python scripts/eval_v7.py run
+
+After the run finishes, repeat with `judge`, then `score`.
 
 Derived from scripts/eval_v6.py. Unchanged:
 - the sandboxes, the persona loop and the approval policy;
@@ -185,6 +187,8 @@ def tasks() -> list[dict]:
     for r in rows:
         if not need <= set(r):
             sys.exit(f"task {r.get('id')} lacks {sorted(need - set(r))}")
+    if len({r["id"] for r in rows}) != len(rows):
+        sys.exit("the task pool contains duplicate ids")
     return rows
 
 
@@ -223,10 +227,12 @@ def check() -> None:
     f = frozen()
     if not f:
         sys.exit("experiments/eval_v7/FROZEN.txt is missing: freeze before running")
-    for key, path in (("tasks_sha256", CFG.tasks), ("personas_sha256", CFG.personas),
+    for key, path in (("personas_sha256", CFG.personas),
                       ("prereg_sha256", CFG.exp / "PREREGISTRATION.md"), ("protocol_sha256", CFG.exp / "PROTOCOL.md"),
-                      ("harness_sha256", Path(__file__))):
-        if f.get(key) != sha(path):
+                      ("harness_sha256", Path(__file__)),
+                      ("report_sha256", Path(__file__).with_name("eval_v7_report.py")),
+                      ("tasks_sha256", CFG.tasks)):
+        if not f.get(key) or f[key] != sha(path):
             sys.exit(f"{path.name} changed since it was frozen ({key})")
     import pcim
     tree = Path(os.path.expanduser(f["tree"]))
@@ -857,6 +863,7 @@ def _show(row: dict) -> str:
 
 
 def judge(arms_vs_a: tuple = ("G",)) -> None:
+    check()
     out = CFG.exp / "judge.jsonl"
     seen = set()
     if out.exists():
@@ -896,6 +903,8 @@ def judge(arms_vs_a: tuple = ("G",)) -> None:
                     err = None
                 except Exception as e:  # noqa: BLE001
                     o, cost, err = {}, 0.0, f"{type(e).__name__}: {e}"[:300]
+                    if quota(environment_signals([str(e)])):
+                        sys.exit("the account's usage limit was hit: stopping; run judge again once it resets")
                 pref = str(o.get("preference", "")).strip()
                 rec = {"pair": pair, "compare": arm, "judge": jm, "x_position": 1 if flip else 2,
                        "x": o.get("r1") if flip else o.get("r2"), "a": o.get("r2") if flip else o.get("r1"),
@@ -914,12 +923,18 @@ def _yes(v) -> bool:
 
 def score() -> dict:
     """eval_v7 PREREGISTRATION: per-arm metrics with Wilson intervals, paired tests against A, the rule."""
+    check()
+    seed = CFG.seed if CFG.seed is not None else int(frozen()["seed"])
+    expected = {a["pair"] for a in assignment(seed)}
     rows = final_rows()
     reqs = {json.loads(x)["pair"]: json.loads(x) for x in (CFG.exp / "requests.jsonl").read_text().splitlines()}
     jd = [json.loads(x) for x in (CFG.exp / "judge.jsonl").read_text().splitlines()] if (CFG.exp / "judge.jsonl").exists() else []
-    pairs = sorted({p for p, _ in rows if all((p, arm) in rows for arm in ARMS)})
+    pairs = sorted(p for p in expected if p in reqs and all(
+        (p, arm) in rows and (not lost(rows[p, arm]) or rows[p, arm].get("attempt", 1) >= 2)
+        for arm in ARMS
+    ))
     need = {p: reqs[p]["needs_question"] for p in pairs}
-    res: dict = {"n_pairs": len(pairs), "n_need_question": sum(need.values()),
+    res: dict = {"n_pairs": len(pairs), "n_pairs_expected": len(expected), "n_need_question": sum(need.values()),
                  "n_need_tacit": sum(1 for p in pairs if reqs[p].get("need_tacit")), "arms": {}, "vs_A": {},
                  "judges": {}, "decision": {}, "per_category": {}, "errors": {}, "reused": {}}
 
@@ -1005,8 +1020,12 @@ def score() -> dict:
              "4_attention_bounded": X["person_seconds_total"] <= 1.5 * max(A["person_seconds_total"], 1),
              "5_cost_bounded": X["cost_usd_total"] <= 1.5 * max(A["cost_usd_total"], 1e-9)}
         failed = [k for k, v in g.items() if not v]
-        g["verdict"] = ("non-inferior to direct execution on this evaluation: the V1 eval gate passes "
-                        "(no superiority claimed)" if not failed else "the V1 eval gate FAILS: " + ", ".join(failed))
+        if len(pairs) != len(expected):
+            g["verdict"] = f"the V1 eval gate is INCOMPLETE: {len(pairs)}/{len(expected)} scheduled pairs scored"
+        elif failed:
+            g["verdict"] = "the V1 eval gate FAILS: " + ", ".join(failed)
+        else:
+            g["verdict"] = "non-inferior to direct execution on this evaluation: the V1 eval gate passes (no superiority claimed)"
         res["decision"][arm] = g
     for item in ("achieved", "unnecessary_question", "missing_question", "false_claim", "rating"):
         table = {}
@@ -1041,11 +1060,14 @@ if __name__ == "__main__":
     if cmd[0] == "run":
         run(tuple(cmd[1].split(",")) if len(cmd) > 1 else ARMS)
     elif cmd[0] == "judge":
-        check()
         judge()
     elif cmd[0] == "score":
         print(json.dumps(score(), indent=1, default=str))
     elif cmd[0] == "assign":
-        print(json.dumps(assignment(int(cmd[1])), indent=1))
+        check()
+        seed = int(cmd[1])
+        if CFG.live and seed != int(frozen()["seed"]):
+            sys.exit("use the seed from FROZEN.txt")
+        print(json.dumps(assignment(seed), indent=1))
     else:
         sys.exit(__doc__)
