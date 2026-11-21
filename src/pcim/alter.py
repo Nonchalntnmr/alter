@@ -17,7 +17,12 @@
                        | provider claude-cli|anthropic|openai|… on|off
                        | autonomy grant [--actions N] [--minutes M] | autonomy revoke]
     alter vault search "…" | eval [FILE] | download
-    alter resume GOAL                      resume a paused goal (`alter resume` alone clears Stop-all, as `ci resume`)
+    alter report [--days N] [--json] [--project here|all]
+                                           the pilot's metrics from ALTER's own records (no model call)
+    alter report --log "task" --estimate-minutes N
+                                           log a task and your own estimate, before ALTER works on it
+    alter report --forget-log              delete every pilot log entry
+    alter resume GOAL                     resume a paused goal (`alter resume` alone clears Stop-all, as `ci resume`)
     alter weekly · models · twin · mesh · audit · doctor · halt · resume · plan · do · …
                                            every `ci` command works here too (`ci` itself still works)
 
@@ -609,6 +614,49 @@ def cmd_weekly(argv: list[str]) -> int:
     return rc
 
 
+def cmd_report(argv: list[str]) -> int:
+    from . import pilot
+    ap = argparse.ArgumentParser(prog="alter report",
+                                 description="The pilot's metrics, from ALTER's own records. No model call.")
+    ap.add_argument("--days", type=int, default=30, help="goals created in the last N days (default 30)")
+    ap.add_argument("--json", action="store_true", help="the export: ids, counts, rates, costs and times; no text")
+    ap.add_argument("--project", choices=["here", "all"], help="default: here in a project folder, else all")
+    ap.add_argument("--log", metavar="TASK", help="log a task before ALTER works on it")
+    ap.add_argument("--estimate-minutes", type=float, help="with --log: how long it would take you alone")
+    ap.add_argument("--forget-log", action="store_true", help="delete every pilot log entry (withdrawal)")
+    a = ap.parse_args(argv)
+    ci, uid, here = _ctx()
+    if a.forget_log:
+        n = pilot.forget_log(ci, uid)
+        print(f"Deleted the pilot log ({n} entr{'y' if n == 1 else 'ies'}). Goals are kept: alter goals forget <id>.")
+        return 0
+    if a.log is not None or a.estimate_minutes is not None:
+        if not (a.log or "").strip() or a.estimate_minutes is None:
+            print('usage: alter report --log "task" --estimate-minutes N', file=sys.stderr)
+            return 2
+        try:
+            rec = pilot.log_task(ci, uid, a.log, a.estimate_minutes, here.project_id if here else None)
+        except ValueError as e:
+            print(f"alter: {e}", file=sys.stderr)
+            return 2
+        print(f"Logged {rec['id']}: your estimate {rec['estimate_minutes']:g} min. It goes with the next goal you "
+              f"start {'in ' + here.name if here else 'in any project'}; start it now.")
+        return 0
+    if not 1 <= a.days <= 3650:
+        print("alter: --days must be between 1 and 3650", file=sys.stderr)
+        return 2
+    scope = a.project or ("here" if here else "all")
+    if scope == "here" and here is None:
+        print("alter: not in a project folder; use --project all, or cd into a project", file=sys.stderr)
+        return 2
+    rep = pilot.compute(ci, uid, days=a.days, project_id=here.project_id if scope == "here" else None)
+    if a.json:
+        print(json.dumps(pilot.export(rep), indent=1))
+    else:
+        print(pilot.render(rep, f"project {here.name}" if scope == "here" else "every project"))
+    return 0
+
+
 def cmd_doctor(argv: list[str]) -> int:
     from . import thirdeye
     from .vault import dataless
@@ -844,7 +892,7 @@ def main(argv: list[str] | None = None) -> int:
     from .embed import EmbedderUnavailable
     table = {"init": cmd_init, "status": cmd_status, "context": cmd_context, "goals": cmd_goals, "goal": cmd_goals,
              "tasks": cmd_tasks, "memory": cmd_memory, "permissions": cmd_permissions, "vault": cmd_vault,
-             "weekly": cmd_weekly, "doctor": cmd_doctor, "ask": cmd_ask,
+             "weekly": cmd_weekly, "doctor": cmd_doctor, "ask": cmd_ask, "report": cmd_report,
              "approve": lambda a: cmd_resolve(a, True), "deny": lambda a: cmd_resolve(a, False),
              "say": lambda a: cmd_event("steer", a), "pause": lambda a: cmd_event("pause", a),
              "cancel": lambda a: cmd_event("cancel", a), "ci": T.main}
