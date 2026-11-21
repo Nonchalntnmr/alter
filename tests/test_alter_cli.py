@@ -237,3 +237,24 @@ def test_vault_topics_find_a_project_the_vault_knows_by_another_name(home, capsy
     capsys.readouterr()
     alter.main(["context", "release"])
     assert "[Calc" in capsys.readouterr().out
+
+
+def test_doctor_says_icloud_placeholders_are_fetched_when_needed(home, capsys, monkeypatch):
+    import shutil
+    tmp, repo, vault = home
+    alter.main(["init", "--tests", check_cmd()])
+    alter.main(["permissions", "vault", "on", "--path", str(vault)])
+    real = V.dataless
+    monkeypatch.setattr(V, "dataless", lambda p: str(p).endswith("Demo.md") or real(p))
+    capsys.readouterr()
+
+    def vault_check():
+        alter.main(["doctor", "--json"])
+        return next(c for c in json.loads(capsys.readouterr().out)["checks"] if c["name"] == "vault")
+    c = vault_check()
+    assert c["status"] == "ok", c
+    assert "2 notes at" in c["detail"] and "iCloud placeholders: 1, fetched when needed" in c["detail"]
+    assert "alter vault download" in c["detail"] and "in iCloud only" not in c["detail"]
+    shutil.rmtree(vault)  # a missing vault folder is still reported as a problem
+    c = vault_check()
+    assert c["status"] == "fail" and "no vault at" in c["detail"]

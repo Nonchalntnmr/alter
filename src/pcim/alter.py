@@ -637,8 +637,9 @@ def cmd_doctor(argv: list[str]) -> int:
         else:
             notes = [p for p in vp.rglob("*.md") if ".obsidian" not in p.parts]
             dl = sum(dataless(p) for p in notes)
-            add("vault", "warn" if dl else "ok", f"{len(notes)} notes at {vp}" + (f"; {dl} in iCloud only (alter vault "
-                                                                                   "download)" if dl else ""))
+            # placeholders are not a problem: Vault() asks iCloud for them when it reads the vault
+            fetched = f"; iCloud placeholders: {dl}, fetched when needed (now: alter vault download)" if dl else ""
+            add("vault", "ok", f"{len(notes)} notes at {vp}{fetched}")
         gs = G.GoalStore(ci)
         stale = [g.id for g in gs.list(uid, None, limit=200) if gs.shown_status(g) == "interrupted"]
         add("goals", "warn" if stale else "ok",
