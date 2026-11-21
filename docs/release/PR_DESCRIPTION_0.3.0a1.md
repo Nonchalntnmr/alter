@@ -25,7 +25,7 @@
   - a clean install from a fresh shell works, and `alter doctor` exits 0.
 - **Live runs** through the installed `alter` with the real `claude` CLI, on a worktree of this
   repository:
-  - two goals ended **verified**;
+  - four goals ran in all, and three ended **verified** ($11.67 as the CLI reports it);
   - one was steered while it ran;
   - one was paused and resumed;
   - one continued from ALTER's own records;
