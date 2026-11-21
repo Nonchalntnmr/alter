@@ -192,7 +192,7 @@ class PersonalCI:
             else:
                 d = Path(data_dir)
                 d.mkdir(parents=True, exist_ok=True)
-                store = Store(d / "pcim.db", KeyRing.load_or_create(d / "master.key"))
+                store = Store(d / "pcim.db", KeyRing.load_or_create(d / "master.key", store=d / "pcim.db"))
         self.store = store
         self.audit = AuditLog(store)
         self.embedder = bind_embedder(store, embedder, self.audit)

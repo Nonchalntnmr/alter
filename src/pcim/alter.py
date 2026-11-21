@@ -629,7 +629,7 @@ def cmd_doctor(argv: list[str]) -> int:
     add("git", "ok" if shutil.which("git") else "fail", shutil.which("git") or "git not found")
     gh = shutil.which("gh")
     add("github_cli", "ok" if gh else "warn", gh or "gh not found: GitHub context is unavailable")
-    home_ok = (T._home() / "token").is_file()
+    home_ok = (T._home() / "token").is_file() and not any(c["name"] == "master_key" for c in checks)
     if home_ok:
         ci, uid = T._open()
         s = thirdeye.settings(Workspace(ci), uid)
