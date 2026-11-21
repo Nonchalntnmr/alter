@@ -99,6 +99,7 @@ _STOP_NOTES = {
     "max_cost": "Stopped: this turn reached its cost limit. Send a message to continue.",
     "max_tokens": "Stopped: this turn reached its input-token limit. Send a message to continue.",
     "halted": "Stopped: execution is halted. Resume it in the Autonomy view to continue.",
+    "paused": "Paused at a safe point, between model steps: every action so far is recorded. Resume to continue.",
     "context_changed": ("Stopped: your consent or memory changed since this session began, and its earlier messages "
                         "may carry what you withdrew. Send a new message to continue in a fresh session."),
 }
@@ -115,6 +116,8 @@ class Agent:
         self.store, self.audit = ci.store, ci.audit
         self._adapters: dict[tuple[str, str | None], object] = {}
         self._locks: dict[str, threading.Lock] = {}
+        # Optional: a callable checked before every model step; True stops the turn as "paused".
+        self.pause_check = None
 
     # ------------------------------------------------------------------ adapters
     def set_adapter(self, provider: str, model: str | None, adapter) -> None:
@@ -419,6 +422,8 @@ class Agent:
             return "context_changed"
         if self.ws.is_halted(user_id):
             return "halted"
+        if self.pause_check is not None and self.pause_check():  # a goal's owner asked it to pause
+            return "paused"
         if turn["tool_calls"] >= lim.max_tool_calls:
             return "max_tool_calls"
         if time.monotonic() - turn["t0"] > lim.max_seconds:
