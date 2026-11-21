@@ -119,6 +119,7 @@ class Agent:
         self._locks: dict[str, threading.Lock] = {}
         # Optional: a callable checked before every model step; True stops the turn as "paused".
         self.pause_check = None
+        self.cancel_check = None
 
     # ------------------------------------------------------------------ adapters
     def set_adapter(self, provider: str, model: str | None, adapter) -> None:
@@ -396,8 +397,13 @@ class Agent:
                                   error=type(e).__name__)
                 self._save(user_id, project_id, sid, st)
                 raise
-            st["messages"].append({"role": "assistant", "content": step.content})
             self._account(st, turn, step)
+            # A goal can be cancelled while the provider is returning its reply. Account for the call
+            # and discard the reply before it can schedule actions or end the goal.
+            if self.cancel_check is not None and self.cancel_check():
+                return self._stop(user_id, project_id, sid, st, touched, turn, "stopped", "paused",
+                                  _STOP_NOTES["paused"])
+            st["messages"].append({"role": "assistant", "content": step.content})
             text = step.text
             if step.text:
                 st["display"].append({"role": "ci", "text": step.text, "at": utcnow().isoformat(), "model": step.model})

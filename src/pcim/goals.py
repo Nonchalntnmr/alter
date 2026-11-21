@@ -244,8 +244,9 @@ class GoalStore:
         r = self.store.query("SELECT max(id) FROM goal_events WHERE goal_id=?", (gid,))
         return int(r[0][0] or 0)
 
-    def has_pending_event(self, gid: str) -> bool:
-        return bool(self.store.query("SELECT 1 FROM goal_events WHERE goal_id=? AND consumed_at IS NULL LIMIT 1", (gid,)))
+    def has_pending_event(self, gid: str, kind: str | None = None) -> bool:
+        return bool(self.store.query("SELECT 1 FROM goal_events WHERE goal_id=? AND consumed_at IS NULL "
+                                     "AND (? IS NULL OR kind=?) LIMIT 1", (gid, kind, kind)))
 
     def consume(self, ids: list[int]) -> None:
         now = utcnow().isoformat()
@@ -480,6 +481,7 @@ class GoalRunner:
         g.status, g.worker_pid, g.payload["reason"] = "running", os.getpid(), None
         self.gs.save(g)
         self.agent.pause_check = lambda: self.gs.has_pending_event(gid)
+        self.agent.cancel_check = lambda: self.gs.has_pending_event(gid, "cancel")
         base_limits = self.agent.limits
         deadline = time.monotonic() + (window_s or g.payload["window_s"])
         message = None
@@ -552,6 +554,7 @@ class GoalRunner:
             return self._park(g, "paused", "interrupted by you (Ctrl-C); resume to continue")
         finally:
             self.agent.pause_check = None
+            self.agent.cancel_check = None
             self.agent.limits = base_limits
             with contextlib.suppress(KeyError, GoalError):
                 cur = self.gs.get(self.uid, gid)
@@ -740,6 +743,7 @@ class GoalRunner:
             base = self.agent.limits
             self.agent.limits = dc.replace(base, max_seconds=max(30.0, min(base.max_seconds, g.payload["window_s"])))
             self.agent.pause_check = lambda: self.gs.has_pending_event(gid)
+            self.agent.cancel_check = lambda: self.gs.has_pending_event(gid, "cancel")
             turn = None
             try:
                 for t in pend:
@@ -748,6 +752,7 @@ class GoalRunner:
                         turn = out
             finally:
                 self.agent.pause_check = None
+                self.agent.cancel_check = None
                 self.agent.limits = base
             if turn is None or (turn.status == "awaiting_approval" and not (turn.usage or {}).get("steps")):
                 # part of the step is resolved and the rest still waits: no model step ran, so no turn

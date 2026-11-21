@@ -301,6 +301,26 @@ def test_s1_cancelling_a_goal_never_calls_the_model_or_runs_what_it_waited_on(en
     assert repo.joinpath("calc.py").read_text().endswith("a - b\n")
 
 
+def test_cancel_during_a_model_call_discards_its_proposed_write(env, monkeypatch):
+    ci, ws, p, repo, here = env
+    r, mock = runner(ci, here, [W()])
+    g = start(r)
+    step = mock.agent_step
+
+    def cancel_before_reply(*args, **kwargs):
+        reply = step(*args, **kwargs)
+        r.gs.add_event("u", g.id, "cancel")
+        return reply
+
+    monkeypatch.setattr(mock, "agent_step", cancel_before_reply)
+
+    cancelled = r.run(g.id)
+
+    assert cancelled.status == "cancelled" and len(mock.requests) == 1
+    assert (repo / "calc.py").read_text().endswith("a - b\n")
+    assert cancelled.payload["verification"]["writes"] == 0
+
+
 def test_s2_a_goal_does_not_open_a_session_over_another_goals_approval(env):
     ci, ws, p, repo, here = env
     r, _ = runner(ci, here, [{"text": "Should add() return the sum?"}], autonomous=False)
