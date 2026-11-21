@@ -5,6 +5,8 @@ ProviderError as a RuntimeError. Mock agent or the stand-in `claude`: no model i
 
 import json
 import os
+import shlex
+import signal
 import subprocess
 import sys
 import time
@@ -40,6 +42,60 @@ def test_1_the_worker_never_imports_code_from_the_project(home, capsys):
     assert "Intended outcome" not in log and "calc.py" not in log and json.loads(log.strip().splitlines()[-1])["status"] == "done"
     assert alter.main(["goals", "forget", gid]) == 0
     assert not (gs.dir / f"{gid}.log").exists() and not (gs.dir / f"{gid}.lock").exists()
+
+
+def test_resume_reaps_an_interrupted_test_before_starting_a_new_one(home, capsys):
+    from pcim import terminal as T
+    from pcim.governor import Governor
+    from pcim.tasks import TaskQueue
+
+    _, repo, _ = home
+    test_command = """
+import fcntl
+import time
+from pathlib import Path
+import calc
+
+with Path('test-process.lock').open('a') as lock:
+    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    first = Path('first-test-started')
+    if not first.exists():
+        first.touch()
+        end = time.monotonic() + 20
+        while not Path('release-first-test').exists() and time.monotonic() < end:
+            time.sleep(0.05)
+    assert calc.add(2, 3) == 5
+"""
+    assert alter.main(["init", "--tests", shlex.join([sys.executable, "-c", test_command])]) == 0
+    assert alter.main(["permissions", "autonomy", "grant"]) == 0
+    ci, uid = T._open()
+    here = T._here(ci, uid)
+    ws = Workspace(ci)
+    queue = TaskQueue(ws, Governor(ws))
+    gs = G.GoalStore(ci)
+    assert alter.main(["goals", "start", "fix add()", "--background"]) == 0
+    try:
+        deadline = time.monotonic() + 10
+        while not (repo / "first-test-started").exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert (repo / "first-test-started").exists()
+        goal = gs.list(uid, here.project_id)[0]
+        [running] = queue.list(uid, here.project_id, status="running")
+        assert running.tool == "run_tests"
+        os.kill(goal.worker_pid, signal.SIGKILL)
+        deadline = time.monotonic() + 5
+        while gs.is_live(goal.id) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert gs.shown_status(gs.get(uid, goal.id)) == "interrupted"
+        capsys.readouterr()
+        assert alter.main(["goals", "resume", goal.id]) == 0
+        out = capsys.readouterr().out
+        assert "verified: the project's tests passed" in out
+        assert queue.get(uid, running.id).status == "interrupted"
+        attempts = [t for t in queue.list(uid, here.project_id) if t.tool == "run_tests"]
+        assert [t.status for t in attempts] == ["succeeded", "interrupted"]
+    finally:
+        (repo / "release-first-test").touch()
 
 
 def test_1b_the_search_child_does_not_import_from_its_working_directory(tmp_path, monkeypatch):

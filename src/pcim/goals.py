@@ -477,6 +477,10 @@ class GoalRunner:
             return g  # nothing to do until the person approves or refuses
         awaiting_answer = incoming == "waiting_answer" and first_turn is None
         if incoming == "running" and first_turn is None:  # this process holds the lock: the last worker died mid-run
+            if self.agent.queue.recover_project_tests(self.uid, g.project_id, wait_s=1.0) is None:
+                g.payload["reason"] = "a previous test command is still running in this project; resume after it exits"
+                self.gs.save(g)
+                return g
             g.payload.setdefault("interruptions", []).append(utcnow().isoformat())
         g.status, g.worker_pid, g.payload["reason"] = "running", os.getpid(), None
         self.gs.save(g)

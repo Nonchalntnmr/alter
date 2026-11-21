@@ -16,7 +16,7 @@ import json
 import os
 import re
 import secrets
-import signal
+import socket
 import stat
 import subprocess
 import sys
@@ -230,7 +230,7 @@ def _search_in_child(root: Path, pattern: str, glob: str, timeout_s: float, excl
 
 class Executor:
     def __init__(self, search_timeout_s: float = 10.0):
-        self._procs: dict[str, subprocess.Popen] = {}
+        self._test_channels: dict[str, socket.socket] = {}
         self._cancelled: set[str] = set()
         self._lock = threading.Lock()
         self.search_timeout_s = search_timeout_s
@@ -238,19 +238,17 @@ class Executor:
     def cancel(self, task_id: str) -> bool:
         with self._lock:
             self._cancelled.add(task_id)
-            proc = self._procs.get(task_id)
-        if proc and proc.poll() is None:
-            try:
-                os.killpg(proc.pid, signal.SIGTERM)
-                time.sleep(0.2)
-                if proc.poll() is None:
-                    os.killpg(proc.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            return True
-        return False
+            channel = self._test_channels.get(task_id)
+        if channel is None:
+            return False
+        try:
+            channel.shutdown(socket.SHUT_WR)
+        except OSError:
+            return False
+        return True
 
-    def run(self, task_id: str, tool: str, args: dict, spec: dict, exclude=()) -> dict:
+    def run(self, task_id: str, tool: str, args: dict, spec: dict, exclude=(), *,
+            test_lock_fd: int | None = None) -> dict:
         """`exclude`: resolved paths search_code must skip (files this caller may not read)."""
         root = Path(spec["root"]).resolve()
         if tool == "read_file":
@@ -329,16 +327,25 @@ class Executor:
                     "sha256_after": _sha(content.encode()),
                     "backup": text}
         if tool == "run_tests":
-            argv, timeout = spec["run_argv"], int(spec.get("run_timeout_s", 300))
-            t0 = time.time()
-            # No bytecode: a fix the same size as the code it replaces, written within the same
-            # second, would otherwise be tested as the stale .pyc of the old code (CPython checks
-            # whole-second mtime and size). That verifies code that is no longer on disk.
-            proc = subprocess.Popen(argv, cwd=root, env={**scrubbed_env(), "PYTHONDONTWRITEBYTECODE": "1"},
+            return self._run_tests(task_id, root, spec, test_lock_fd)
+        raise ToolError(f"{tool} is not executed by the executor")
+
+    def _run_tests(self, task_id: str, root: Path, spec: dict, test_lock_fd: int | None) -> dict:
+        argv, timeout = spec["run_argv"], int(spec.get("run_timeout_s", 300))
+        t0 = time.monotonic()
+        worker_script = Path(__file__).with_name("_test_worker.py").resolve()
+        caller, worker = socket.socketpair()
+        with caller, worker:
+            # The supervisor inherits the project lock, which stays held until the test group exits.
+            # Only the supervisor sees these descriptors. The approved command gets the usual environment.
+            fds = (worker.fileno(),) if test_lock_fd is None else (worker.fileno(), test_lock_fd)
+            command = [sys.executable, "-I", str(worker_script), str(worker.fileno()), *argv]
+            proc = subprocess.Popen(command, cwd=root, env={**scrubbed_env(), "PYTHONDONTWRITEBYTECODE": "1"},
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                                    start_new_session=True)
+                                    pass_fds=fds, start_new_session=True)
+            worker.close()
             with self._lock:
-                self._procs[task_id] = proc
+                self._test_channels[task_id] = caller
                 cancelled_early = task_id in self._cancelled
             if cancelled_early:  # cancel arrived between "running" and Popen; outside the lock
                 self.cancel(task_id)
@@ -351,12 +358,17 @@ class Executor:
                 timed_out = True
             finally:
                 with self._lock:
-                    self._procs.pop(task_id, None)
+                    self._test_channels.pop(task_id, None)
             if task_id in self._cancelled and not timed_out:
                 raise Cancelled("cancelled while running")
-            return {"argv": argv, "exit_code": proc.returncode, "timed_out": timed_out,
-                    "duration_s": round(time.time() - t0, 2), "stdout_tail": out[-6000:], "stderr_tail": err[-3000:]}
-        raise ToolError(f"{tool} is not executed by the executor")
+            with caller.makefile("rb") as response:
+                result = json.loads(response.read() or "{}")
+        if "error" in result:
+            raise ToolError(result["error"])
+        if not timed_out and "exit_code" not in result:
+            raise ToolError("the test supervisor exited without a result")
+        return {"argv": argv, "exit_code": result.get("exit_code", proc.returncode), "timed_out": timed_out,
+                "duration_s": round(time.monotonic() - t0, 2), "stdout_tail": out[-6000:], "stderr_tail": err[-3000:]}
 
 
 if __name__ == "__main__":  # the search child (see _search_in_child)

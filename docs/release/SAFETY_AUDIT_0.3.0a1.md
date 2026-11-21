@@ -41,7 +41,7 @@ three characters (`rev…@nor…` for the author email). The scans print labels 
 | E3 | medium | The agent path (`ci do`, goals, `alter say`) has no credential tripwire on what the person types or on tool results. Pre-existing since rc2. | open |
 | E10 | medium | With the GitHub source on and autonomy granted, anyone's PR title on a public repository reaches the goal's first message. An injected instruction could get a test file written and then run. | open |
 | R5 | medium | No undo command exists in `alter`, `ci` or `pcim`. `ci undo <task>` is sent to the model as a question, and exits 0. | open |
-| R6 | medium | After a goal worker dies, its test process keeps running and its task stays `running` forever. Resume starts a second test run alongside it. | open |
+| R6 | medium | After a goal worker died, its test process kept running and its task stayed `running`. Resume started a second test run alongside it. | fixed in the recovery follow-up |
 | R7 | medium | Backup and restore are not documented. A plain copy of `pcim.db` taken while a worker holds the store open loses committed data. | open (procedure in §4) |
 | H2 | low | The home path (`/Us…`, holding the username `nis…`) is in 3 files on `main`. | owner decision (§6) |
 | H3 | low | A model answer on `main` names the institution behind the email domain (a leak from before identity isolation). | owner decision (§6) |
@@ -244,15 +244,18 @@ the project.
   `interrupted: goal_… (alter goals resume <id>)`. The worker log was empty.
 - `alter goals resume <id>` continued in a new session, with a fresh brief. The tests ran, and the
   goal ended `done`, exit 0. Nothing was lost.
-- **R6 (medium, open).**
+- **R6 (medium, fixed in the recovery follow-up).** The audit initially observed:
   - The killed worker's test process kept running. `run_tests` starts it in its own session
     (`tools.py:335`).
   - The task stayed `running` in `alter tasks` after the resume, and still does.
   - The resume started a second `sleep 25` while the first was alive. A real suite writing shared
     files could give a false result.
 
-  Remediation: store the process group id with the task. On resume, or in `doctor`, kill a stale
-  group and mark its task `interrupted`.
+  The test supervisor now terminates its test process group if the caller exits. It holds a
+  project lock through cleanup, which prevents a second test from starting. Resume records the
+  old attempt as `interrupted` before starting work. The regression kills a real background
+  worker while its test holds a file lock, then verifies that resume can run the tests and
+  finish the goal.
 - Ctrl-C, the end of the window, a pause, and "waiting on approval" were not re-tested here.
   `tests/test_alter_goals.py` and `test_alter_review.py` cover them.
 
@@ -379,4 +382,4 @@ Each fix has its own commit and regression test (`tests/test_safety_audit.py`). 
    `user.email`. If you switch to the noreply address first, re-author them before pushing. That is
    a rewrite of this unpushed branch only, which this audit did not do.
 5. **Open items to schedule:** E2, E3 and E10 (the egress and autonomy design), R5 (an undo
-   command), R6 (orphaned test runs), R7 (`pcim backup`), then the low items.
+   command), R7 (`pcim backup`), then the low items.

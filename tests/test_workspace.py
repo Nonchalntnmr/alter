@@ -144,6 +144,7 @@ def test_timeout_and_cancel_kill_the_process(env):
         if q.get("u", pending.id).status == "running":
             break
         time.sleep(0.05)
+    assert q.recover()["interrupted"] == 0 and q.get("u", pending.id).status == "running"
     q.cancel("u", pending.id)
     th.join(timeout=10)
     assert not th.is_alive() and q.get("u", pending.id).status == "cancelled"

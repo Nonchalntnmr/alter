@@ -14,11 +14,13 @@ action cannot loop past its limit.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import datetime as dt
 import hashlib
 import logging
 import time
+from pathlib import Path
 
 from .governor import RISK, Governor, jail
 from .registry import vendor_of
@@ -34,6 +36,10 @@ MODEL_HIDDEN = ("backup", "lineage", "abs_path")  # CI's bookkeeping in a task r
 
 
 class TaskStateError(RuntimeError):
+    pass
+
+
+class _TestRunBusy(RuntimeError):
     pass
 
 
@@ -194,15 +200,78 @@ class TaskQueue:
         """Call at startup. Nothing that was mid-flight when the process died is re-run."""
         now = utcnow().isoformat()
         a = self.store.execute("UPDATE tasks SET status='interrupted', reason='process stopped while running', "
-                               "updated_at=? WHERE status='running'", (now,)).rowcount
+                               "updated_at=? WHERE status='running' AND tool!='run_tests'", (now,)).rowcount
+        for row in self.store.query("SELECT DISTINCT user_id, project_id FROM tasks "
+                                    "WHERE status='running' AND tool='run_tests'"):
+            a += self.recover_project_tests(row["user_id"], row["project_id"]) or 0
         cutoff = (utcnow() - dt.timedelta(seconds=self.ttl)).isoformat()
         b = self.store.execute("UPDATE tasks SET status='expired', reason='approval window passed before restart', "
                                "updated_at=? WHERE status IN ('approved','awaiting_approval') AND COALESCE(approved_at, created_at) < ?",
                                (now, cutoff)).rowcount
         return {"interrupted": a, "expired": b}
 
+    @contextlib.contextmanager
+    def _test_lock(self, project_id: str, wait_s: float = 0.0):
+        """The worker and its test supervisor share this lock until both have exited."""
+        if self.store.path == ":memory:":
+            yield None
+            return
+        import fcntl
+
+        directory = Path(self.store.path).parent / "test-runs"
+        directory.mkdir(mode=0o700, exist_ok=True)
+        with (directory / f"{project_id}.lock").open("a") as lock:
+            deadline = time.monotonic() + wait_s
+            while True:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError as e:
+                    if time.monotonic() >= deadline:
+                        raise _TestRunBusy("a test command is still running in this project") from e
+                    time.sleep(0.05)
+            yield lock.fileno()
+
+    def _interrupt_tests(self, user_id: str, project_id: str) -> int:
+        now = utcnow().isoformat()
+        count = self.store.execute(
+            "UPDATE tasks SET status='interrupted', reason='worker stopped during the test command', "
+            "updated_at=?, finished_at=? WHERE user_id=? AND project_id=? AND status='running' AND tool='run_tests'",
+            (now, now, user_id, project_id),
+        ).rowcount
+        if count:
+            self.audit.append(user_id, "task.tests_interrupted", project=project_id, count=count)
+        return count
+
+    def recover_project_tests(self, user_id: str, project_id: str, wait_s: float = 0.0) -> int | None:
+        """Count interrupted tests, or return None while a command still holds the project lock."""
+        try:
+            with self._test_lock(project_id, wait_s):
+                return self._interrupt_tests(user_id, project_id)
+        except _TestRunBusy:
+            return None
+
     def _execute(self, user_id: str, task_id: str) -> None:
         t = self.get(user_id, task_id)
+        if t.tool != "run_tests":
+            self._execute_task(user_id, t)
+            return
+        try:
+            with self._test_lock(t.project_id) as lock_fd:
+                self._interrupt_tests(user_id, t.project_id)
+                self._execute_task(user_id, t, test_lock_fd=lock_fd)
+        except (OSError, _TestRunBusy) as error:
+            now = utcnow().isoformat()
+            changed = self.store.execute(
+                "UPDATE tasks SET status='failed', reason=?, updated_at=?, finished_at=? "
+                "WHERE id=? AND status='approved'",
+                (str(error)[:500], now, now, task_id),
+            ).rowcount
+            if changed:
+                self.audit.append(user_id, "task.finish", task=task_id, tool=t.tool, status="failed", ms=0)
+
+    def _execute_task(self, user_id: str, t: Task, test_lock_fd: int | None = None) -> None:
+        task_id = t.id
         d = self.gov.recheck(user_id, t.project_id, t.tool, t.args, t.authorization_id)
         if d.action != "execute":
             self._set(task_id, status="denied", reason=f"at execution: {d.reason}"[:500])
@@ -228,7 +297,10 @@ class TaskQueue:
                 result = self._read(user_id, t, self.ws.workspace_auth(user_id, t.project_id)["spec"])
             else:
                 spec = self.ws.workspace_auth(user_id, t.project_id)["spec"]
-                result = self.executor.run(task_id, t.tool, t.args, spec)
+                if t.tool == "run_tests":
+                    result = self.executor.run(task_id, t.tool, t.args, spec, test_lock_fd=test_lock_fd)
+                else:
+                    result = self.executor.run(task_id, t.tool, t.args, spec)
                 if t.tool == "write_file" and (lineage := self.exposure(user_id, t)):
                     result["lineage"] = lineage  # the file now carries what its writer was shown (file_lineage)
             status, reason = "succeeded", None
