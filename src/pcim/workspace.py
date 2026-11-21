@@ -218,6 +218,16 @@ class Workspace:
         ]
         counts = self.store.delete_project_rows(project_id, row["key_id"], interaction_ids=interaction_ids)
         counts["memory_items"] = len(doomed)
+        import sqlite3
+        try:  # ALTER's goals for this project (their payloads were sealed with the key just destroyed)
+            gids = [r["id"] for r in self.store.query("SELECT id FROM goals WHERE project_id=? AND user_id=?",
+                                                      (project_id, user_id))]
+            for gid in gids:
+                self.store.execute("DELETE FROM goal_events WHERE goal_id=?", (gid,))
+            self.store.execute("DELETE FROM goals WHERE project_id=? AND user_id=?", (project_id, user_id))
+            counts["goals"] = len(gids)
+        except sqlite3.OperationalError:  # ALTER never ran here: there is no goals table
+            pass
         self.audit.append(user_id, "project.delete", project=project_id, **{k: int(v) for k, v in counts.items()})
         return counts
 

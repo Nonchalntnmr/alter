@@ -3,6 +3,13 @@ A research prototype of a user-owned context layer that sits in front of any fou
 model. It decides what each model should know about you for each request, learns from
 outcomes which context actually helps, and can prove what it sent and what it deleted.
 
+**ALTER 0.3.0a1 (alpha).**
+- **One command:** `alter`, which understands, remembers, acts, verifies and learns on a project
+  folder.
+- **Start with:** `alter doctor`, `alter init --provider claude-cli` in a project, then `alter`.
+- **What is built and what is not:** `docs/ALTER.md`.
+- **No performance claim** over direct model use is made. The release gate stays CONDITIONAL.
+
 **Start here.** Read `docs/RESEARCH.md` §0 first; it is half a page. The short version:
 
 - **Shown, in simulation only:** a value model learned *across a population* beats a

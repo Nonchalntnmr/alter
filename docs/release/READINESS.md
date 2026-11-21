@@ -1,3 +1,42 @@
+# Release readiness
+
+## ALTER `0.3.0a1` (alpha), 2026-11-21
+
+**Gate decision: CONDITIONAL, unchanged.** This is an **alpha** for the owner's machine.
+- It makes no claim of research validation or performance over direct model execution.
+- It has had no human evaluation.
+- The evidence below is engineering evidence: it shows the product works, not that it helps
+  people.
+
+| check | result |
+|---|---|
+| full suite (`scripts/check.sh`, CI's rule set) | **642 passed, 4 skipped**, plus ALTER's own twin tests |
+| clean install from the wheel, fresh venv, fresh shell | `alter --version` → `alter 0.3.0a1 (alpha)`; `alter doctor` exits 0 against the real data (`claude` CLI 2.1.316, isolation verified) |
+| `scripts/e2e_terminal.py` against the installed wheel | **37 / 37** |
+| independent code review (a separate agent, read-only) | **18 findings**, 4 of them security; **all fixed**. Of the 18 regression tests, 17 failed on the reviewed code. Second pass: see the PR. |
+| identity scan of the branch history | **clean**, after one redaction: ALTER had written the owner's name into a test (§ live runs) |
+
+**Live runs** through the installed `alter` with the real `claude` CLI (Opus), in a worktree of
+this repository, autonomy granted for that folder only:
+
+| goal | turns | cost | result |
+|---|---|---|---|
+| "examine everything we've built … finish the next working version of my cognitive twin" (steered while it ran) | 3 | $4.56 | **done, verified** (the project's tests passed after the last change): `twin_do.py` + test |
+| "Continue what we were building." | 1 | $1.11 | changed nothing; refused to edit two large files it had received cut off, and asked two questions. **It exposed two bugs**, both fixed: silent truncation of tool results, and a goal ending "done" after asking questions. |
+| "Continue …" with the answers (paused after its first checkpoint, then resumed) | 3 | $4.33 | **done, verified**: one failing test run fixed. It used passage edits to `twin.py` and `terminal.py`, wiring `ci twin include/exclude do` and the weekly section. |
+
+**Still open for this alpha:**
+1. **No human evaluation.**
+2. **Identifiers from context can reach a file.** ALTER can write identifiers it saw in its
+   context into files, and did so once. Run `scripts/scan_identity.py --history` before any push.
+   Next step: run that check on a goal's changed files before the goal counts as done.
+3. **Agent cost.** With Opus through the CLI, one turn can reach the $2 turn limit. Costs are as
+   the CLI reports them.
+4. **This configuration only.** Identity isolation is still verified only for `claude` CLI
+   2.1.316.
+
+---
+
 # Release readiness: Alter `0.2.0rc2`
 
 **Gate decision: CONDITIONAL.**

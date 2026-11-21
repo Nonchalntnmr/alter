@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "contextual-intelligence"
-version = "0.2.0rc2"
+version = "0.3.0a1"
 description = "Personal CI: a research prototype of a user-owned, outcome-learned context layer in front of foundation models"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -37,6 +37,7 @@ all = ["contextual-intelligence[api,anthropic,neural,mcp,test]"]
 [project.scripts]
 pcim = "pcim.cli:main"
 ci = "pcim.terminal:main"
+alter = "pcim.alter:main"
 pcim-mcp = "pcim.mcp_server:main"
 
 [tool.setuptools.packages.find]

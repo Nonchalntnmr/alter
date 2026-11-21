@@ -1,6 +1,8 @@
-# The cognitive twin and `ci do` work: an investigation and a design (not built)
+# The cognitive twin and `ci do` work: a design, and its first slice
 
-Written 2026-11-18. **Status: a proposal.** Nothing here is implemented or measured.
+Written 2026-11-18; updated 2026-11-21. **Status: a counts-only, default-off slice is built**
+(`src/pcim/twin_do.py`, `ci twin include|exclude do`, a CI DO section in `ci weekly`). The rest is a
+proposal, and nothing here is measured. See "What is built, and what is not" at the end.
 
 ## What the twin sees today (read from `src/pcim/twin.py`)
 
@@ -49,8 +51,27 @@ likely to save the person effort is the one part the twin cannot learn from.
    as how they phrase requests or whether they run tests, more often than a review without them.
    Self-reported liking does not count: the twin's own rule is "not tuned for approval".
 
-## Why it is not built now
+## What is built, and what is not (2026-11-21)
 
-The directive ranks safety, task completion, missed clarifications and reliability above the twin.
-eval_v5 is still measuring the routing questions that decide what `ci do` records are worth
-learning from. This becomes the next twin item once eval_v5 and the human evaluation report.
+Built, off by default:
+- `ci twin include do` / `ci twin exclude do`. Consent is sealed per-user state, and each change
+  is written to the audit log. Plain `ci twin` shows the current state.
+- `ci weekly` shows, and stores in its snapshot, counts only:
+  - requests
+  - verdicts (verified, not verified, unchanged, none)
+  - done claims without verification
+  - requests that answered a question, and requests waiting for an answer
+
+  No request text, answers or ids are kept. tests/test_twin_do.py checks this.
+- A request removed with `ci do forget` is not counted in the next summary. tests/test_twin_do.py
+  checks this too.
+
+Not built:
+- The per-request-kind and repeated-request questions in the table above. They need request text,
+  and this slice reads none.
+- Any change to `--deep`. This slice did not change the digest it sends.
+- The pre-registered usefulness check (step 2 above).
+
+On 2026-11-18 this work was set to wait for eval_v5 and the human evaluation. eval_v6 has since
+run (`0d61d26`). The human evaluation exists only as a protocol (`b17260d`). On 2026-11-21 the
+person chose to build this slice now; the human evaluation is separate.

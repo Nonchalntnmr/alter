@@ -691,6 +691,19 @@ def cmd_twin(argv: list[str]) -> int:
     from .types import utcnow
     ci, uid = _open()
     twin = CognitiveTwin(ci)
+    if argv:
+        from . import twin_do
+        if len(argv) == 2 and argv[0] in ("include", "exclude") and argv[1] == "do":
+            if argv[0] == "include":
+                twin_do.include_do(ci, uid)
+                print("The twin now counts your `ci do` requests in `ci weekly` (counts only, no request text). "
+                      "Undo: ci twin exclude do")
+            else:
+                twin_do.exclude_do(ci, uid)
+                print("The twin no longer reads your `ci do` records.")
+            return 0
+        print("usage: ci twin [include do | exclude do]", file=sys.stderr)
+        return 2
     dna = ci.dna(uid)
     rep = independence_report(ci.store.list_skills(uid), ci.attempts(uid), utcnow())
     print(f"{twin.name(uid)} — a model of how {uid} works, built from what you recorded. It is not you, and it says which parts are facts.")
@@ -719,6 +732,9 @@ def cmd_twin(argv: list[str]) -> int:
     print(f"\nOpen challenges (experiments not yet run): {len(open_ch)}")
     print(f"Plans: {sum(1 for p in plans if p['status'] == 'needs_answers')} waiting on your answers, "
           f"{sum(1 for p in plans if p['status'] in ('awaiting_approval', 'ready'))} waiting on approval")
+    from . import twin_do
+    print("ci do records: " + ("included (counts only) · ci twin exclude do" if twin_do.do_included(ci, uid)
+                               else "not read (default) · ci twin include do"))
     print("\nWeekly review: ci weekly   ·   evidence behind any of this: ci audit, pcim export")
     return 0
 
@@ -889,27 +905,15 @@ def _session_verification(ci, uid: str, project_id: str, sid: str, final_text: s
     from .governor import Governor
     from .tasks import TaskQueue
     ws = Workspace(ci)
-    ts = sorted((t.public() for t in TaskQueue(ws, Governor(ws)).list(uid, project_id, limit=1000) if t.session_id == sid),
-                key=lambda t: t["created_at"])
-    writes = [i for i, t in enumerate(ts) if t["tool"] == "write_file" and t["status"] == "succeeded"]
-    # a test run that ran is "succeeded" as a tool call; a failing suite carries a reason ("tests exited 1")
-    runs = [(i, not t.get("reason")) for i, t in enumerate(ts) if t["tool"] == "run_tests" and t["status"] == "succeeded"]
-    refused = [{"tool": t["tool"], "path": (t.get("args") or {}).get("path"), "status": t["status"]}
-               for t in ts if t["status"] in ("denied", "cancelled", "expired")]
-    after = [passed for i, passed in runs if writes and i > writes[-1]]  # only what ran after the last change counts
-    if not writes:
-        verdict, line = "unchanged", "no file was changed"
-    elif after and after[-1]:
-        verdict, line = "verified", "verified: the project's tests passed after the last change"
-    elif after:
-        verdict, line = "not_verified", "not verified: the last test run after the change did not pass"
-    else:
-        verdict, line = "not_verified", ("not verified: the tests were not run after the last change "
-                                         "(ask CI to run them, or run them yourself)")
-    # what the reply claims, against what the records show: executed is not the same as verified
-    claims = bool(_CLAIMS_DONE.search(final_text or ""))
-    return {"verdict": verdict, "line": line, "refused": refused, "writes": len(writes), "test_runs": len(runs),
-            "claims_done": claims, "claim_unverified": claims and verdict != "verified"}
+    from .goals import verify_tasks
+    ts = [t.public() for t in TaskQueue(ws, Governor(ws)).list(uid, project_id, limit=1000) if t.session_id == sid]
+    v = verify_tasks(ts, final_text)  # ordered by when actions ran, not when they were proposed
+    out = {k: v[k] for k in ("verdict", "line", "refused", "writes", "test_runs", "claims_done", "claim_unverified")}
+    if v["verdict"] == "not_verified":  # ci do's own wording, kept
+        out["line"] = ("not verified: the last test run after the change did not pass" if "did not pass" in v["line"] else
+                       "not verified: the tests were not run after the last change "
+                       "(ask CI to run them, or run them yourself)")
+    return out
 
 
 def _print_verification(v: dict) -> None:
