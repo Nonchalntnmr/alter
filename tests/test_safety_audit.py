@@ -160,3 +160,46 @@ def test_s4_a_file_undo_could_not_restore_is_not_overwritten(tmp_path):
     assert w.status == "succeeded" and (repo / "utf.txt").read_text() == "replaced\n"
     q.undo("u", w.id)
     assert (repo / "utf.txt").read_bytes() == utf
+
+
+# S5 -----------------------------------------------------------------------------------------------
+def test_s5_the_alter_brief_never_carries_a_credential_to_the_model(tmp_path):
+    """`ci ask` withholds cloud vendors from a request that holds a credential; ALTER's brief bypassed
+    that check, so a key in a vault note, a README or a commit subject reached the goal's provider."""
+    from test_alter_goals import _texts, env, runner, start  # noqa: F401
+    from pcim import thirdeye
+    from pcim.sovereignty.credentials import find_credentials
+    from pcim.terminal import Here
+    from pcim.workspace import Workspace
+    aws = "AKIA" + "ABCDEFGHIJKLMNOP"  # fake, and built here so the file itself holds no key-shaped string
+    gh = "ghp_" + "0123456789abcdefghij0123456789abcdef"
+    ci = PersonalCI(tmp_path / "data", seed=0)
+    ci.onboard("u", "U", providers=("mock",))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text(f"# Calc\nexport GITHUB_TOKEN={gh}\n")
+    from test_alter_cli import git
+    git(repo, "init", "-q")
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", f"deploy: rotate {aws}")
+    vault = tmp_path / "vault"
+    (vault / ".obsidian").mkdir(parents=True)
+    (vault / "Calc deploy.md").write_text(f"# Calc deploy\nThe calc deploy user signs in with {aws} for the bucket.\n")
+    ws = Workspace(ci)
+    p = ws.create_project("u", "Calc")
+    ws.authorize_workspace("u", p.id, str(repo), run_argv=["true"], allow_write=True)
+    thirdeye.set_source(ws, "u", "vault", True, str(vault))
+    here = Here(p.id, "Calc", {"mock"}, str(repo))
+
+    brief = thirdeye.gather(ci, "u", here, "calc deploy bucket")
+    assert any(e.source == "vault" for e in brief.evidence)
+    assert find_credentials(brief.for_model()) == [] and aws not in brief.for_terminal()
+    assert "[REDACTED:AWS access key id]" in brief.for_model()
+    assert {e.cite for e in brief.evidence if e.source == "git"} >= {"file:README.md"}
+    assert sum("credential-shaped text redacted" in w for w in brief.withheld) == 3  # README, commit, vault
+
+    r, mock = runner(ci, here, [{"text": "Nothing to change."}])
+    g = start(r, "check the calc deploy bucket")
+    r.run(g.id)
+    sent = _texts(mock)[0]
+    assert "Calc deploy" in sent and aws not in sent and gh not in sent and find_credentials(sent) == []
