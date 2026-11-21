@@ -160,6 +160,6 @@ kept from the model (`MODEL_HIDDEN`).
 
 ## 8. The repository is public
 
-`Nonchalntnmr/alter` has been public since it was created (2026-10-17). Every pushed commit carries
-the author's name and email, and three files on `main` carry this machine's home path.
+The GitHub repository (`origin`) has been public since it was created (2026-10-17). Every pushed
+commit carries the author's name and email, and three files on `main` carry this machine's home path.
 `docs/release/SAFETY_AUDIT_0.3.0a1.md` §1 lists what is there and what removing it would take.
