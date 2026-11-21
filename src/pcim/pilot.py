@@ -185,6 +185,8 @@ def compute(ci, uid: str, days: int | None = 30, project_id: str | None = None, 
             "wall_s": _secs(g.created_at, cps[-1]["at"]) if cps and g.status in G.FINAL else None,
             "paused": g.id in paused,  # parked as paused, whatever the cause (the audit's goal.park)
             "interruptions": len(g.payload.get("interruptions") or []) + (shown == "interrupted"),
+            # C10: files this goal wrote that hold the person's identifiers (labels only, never values)
+            "identifier_files": len(g.payload.get("identifiers") or []),
         })
 
     fin = [r for r in rows if r["final"]]
@@ -223,6 +225,9 @@ def compute(ci, uid: str, days: int | None = 30, project_id: str | None = None, 
         "verified_done": _rate(verified, len(fin)),
         "done_nothing_changed": sum(r["status"] == "done" and r["verdict"] == "unchanged" for r in fin),
         "false_done": {"n": len(false_done), "goals": false_done},
+        "identifiers": {"goals_with_hits": sum(r["identifier_files"] > 0 for r in rows),
+                        "files": sum(r["identifier_files"] for r in rows),
+                        "goals": [r["goal"] for r in rows if r["identifier_files"]]},
         "unauthorized": {"ran_without_permission": [x for r in rows for x in r["ran_without_permission"]],
                          "denied_by_policy": [x for r in rows for x in r["denied_by_policy"]],
                          "refused_by_person": sum(r["refused_by_person"] for r in rows)},
@@ -297,6 +302,9 @@ def render(rep: dict, where: str) -> str:
         f"{rep['done_nothing_changed']}",
         f"False done (done without a verified or unchanged verdict): {rep['false_done']['n']}"
         + (f" ({', '.join(rep['false_done']['goals'])})" if rep["false_done"]["n"] else ""),
+        f"Identifiers written into files (C10): {rep['identifiers']['files']} file(s) in "
+        f"{rep['identifiers']['goals_with_hits']} goal(s)"
+        + (f" ({', '.join(rep['identifiers']['goals'])}: review before you commit)" if rep["identifiers"]["files"] else ""),
         f"Unauthorized: {len(u['ran_without_permission'])} action(s) ran without your approval or a grant"
         + (f" ({', '.join(x['task'] for x in u['ran_without_permission'])})" if u["ran_without_permission"] else "")
         + f" · {len(u['denied_by_policy'])} denied by policy" + (f" ({_each(denied)})" if denied else "")

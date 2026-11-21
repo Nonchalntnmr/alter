@@ -56,3 +56,16 @@ def test_a_clean_goal_has_no_warning(env, marks):
     r, _ = runner(ci, here, [W(), RUN(), {"text": "Done."}])
     g = r.run(start(r).id)
     assert g.status == "done" and g.payload["identifiers"] == [] and "WARNING" not in g.payload["reason"]
+
+
+def test_alter_report_counts_goals_that_wrote_identifiers(env, marks):
+    ci, ws, p, repo, here = env
+    from pcim import pilot
+    leak = {"text": "Adding a test.", "tool_uses": [{"id": "w1", "name": "write_file", "input": {
+        "path": "calc.py", "content": "def add(a, b):\n    return a + b\nOWNER = 'Ada Lovelace'\n", "reason": "fix"}}]}
+    r, _ = runner(ci, here, [leak, RUN(), {"text": "Done; tests pass."}])
+    g = r.run(start(r).id)
+    rep = pilot.compute(ci, "u", days=None)
+    assert rep["identifiers"] == {"goals_with_hits": 1, "files": 1, "goals": [g.id]}
+    text = pilot.render(rep, "all projects")
+    assert "Identifiers written into files (C10): 1 file(s) in 1 goal(s)" in text and "lovelace" not in text.lower()
