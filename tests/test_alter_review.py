@@ -285,3 +285,102 @@ def test_17_one_running_goal_per_project(env):
     with r.gs.worker_lock(a.id):
         with pytest.raises(G.GoalError, match="running in this project"):
             start(r, "another")
+
+
+# second pass ---------------------------------------------------------------------------------------
+def test_s1_cancelling_a_goal_never_calls_the_model_or_runs_what_it_waited_on(env):
+    ci, ws, p, repo, here = env
+    r, mock = runner(ci, here, [W(), {"text": "must never be asked"}], autonomous=False)
+    g = r.run(start(r).id)
+    assert g.status == "waiting_approval"
+    pend = G.pending_tasks(ci, "u", g)
+    r.gs.add_event("u", g.id, "cancel")
+    g = r.apply_events(g.id)
+    assert g.status == "cancelled" and len(mock.requests) == 1
+    assert r.agent.queue.get("u", pend[0]["id"]).status == "cancelled"
+    assert repo.joinpath("calc.py").read_text().endswith("a - b\n")
+
+
+def test_s2_a_goal_does_not_open_a_session_over_another_goals_approval(env):
+    ci, ws, p, repo, here = env
+    r, _ = runner(ci, here, [{"text": "Should add() return the sum?"}], autonomous=False)
+    a = r.run(start(r, "make add right").id)
+    assert a.status == "waiting_answer"
+    rb, _ = runner(ci, here, [W(), RUN(), {"text": "done"}], autonomous=False)
+    b = rb.run(start(rb, "fix add").id)
+    assert b.status == "waiting_approval"
+    r.gs.add_event("u", a.id, "steer", "yes")
+    a = r.run(a.id)
+    assert a.status == "paused" and b.id in a.payload["reason"]
+    assert rb.agent.open_session("u", p.id) == b.payload["sessions"][-1]  # B's session was not closed
+    b = rb.resolve_pending(b.id, True)
+    assert b.status == "waiting_approval" and G.pending_tasks(ci, "u", b)[0]["tool"] == "run_tests"
+
+
+def test_s3_approving_part_of_a_step_is_not_a_turn_and_the_limit_stops_cleanly(env):
+    ci, ws, p, repo, here = env
+    r, mock = runner(ci, here, [TWO, {"text": "ok"}], autonomous=False)
+    g = r.run(start(r).id)
+    first, second = G.pending_tasks(ci, "u", g)
+    g = r.resolve_pending(g.id, True, task_ids=[first["id"]])
+    assert g.payload["turns"] == 1 and g.status == "waiting_approval" and g.payload["reason"].startswith("1 action")
+    g.payload["max_turns"] = 1
+    r.gs.save(g)
+    g = r.resolve_pending(g.id, True)
+    assert g.status == "stopped" and "cancelled, not run" in g.payload["reason"]
+    assert not (repo / "b.txt").exists() and len(mock.requests) == 1
+
+
+def test_s4_a_pause_given_after_a_resume_request_wins(env, monkeypatch):
+    ci, ws, p, repo, here = env
+    r, mock = runner(ci, here, [W(), RUN(), {"text": "done"}])
+    g = start(r)
+    r.gs.add_event("u", g.id, "pause")
+    r.apply_events(g.id)
+    token = r.gs.last_event_id(g.id)  # "keep going": a worker is spawned with this token
+    r.gs.add_event("u", g.id, "pause")  # then "pause", before that worker starts
+    assert r.apply_events(g.id).status == "paused"
+    assert r.run(g.id, resume=True, resume_after=token).status == "paused" and mock.requests == []
+    seen = {}
+    monkeypatch.setattr(G.subprocess, "Popen", lambda argv, **kw: seen.setdefault("argv", argv) and type("P", (), {"pid": 1})())
+    G.spawn_worker(ci, g.id, str(repo), 60, resume=True)
+    assert "-P" in seen["argv"] and seen["argv"][seen["argv"].index("--resume-after") + 1] == str(r.gs.last_event_id(g.id))
+
+
+def test_s5_a_context_source_that_fails_is_listed_and_the_goal_still_starts(env, monkeypatch):
+    ci, ws, p, repo, here = env
+    def boom(*a, **k):
+        raise subprocess.TimeoutExpired("git", 15)
+    monkeypatch.setattr(thirdeye, "_repo", boom)
+    r, _ = runner(ci, here, [W(), RUN(), {"text": "done"}])
+    g = start(r)
+    assert "git: not read (TimeoutExpired)" in g.payload["context"]["withheld"]
+    assert r.run(g.id).status == "done"
+
+
+def test_s6_the_twins_do_counts_are_shown_but_never_saved(env):
+    ci, ws, p, repo, here = env
+    from pcim import twin_do
+    from pcim.twin import CognitiveTwin
+    twin_do.include_do(ci, "u")
+    rv = CognitiveTwin(ci).review("u")
+    assert rv.do is not None and "do" in rv.as_dict() and "do" not in rv.snapshot()
+
+
+def test_s7_short_command_like_phrases_are_not_goals(home, capsys):
+    tmp, repo, vault = home
+    alter.main(["init", "--tests", check_cmd()])
+    from pcim import terminal as T
+    ci, uid = T._open()
+    for argv in (["Stop."], ["stop", "now"], ["list"], ["show", "goal_x"]):
+        assert alter.main(argv) == 2, argv
+    assert G.GoalStore(ci).list(uid) == []
+
+
+def test_s8_pausing_a_goal_that_waits_for_an_answer_keeps_it_waiting(env):
+    ci, ws, p, repo, here = env
+    r, mock = runner(ci, here, [{"text": "Which file?"}, {"text": "never"}])
+    g = r.run(start(r, "change it").id)
+    r.gs.add_event("u", g.id, "pause")
+    assert r.apply_events(g.id).status == "waiting_answer"
+    assert r.run(g.id, resume=True).status == "waiting_answer" and len(mock.requests) == 1

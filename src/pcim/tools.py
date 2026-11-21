@@ -191,6 +191,11 @@ def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
     the clean filter of every file whose stat data changed. Filter drivers have names of the
     repository's choosing, so each one configured is disabled by name; reading config runs
     nothing."""
+    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=15, env=git_env(root))
+
+
+def git_env(root: Path) -> dict:
+    """The environment `_git` runs git in; also for tools that run git themselves (gh)."""
     env = scrubbed_env()
     keys = subprocess.run(["git", "-C", str(root), "config", "--null", "--name-only", "--get-regexp", r"^filter\."],
                           capture_output=True, text=True, timeout=15, env=env).stdout.split("\0")
@@ -205,7 +210,7 @@ def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
     env["GIT_CONFIG_COUNT"] = str(len(over))  # unlike -c, a key here cannot be split by an "=" in a driver name
     for n, (k, v) in enumerate(over):
         env[f"GIT_CONFIG_KEY_{n}"], env[f"GIT_CONFIG_VALUE_{n}"] = k, v
-    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=15, env=env)
+    return env
 
 
 def _search_in_child(root: Path, pattern: str, glob: str, timeout_s: float, exclude=()) -> dict:

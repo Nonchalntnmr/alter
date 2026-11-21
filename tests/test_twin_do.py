@@ -71,16 +71,18 @@ def test_the_weekly_review_and_snapshot_hold_ci_do_counts_only_after_opt_in(env,
 
     # default off: the review, snapshot and render say nothing about ci do
     rv = twin.review("u")
-    assert rv.do is None and rv.snapshot()["do"] is None
+    assert rv.do is None and "do" not in rv.snapshot()
     assert "CI DO" not in render(rv)
 
     twin_do.include_do(ci, "u")
     rv = twin.review("u")
-    snap = rv.snapshot()
-    assert snap["do"]["requests"] == 2 and snap["do"]["verified"] == 1 and snap["do"]["not_verified"] == 1
-    assert snap["do"]["answered_a_question"] == 1 and snap["do"]["claimed_done_unverified"] == 1
-    assert all(isinstance(v, int) for v in snap["do"].values())
-    dumped = json.dumps(snap, default=str)
+    # shown in the review, never saved: a saved count would outlive `ci do forget` (second review, item 6)
+    assert "do" not in rv.snapshot()
+    d = rv.as_dict()["do"]
+    assert d["requests"] == 2 and d["verified"] == 1 and d["not_verified"] == 1
+    assert d["answered_a_question"] == 1 and d["claimed_done_unverified"] == 1
+    assert all(isinstance(v, int) for v in d.values())
+    dumped = json.dumps(rv.as_dict(), default=str)  # what is shown, saved or not, quotes no request
     assert SECRET not in dumped and "pytest" not in dumped and "do_bbbb" not in dumped
     text = render(rv)
     assert "CI DO" in text and SECRET not in text

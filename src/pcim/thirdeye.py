@@ -175,10 +175,12 @@ def _github(root: Path) -> tuple[list[Evidence], list[str]]:
     gh = shutil.which("gh")
     if not gh:
         return [], ["github: the gh command is not installed"]
+    from .tools import git_env
     try:
+        env = {**git_env(root), **{k: v for k, v in os.environ.items() if k in ("GH_TOKEN", "GITHUB_TOKEN", "GH_HOST")}}
         r = subprocess.run([gh, "pr", "list", "--state", "all", "--limit", "8", "--json",
                             "number,title,state,mergedAt,updatedAt,headRefName"],
-                           cwd=root, capture_output=True, text=True, timeout=20)
+                           cwd=root, capture_output=True, text=True, timeout=20, env=env)
     except (OSError, subprocess.SubprocessError) as e:
         return [], [f"github: not read ({type(e).__name__})"]
     if r.returncode != 0:
@@ -243,21 +245,24 @@ def gather(ci, uid: str, here, query: str, *, use_github: bool | None = None, us
     ws = Workspace(ci)
     s = settings(ws, uid)
     root = Path(here.root)
-    evidence: list[Evidence] = _remembered(ci, uid, here.project_id, vendor, exclude_goal)
+    evidence: list[Evidence] = []
     withheld: list[str] = []
-    e, w = _repo(root, history)
-    evidence += e
-    withheld += w
+
+    def take(name, fn):  # a source that fails is listed as not included, and never stops the goal
+        try:
+            e, w = fn()
+        except Exception as ex:  # noqa: BLE001
+            e, w = [], [f"{name}: not read ({type(ex).__name__})"]
+        evidence.extend(e)
+        withheld.extend(w)
+    take("alter", lambda: (_remembered(ci, uid, here.project_id, vendor, exclude_goal), []))
+    take("git", lambda: _repo(root, history))
     if s["github"] if use_github is None else use_github:
-        e, w = _github(root)
-        evidence += e
-        withheld += w
+        take("github", lambda: _github(root))
     else:
         withheld.append("github: off (alter permissions github on)")
     if s["vault"] if use_vault is None else use_vault:
-        e, w = _vault(s["vault_path"], " ".join([here.name, *s["topics"].get(here.project_id, []), query]))
-        evidence += e
-        withheld += w
+        take("vault", lambda: _vault(s["vault_path"], " ".join([here.name, *s["topics"].get(here.project_id, []), query])))
     else:
         withheld.append("vault: off (alter permissions vault on)")
     return Brief(here.name, str(root), query, evidence, withheld)

@@ -138,12 +138,13 @@ class Review:
                 # Counts-only statements: a snapshot outlives the notes, goals and requests a full
                 # statement would quote. Priorities name goals and notes by id («goal:…», «note:…»).
                 "challenges": [{"kind": c.kind, "rule": c.rule, "statement": c.redacted} for c in self.challenges],
-                "adjustments": self.adjustments, "scorecard": self.scorecard,
-                # Integers only (twin_do): no request text, answers or ids. None unless `ci twin include do`.
-                "do": self.do}
+                "adjustments": self.adjustments, "scorecard": self.scorecard}
+        # `do` (twin_do counts) is shown in the review but never saved: in a week with one request the
+        # counts would describe it, and a saved version would outlive `ci do forget`.
 
     def as_dict(self) -> dict:
-        return self.snapshot() | {"did": self.did, "stuck": self.stuck, "next": self.next, "thin": self.thin}
+        return self.snapshot() | {"did": self.did, "stuck": self.stuck, "next": self.next, "thin": self.thin,
+                                  "do": self.do}
 
 
 class CognitiveTwin:

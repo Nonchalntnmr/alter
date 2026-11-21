@@ -47,6 +47,10 @@ from .textsafe import terminal_safe
 # `ci` commands that `alter` passes through unchanged (`alter ask` is ALTER's own: cited context)
 CI_COMMANDS = frozenset({"route", "mode", "prefer", "models", "outcome", "practice", "skills", "scorecard", "challenge",
                          "plan", "mesh", "twin", "audit", "learn", "execute", "halt", "resume", "do"})
+# A short phrase starting with one of these reads as a command typed wrong, not as work to pay for
+COMMAND_LIKE = frozenset({"stop", "list", "show", "quit", "exit", "help", "start", "kill", "pause", "cancel", "resume",
+                          "run", "ls", "rm", "delete", "undo", "halt", "abort", "version", "config", "log", "logs",
+                          "approve", "deny", "status", "goals", "goal", "tasks", "memory", "context", "init"})
 CONTROL = {
     "pause": re.compile(r"^(pause|stop|hold on|wait)( (it|now|please))?[.!]*$", re.I),
     "status": re.compile(r"^(status|progress|what have you (finished|done)( so far)?|where are we|"
@@ -851,9 +855,9 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_goals(["resume", *rest])
         if cmd in CI_COMMANDS:
             return T.main(argv)
-        words = " ".join(argv).split()
-        if len(words) == 1 and re.fullmatch(r"[a-z][a-z-]*", words[0]):  # `alter stop`, `alter list`: a typo, not work
-            print(f"alter: unknown command {words[0]!r}. To give ALTER a goal, say it in a few words; "
+        words = [w.strip(".,!?;:'\"").lower() for w in " ".join(argv).split()]
+        if len(words) == 1 or (len(words) <= 3 and words[0] in COMMAND_LIKE):  # `alter Stop.`, `alter stop now`
+            print(f"alter: unknown command {argv[0]!r}. To give ALTER a goal, say it in a few words; "
                   "alter --help lists the commands.", file=sys.stderr)
             return 2
         ci, uid, here = _ctx()
