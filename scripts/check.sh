@@ -43,7 +43,11 @@ export HF_HUB_OFFLINE=1
 export PYTHONPATH="$repo/src"
 PCIM_HOME="$(mktemp -d "${TMPDIR:-/tmp}/pcim-check.XXXXXX")"
 export PCIM_HOME
-trap 'rm -rf "$PCIM_HOME"' EXIT
+# A private temp folder per run: two check.sh runs at once (two worktrees, or agents) must not see
+# each other's sandboxes or temp files.
+TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/pcim-check-tmp.XXXXXX")"
+export TMPDIR
+trap 'rm -rf "$PCIM_HOME" "$TMPDIR"' EXIT
 
 status=0
 
