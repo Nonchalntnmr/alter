@@ -3,7 +3,7 @@ Offline: the mock agent plays the model, and every store is a throwaway PCIM_HOM
 
 import pytest
 
-from pcim import cli
+from pcim import alter, cli
 from pcim import terminal as T
 from pcim.engine import PersonalCI
 from pcim.sovereignty.crypto import MasterKeyMissing
@@ -29,6 +29,7 @@ def test_s1_a_lost_master_key_is_never_replaced_by_a_new_one(tmp_path, monkeypat
     with pytest.raises(SystemExit) as e:  # `ci` and `alter` open the store through T._open
         T._open()
     assert e.value.code == 2 and "Restore master.key" in capsys.readouterr().err
+    assert alter.main(["setup"]) == 2 and "Restore master.key" in capsys.readouterr().err
     assert not (home / "master.key").exists()  # no second key was made
 
     capsys.readouterr()

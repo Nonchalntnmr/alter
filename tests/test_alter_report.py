@@ -74,6 +74,29 @@ def test_a_done_goal_without_a_verified_or_unchanged_verdict_is_a_false_done(env
     assert report(ci)["false_done"]["n"] == 1
 
 
+def test_identifier_report_counts_hits_and_scan_coverage_without_file_names(env, monkeypatch):
+    from pcim import identity_guard
+
+    ci, ws, p, repo, here = env
+    monkeypatch.setattr(identity_guard, "markers", lambda: {"name": "synthetic identity"})
+    script = [W(content="def add(a, b):\n    return a + b  # synthetic identity\n"), RUN(), {"text": "Done."}]
+    _, hit = run_goal(ci, here, script)
+    assert hit.payload["identifiers"] == [{"file": "calc.py", "labels": ["name"]}]
+    run_goal(ci, here, [W(), RUN(), {"text": "Done."}])
+    r, old = run_goal(ci, here, [W(), RUN(), {"text": "Done."}])
+    old.payload.pop("identifiers")
+    r.gs.save(old)
+    r, failed = run_goal(ci, here, [W(), RUN(), {"text": "Done."}])
+    failed.payload["identifiers"] = [{"file": "(check failed)", "labels": ["OSError"]}]
+    r.gs.save(failed)
+
+    rep = pilot.export(report(ci))
+
+    assert rep["identifiers"] == {"goals_with_hits": 1, "files": 1, "goals": [hit.id],
+                                  "scanned_goals": 2, "unscanned_goals": 1, "scan_failures": 1}
+    assert "calc.py" not in json.dumps(rep) and "synthetic identity" not in json.dumps(rep)
+
+
 def test_approvals_answers_and_the_autonomy_share(env):
     ci, ws, p, repo, here = env
     manual(ci, here)

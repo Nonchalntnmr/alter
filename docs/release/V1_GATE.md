@@ -127,7 +127,7 @@ so none drops out of a denominator.
 | **C7** (T) | time to the first useful response | from the request (`requested_at`) to the first checkpoint carrying model text | median ≤ 120 s | `alter report`: `time.first_response_median_s` | **Not measured.** See the note below. |
 | **C8** (T) | memory retrieval accuracy (vault) | hit@1, hit@3 and MRR of the expected notes (`alter vault eval`) | no regression on the recorded sets (dev hit@1 ≥ 18/20; held-out hit@1 ≥ 8/10, MRR ≥ 0.88), **and** hit@3 ≥ 16/20 on a fresh set of 20, written before the pilot | `alter vault eval FILE` | **Measured on the recorded sets** (0.3.0a1): dev 18/20 hit@1, MRR 0.95; held-out 8/10, MRR 0.88. **The fresh set is not measured.** Retrieval of ALTER's own goal memory is not measured. |
 | **C9** (T) | the person's skill retention | `ci skills`: unassisted ("alone") against assisted rates, per skill | at least 2 skills with ≥ 6 unassisted attempts each in the pilot, and 0 of them flagged `declining` | `ci skills --json`; the summary in `alter report`: `skills` | **Not measured** |
-| **C10** (T) | no identifier written into files | hits of `scripts/scan_identity.py` on each pilot goal's diff | **0** | the scan, run per goal (`PILOT.md` §5) | **1 event in 4 live goals:** ALTER used the owner's name in a test. It was caught before push. The planned check on changed files is not built. |
+| **C10** (T) | no identifier written into files | changed files flagged by ALTER or by `scripts/scan_identity.py` on each pilot goal's diff | **0** | `alter report`: `identifiers`, plus the per-goal diff scan (`PILOT.md` §5) | **1 event in 4 live goals:** ALTER used the owner's name in a test. It was caught before push. The automatic scan is implemented and awaits pilot data. |
 | **C11** (H) | no identifier in model input | `scripts/audit_egress.py`, once on each participant's machine before their first goal, and after any CLI update | **0** identifiers; hosts limited to the provider | the egress audit | **Measured** for the owner's configuration on rc2 (CLI 2.1.316): only `api.anthropic.com`, and no identifiers in model input. Not run on 0.3.0a1 or on other machines. |
 
 **Reported, not gating.** None of these is part of the V1 claim:
@@ -150,8 +150,9 @@ so none drops out of a denominator.
   threshold is not the remedy.
 - **C9 is a check for harm, not a claim of benefit.** With 6 attempts per skill, the `declining`
   flag is coarse.
-- **C10** fails today on its one data point. Before the pilot, the owner decides whether to build
-  the changed-files check (§6).
+- **C10** has one recorded hit from before the automatic check. The report counts flagged files
+  from completed goals and separately reports missing or failed scans. The pilot also checks the
+  diff, including changes outside ALTER's recorded writes.
 
 ## 4. Out of scope for V1
 
@@ -230,9 +231,7 @@ and C10 has one event.
 
 1. **The thresholds** for C5 (median 3), C6 ($5.00) and C7 (120 s). They are set here, before any
    data. Change them only before the pilot starts, and record the change.
-2. **Whether to build the changed-files identity check** (READINESS open item 2) before the
-   pilot. Without it, C10 rests on running the scan after each goal by hand.
-3. **Whether C7 needs progress shown within a turn,** or is accepted as it measures today.
-4. **Who else takes part** (up to 4 more), and who pays for their model use.
-5. **Who checks the analysis.** It should be someone other than the implementer. The implementer
+2. **Whether C7 needs progress shown within a turn,** or is accepted as it measures today.
+3. **Who else takes part** (up to 4 more), and who pays for their model use.
+4. **Who checks the analysis.** It should be someone other than the implementer. The implementer
    may compute numbers from the exports, but does not rate success or code free text.

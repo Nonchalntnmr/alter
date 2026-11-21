@@ -66,6 +66,7 @@ def test_alter_report_counts_goals_that_wrote_identifiers(env, marks):
     r, _ = runner(ci, here, [leak, RUN(), {"text": "Done; tests pass."}])
     g = r.run(start(r).id)
     rep = pilot.compute(ci, "u", days=None)
-    assert rep["identifiers"] == {"goals_with_hits": 1, "files": 1, "goals": [g.id]}
+    assert rep["identifiers"] == {"goals_with_hits": 1, "files": 1, "goals": [g.id],
+                                  "scanned_goals": 1, "unscanned_goals": 0, "scan_failures": 0}
     text = pilot.render(rep, "all projects")
     assert "Identifiers written into files (C10): 1 file(s) in 1 goal(s)" in text and "lovelace" not in text.lower()

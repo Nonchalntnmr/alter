@@ -206,6 +206,7 @@ def _claude_check() -> tuple[bool, str, str, str]:
 def cmd_setup(argv: list[str]) -> int:
     from . import cli
     from .engine import PersonalCI
+    from .sovereignty.crypto import MasterKeyMissing
     ap = argparse.ArgumentParser(
         prog="alter setup", description="Set ALTER up on this computer: an identity, a check of the claude CLI, goal "
         "outcomes to memory, and optionally this folder as a project. Asks nothing; never changes an existing identity.")
@@ -225,8 +226,12 @@ def cmd_setup(argv: list[str]) -> int:
     home = T._home()
     tok = home / "token"
     print(f"ALTER {__version__} setup · data in {home}")
-    if tok.is_file():
+    try:
         ci = PersonalCI(home)
+    except MasterKeyMissing as e:
+        print(f"alter setup: {e}", file=sys.stderr)
+        return 2
+    if tok.is_file():
         uid = ci.user_for_token(tok.read_text().strip())
         if uid is None:
             print(f"alter setup: the token in {home} matches no user in its store. Nothing was changed; restore the "
@@ -236,7 +241,6 @@ def cmd_setup(argv: list[str]) -> int:
         if a.user != SETUP_USER and a.user != uid:
             print(f"  --user {a.user} ignored: setup never replaces an identity")
     else:
-        ci = PersonalCI(home)
         if ci.store.list_user_ids():
             print(f"alter setup: the store in {home} holds an identity, but its token file is missing. Nothing was "
                   "changed: setup does not create a second identity next to it.", file=sys.stderr)
