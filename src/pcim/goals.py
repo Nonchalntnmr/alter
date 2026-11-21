@@ -641,6 +641,18 @@ class GoalRunner:
         g.status, g.payload["reason"] = status, reason
         if g.payload["sessions"] and g.payload["verification"] is None:
             g.payload["verification"] = verify(self.ci, self.uid, g.project_id, g.payload["sessions"])
+        files = (g.payload.get("verification") or {}).get("files") or []
+        if files:  # personal identifiers the model may have copied from its context into a file
+            from .identity_guard import scan
+            try:
+                hits = scan(self.here.root, files)
+            except Exception as e:  # noqa: BLE001 - the check must never lose the goal's outcome
+                hits = [{"file": "(check failed)", "labels": [type(e).__name__]}]
+            g.payload["identifiers"] = hits
+            if hits:
+                g.payload["reason"] = (f"{reason}; WARNING: {len(hits)} file(s) hold your personal identifiers "
+                                       f"({', '.join(sorted({lb for h in hits for lb in h['labels']}))}): review "
+                                       "them before you commit or push")
         g.payload["memory_item"] = record_outcome(self.ci, self.uid, g, self.here.name)
         self.gs.save(g)
         self.ci.audit.append(self.uid, "goal.finish", goal=g.id, status=status,
@@ -807,6 +819,8 @@ def report(ci, uid: str, g: Goal, gs: GoalStore | None = None) -> str:
         if last:
             out.append("  last message from ALTER (model-written):")
             out += ["    " + x for x in last.splitlines()[-12:]]
+    for h in g.payload.get("identifiers") or []:
+        out.append(f"  WARNING: {h['file']} holds your {', '.join(h['labels'])}: review before you commit or push")
     if g.payload.get("memory_item"):
         out.append(f"  outcome recorded in memory: {g.payload['memory_item']}")
     return terminal_safe("\n".join(out))
