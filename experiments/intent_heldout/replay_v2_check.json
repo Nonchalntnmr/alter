@@ -1,0 +1,260 @@
+{
+ "code": "58348cc (V2, the code the run used)",
+ "items": {
+  "h01": {
+   "decision": "clarify",
+   "external": 1,
+   "restored": []
+  },
+  "h02": {
+   "decision": "clarify",
+   "external": 0,
+   "restored": []
+  },
+  "h03": {
+   "decision": "clarify",
+   "external": 1,
+   "restored": []
+  },
+  "h04": {
+   "decision": "clarify",
+   "external": 0,
+   "restored": []
+  },
+  "h05": {
+   "decision": "clarify",
+   "external": 1,
+   "restored": []
+  },
+  "h06": {
+   "decision": "clarify",
+   "external": 0,
+   "restored": []
+  },
+  "h07": {
+   "decision": "clarify",
+   "external": 1,
+   "restored": []
+  },
+  "h08": {
+   "decision": "clarify",
+   "external": 0,
+   "restored": []
+  },
+  "h09": {
+   "decision": "clarify",
+   "external": 1,
+   "restored": []
+  },
+  "h10": {
+   "decision": "clarify",
+   "external": 0,
+   "restored": []
+  },
+  "h11": {
+   "decision": "clarify",
+   "external": 0,
+   "restored": []
+  },
+  "h12": {
+   "decision": "clarify",
+   "external": 0,
+   "restored": []
+  },
+  "h13": {
+   "decision": "ready",
+   "external": 0,
+   "restored": []
+  },
+  "h14": {
+   "decision": "ready",
+   "external": 0,
+   "restored": []
+  },
+  "h15": {
+   "decision": "clarify",
+   "external": 0,
+   "restored": []
+  },
+  "h16": {
+   "decision": "clarify",
+   "external": 1,
+   "restored": []
+  },
+  "h17": {
+   "decision": "ready",
+   "external": 0,
+   "restored": []
+  },
+  "h18": {
+   "decision": "ready",
+   "external": 0,
+   "restored": []
+  },
+  "h19": {
+   "decision": "approval",
+   "external": 0,
+   "restored": []
+  },
+  "h20": {
+   "decision": "clarify",
+   "external": 0,
+   "restored": []
+  },
+  "h21": {
+   "decision": "clarify",
+   "external": 1,
+   "restored": []
+  },
+  "h22": {
+   "decision": "ready",
+   "external": 0,
+   "restored": []
+  },
+  "h23": {
+   "decision": "ready",
+   "external": 0,
+   "restored": []
+  },
+  "h24": {
+   "decision": "ready",
+   "external": 0,
+   "restored": []
+  },
+  "h25": {
+   "decision": "approval",
+   "external": 1,
+   "restored": []
+  },
+  "h26": {
+   "decision": "clarify",
+   "external": 1,
+   "restored": []
+  },
+  "h27": {
+   "decision": "clarify",
+   "external": 2,
+   "restored": []
+  },
+  "h28": {
+   "decision": "clarify",
+   "external": 1,
+   "restored": []
+  },
+  "h29": {
+   "decision": "clarify",
+   "external": 1,
+   "restored": []
+  },
+  "h30": {
+   "decision": "ready",
+   "external": 0,
+   "restored": []
+  },
+  "h31": {
+   "decision": "clarify",
+   "external": 0,
+   "restored": []
+  },
+  "h32": {
+   "decision": "clarify",
+   "external": 0,
+   "restored": []
+  },
+  "h33": {
+   "decision": "clarify",
+   "external": 2,
+   "restored": []
+  },
+  "h34": {
+   "decision": "clarify",
+   "external": 1,
+   "restored": []
+  },
+  "h35": {
+   "decision": "clarify",
+   "external": 1,
+   "restored": []
+  },
+  "h36": {
+   "decision": "clarify",
+   "external": 2,
+   "restored": []
+  },
+  "h37": {
+   "decision": "clarify",
+   "external": 0,
+   "restored": []
+  },
+  "h38": {
+   "decision": "clarify",
+   "external": 1,
+   "restored": []
+  },
+  "h39": {
+   "decision": "clarify",
+   "external": 0,
+   "restored": []
+  },
+  "h40": {
+   "decision": "clarify",
+   "external": 1,
+   "restored": [
+    "look at the data"
+   ]
+  },
+  "h41": {
+   "decision": "clarify",
+   "external": 0,
+   "restored": []
+  },
+  "h42": {
+   "decision": "clarify",
+   "external": 0,
+   "restored": []
+  },
+  "h43": {
+   "decision": "clarify",
+   "external": 0,
+   "restored": []
+  },
+  "h44": {
+   "decision": "clarify",
+   "external": 0,
+   "restored": []
+  },
+  "h45": {
+   "decision": "clarify",
+   "external": 0,
+   "restored": []
+  },
+  "h46": {
+   "decision": "clarify",
+   "external": 0,
+   "restored": []
+  },
+  "h47": {
+   "decision": "clarify",
+   "external": 1,
+   "restored": []
+  },
+  "h48": {
+   "decision": "ready",
+   "external": 0,
+   "restored": []
+  },
+  "h49": {
+   "decision": "clarify",
+   "external": 1,
+   "restored": [
+    "look into the reimbursement thing"
+   ]
+  },
+  "h50": {
+   "decision": "ready",
+   "external": 0,
+   "restored": []
+  }
+ },
+ "diffs": []
+}

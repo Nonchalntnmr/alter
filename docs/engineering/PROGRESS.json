@@ -1,0 +1,46 @@
+{
+  "updated": "2026-11-17",
+  "head": "release/alter-0.2.0rc2",
+  "release": "CONDITIONAL (restricted developer preview after review; no broad release before the human evaluation)",
+  "organization": {
+    "note": "Roles are a ledger, not 12 concurrent processes. Subagents run in small batches, and only when they cannot endanger the frozen eval_v5: 20 parallel agents exhausted this account's 5-hour usage limit on 2026-11-11, and eval_v5 needs about 1,000 CLI calls on the same account. Launched so far this milestone: 1 (the blind task author).",
+    "roles": {
+      "01 Architect": {"owner": "principal", "files": ["docs/engineering/"], "status": "pipeline mapped (PIPELINE_MAP.md)"},
+      "02 Intent": {"owner": "principal", "files": ["src/pcim/intent_compiler.py"], "status": "frozen for eval_v5"},
+      "03 Planner": {"owner": "principal", "files": ["src/pcim/plan_exec.py"], "status": "frozen for eval_v5"},
+      "04 Router": {"owner": "principal", "files": ["src/pcim/router.py"], "status": "planning-assisted router under eval_v5; frozen"},
+      "05 Executor": {"owner": "principal", "files": ["src/pcim/agent.py", "src/pcim/tasks.py"], "status": "frozen for eval_v5"},
+      "06 Memory": {"owner": "unassigned", "files": ["src/pcim/memory.py", "src/pcim/twin.py"], "status": "gap: ci do records no outcome (PIPELINE_MAP gap 3)"},
+      "07 Reliability": {"owner": "principal", "files": ["tests/test_reask_recovery.py"], "status": "invalid-JSON fault injection done (mutation-checked)"},
+      "08 Security": {"owner": "principal", "files": ["src/pcim/adapters/claude_cli.py", "scripts/audit_egress.py"], "status": "egress audited; history rewritten and verified"},
+      "09 Performance": {"owner": "unassigned", "files": [], "status": "measured per run in eval_v5 (cost, tokens, latency)"},
+      "10 Evaluation": {"owner": "principal + blind task author (subagent)", "files": ["experiments/eval_v5/", "scripts/eval_v5.py"], "status": "waiting for the task pool; then freeze and run"},
+      "11 Experience": {"owner": "unassigned", "files": ["src/pcim/terminal.py"], "status": "frozen for eval_v5"},
+      "12 Red Team": {"owner": "planned subagent, after eval_v5", "files": [], "status": "adversarial review of ci do / router / governor boundary, read-only"}
+    }
+  },
+  "completed": [
+    "history rewrite applied and verified (8 branches; scans clean; map committed)",
+    "invalid-JSON recovery: deterministic tests, mutation-checked",
+    "planning-assisted router (opt-in) with tests",
+    "eval_v5 harness: four arms through the real CLI, personas, three judges, offline e2e tests, live smoke",
+    "PR description and restricted-preview notes (held)",
+    "human-evaluation protocol: superiority rule, exact power"
+  ],
+  "tests": {"suite": "557 passed, 4 skipped (385cb7b)", "e2e": "37/37", "eval_v5 harness": "8 offline tests"},
+  "known_failures": [
+    "keyword router clarification recall 4/21 (v4)",
+    "no result verification on ci do",
+    "the re-ask path is never triggered live (0/157)",
+    "a local I/O error is misclassified as a provider failure"
+  ],
+  "blockers": [
+    "eval_v5: waiting for the blind task author",
+    "the machine is on battery (36%, about 53 min): eval_v5 waits while the battery is below 25% or the lid is closed"
+  ],
+  "next": [
+    "freeze and run eval_v5 when the pool arrives",
+    "build result verification for ci do on a separate branch (PIPELINE_MAP gap 2), without touching the frozen tree",
+    "after eval_v5: red-team and security reviews (read-only subagents, at most 2 at a time)"
+  ]
+}

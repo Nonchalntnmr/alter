@@ -15,4 +15,4 @@ Context sovereignty (consent, egress, audit, crypto-shredding, injection gating)
 not a layer; it wraps every layer and lives in sovereignty/.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0rc2"

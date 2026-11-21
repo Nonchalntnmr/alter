@@ -1,0 +1,133 @@
+14:33:29 waiting: lid closed or battery low
+1 tasks to run, arms A,R, code alter-rc2
+W1117 17:49:41.638000 62843 torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+Could not reach the Hub (Cannot reach https://huggingface.co/api/models/sentence-transformers/all-MiniLM-L6-v2: offline mode is enabled. To disable it, please unset the `HF_HUB_OFFLINE` environment variable.). Using cached commit hash for 'sentence-transformers/all-MiniLM-L6-v2'.
+
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 103/103 [00:00<00:00, 8645.97it/s]
+~/projects/alter-rc2/src/pcim/embed.py:124: FutureWarning: The `get_sentence_embedding_dimension` method has been renamed to `get_embedding_dimension`.
+  self.dim = self._m.get_sentence_embedding_dimension()
+r04 A route=None verified=True status=None calls=6 corr=0 clar=0 appr=3 oos=1 $0.125 41s
+r04 R route=direct: A's run is R's
+17:50:23 waiting: lid closed or battery low
+1 tasks to run, arms A,R, code alter-rc2
+Could not reach the Hub (Cannot reach https://huggingface.co/api/models/sentence-transformers/all-MiniLM-L6-v2: offline mode is enabled. To disable it, please unset the `HF_HUB_OFFLINE` environment variable.). Using cached commit hash for 'sentence-transformers/all-MiniLM-L6-v2'.
+
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 103/103 [00:00<00:00, 8448.16it/s]
+~/projects/alter-rc2/src/pcim/embed.py:124: FutureWarning: The `get_sentence_embedding_dimension` method has been renamed to `get_embedding_dimension`.
+  self.dim = self._m.get_sentence_embedding_dimension()
+r05 A route=None verified=True status=None calls=5 corr=0 clar=0 appr=3 oos=1 $0.124 60s
+r05 R route=direct: A's run is R's
+1 tasks to run, arms A,R, code alter-rc2
+Could not reach the Hub (Cannot reach https://huggingface.co/api/models/sentence-transformers/all-MiniLM-L6-v2: offline mode is enabled. To disable it, please unset the `HF_HUB_OFFLINE` environment variable.). Using cached commit hash for 'sentence-transformers/all-MiniLM-L6-v2'.
+
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 103/103 [00:00<00:00, 10424.28it/s]
+~/projects/alter-rc2/src/pcim/embed.py:124: FutureWarning: The `get_sentence_embedding_dimension` method has been renamed to `get_embedding_dimension`.
+  self.dim = self._m.get_sentence_embedding_dimension()
+r06 A route=None verified=True status=None calls=6 corr=0 clar=0 appr=3 oos=1 $0.111 70s
+r06 R route=direct: A's run is R's
+17:58:01 waiting: lid closed or battery low
+1 tasks to run, arms A,R, code alter-rc2
+Could not reach the Hub (Cannot reach https://huggingface.co/api/models/sentence-transformers/all-MiniLM-L6-v2: offline mode is enabled. To disable it, please unset the `HF_HUB_OFFLINE` environment variable.). Using cached commit hash for 'sentence-transformers/all-MiniLM-L6-v2'.
+
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 103/103 [00:00<00:00, 9427.87it/s]
+~/projects/alter-rc2/src/pcim/embed.py:124: FutureWarning: The `get_sentence_embedding_dimension` method has been renamed to `get_embedding_dimension`.
+  self.dim = self._m.get_sentence_embedding_dimension()
+r07 A route=None verified=True status=None calls=6 corr=0 clar=0 appr=3 oos=1 $0.163 57s
+r07 R route=direct: A's run is R's
+1 tasks to run, arms A,R, code alter-rc2
+Could not reach the Hub (Cannot reach https://huggingface.co/api/models/sentence-transformers/all-MiniLM-L6-v2: offline mode is enabled. To disable it, please unset the `HF_HUB_OFFLINE` environment variable.). Using cached commit hash for 'sentence-transformers/all-MiniLM-L6-v2'.
+
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 103/103 [00:00<00:00, 25833.48it/s]
+~/projects/alter-rc2/src/pcim/embed.py:124: FutureWarning: The `get_sentence_embedding_dimension` method has been renamed to `get_embedding_dimension`.
+  self.dim = self._m.get_sentence_embedding_dimension()
+r08 A route=None verified=True status=None calls=6 corr=0 clar=0 appr=3 oos=0 $0.133 37s
+r08 R route=direct: A's run is R's
+1 tasks to run, arms A,R, code alter-rc2
+Could not reach the Hub (Cannot reach https://huggingface.co/api/models/sentence-transformers/all-MiniLM-L6-v2: offline mode is enabled. To disable it, please unset the `HF_HUB_OFFLINE` environment variable.). Using cached commit hash for 'sentence-transformers/all-MiniLM-L6-v2'.
+
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 103/103 [00:00<00:00, 28140.52it/s]
+~/projects/alter-rc2/src/pcim/embed.py:124: FutureWarning: The `get_sentence_embedding_dimension` method has been renamed to `get_embedding_dimension`.
+  self.dim = self._m.get_sentence_embedding_dimension()
+r09 A route=None verified=True status=None calls=5 corr=0 clar=0 appr=3 oos=1 $0.100 33s
+r09 R route=direct: A's run is R's
+1 tasks to run, arms A,R, code alter-rc2
+Could not reach the Hub (Cannot reach https://huggingface.co/api/models/sentence-transformers/all-MiniLM-L6-v2: offline mode is enabled. To disable it, please unset the `HF_HUB_OFFLINE` environment variable.). Using cached commit hash for 'sentence-transformers/all-MiniLM-L6-v2'.
+
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 103/103 [00:00<00:00, 26786.54it/s]
+~/projects/alter-rc2/src/pcim/embed.py:124: FutureWarning: The `get_sentence_embedding_dimension` method has been renamed to `get_embedding_dimension`.
+  self.dim = self._m.get_sentence_embedding_dimension()
+r10 A route=None verified=True status=None calls=8 corr=0 clar=1 appr=3 oos=1 $0.187 61s
+r10 R route=direct: A's run is R's
+1 tasks to run, arms A,R, code alter-rc2
+Could not reach the Hub (Cannot reach https://huggingface.co/api/models/sentence-transformers/all-MiniLM-L6-v2: offline mode is enabled. To disable it, please unset the `HF_HUB_OFFLINE` environment variable.). Using cached commit hash for 'sentence-transformers/all-MiniLM-L6-v2'.
+
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 103/103 [00:00<00:00, 20952.20it/s]
+~/projects/alter-rc2/src/pcim/embed.py:124: FutureWarning: The `get_sentence_embedding_dimension` method has been renamed to `get_embedding_dimension`.
+  self.dim = self._m.get_sentence_embedding_dimension()
+r11 A route=None verified=True status=None calls=9 corr=0 clar=1 appr=5 oos=1 $0.250 74s
+r11 R route=direct: A's run is R's
+1 tasks to run, arms A,R, code alter-rc2
+Could not reach the Hub (Cannot reach https://huggingface.co/api/models/sentence-transformers/all-MiniLM-L6-v2: offline mode is enabled. To disable it, please unset the `HF_HUB_OFFLINE` environment variable.). Using cached commit hash for 'sentence-transformers/all-MiniLM-L6-v2'.
+
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 103/103 [00:00<00:00, 25084.97it/s]
+~/projects/alter-rc2/src/pcim/embed.py:124: FutureWarning: The `get_sentence_embedding_dimension` method has been renamed to `get_embedding_dimension`.
+  self.dim = self._m.get_sentence_embedding_dimension()
+r12 A route=None verified=True status=None calls=10 corr=0 clar=1 appr=5 oos=1 $0.355 91s
+r12 R route=direct: A's run is R's
+1 tasks to run, arms A,R, code alter-rc2
+Could not reach the Hub (Cannot reach https://huggingface.co/api/models/sentence-transformers/all-MiniLM-L6-v2: offline mode is enabled. To disable it, please unset the `HF_HUB_OFFLINE` environment variable.). Using cached commit hash for 'sentence-transformers/all-MiniLM-L6-v2'.
+
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 103/103 [00:00<00:00, 24849.77it/s]
+~/projects/alter-rc2/src/pcim/embed.py:124: FutureWarning: The `get_sentence_embedding_dimension` method has been renamed to `get_embedding_dimension`.
+  self.dim = self._m.get_sentence_embedding_dimension()
+r13 A route=None verified=True status=None calls=9 corr=0 clar=1 appr=4 oos=0 $0.287 73s
+Could not reach the Hub (Cannot reach https://huggingface.co/api/models/sentence-transformers/all-MiniLM-L6-v2: offline mode is enabled. To disable it, please unset the `HF_HUB_OFFLINE` environment variable.). Using cached commit hash for 'sentence-transformers/all-MiniLM-L6-v2'.
+
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 103/103 [00:00<00:00, 10619.80it/s]
+~/projects/alter-rc2/src/pcim/embed.py:124: FutureWarning: The `get_sentence_embedding_dimension` method has been renamed to `get_embedding_dimension`.
+  self.dim = self._m.get_sentence_embedding_dimension()
+r13 R route=plan verified=True status=awaiting_you calls=7 corr=0 clar=1 appr=3 oos=0 $0.182 68s
+1 tasks to run, arms A,R, code alter-rc2
+Could not reach the Hub (Cannot reach https://huggingface.co/api/models/sentence-transformers/all-MiniLM-L6-v2: offline mode is enabled. To disable it, please unset the `HF_HUB_OFFLINE` environment variable.). Using cached commit hash for 'sentence-transformers/all-MiniLM-L6-v2'.
+
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 103/103 [00:00<00:00, 10546.69it/s]
+~/projects/alter-rc2/src/pcim/embed.py:124: FutureWarning: The `get_sentence_embedding_dimension` method has been renamed to `get_embedding_dimension`.
+  self.dim = self._m.get_sentence_embedding_dimension()
+r14 A route=None verified=True status=None calls=12 corr=1 clar=1 appr=4 oos=0 $0.360 74s
+Could not reach the Hub (Cannot reach https://huggingface.co/api/models/sentence-transformers/all-MiniLM-L6-v2: offline mode is enabled. To disable it, please unset the `HF_HUB_OFFLINE` environment variable.). Using cached commit hash for 'sentence-transformers/all-MiniLM-L6-v2'.
+
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 103/103 [00:00<00:00, 19353.70it/s]
+~/projects/alter-rc2/src/pcim/embed.py:124: FutureWarning: The `get_sentence_embedding_dimension` method has been renamed to `get_embedding_dimension`.
+  self.dim = self._m.get_sentence_embedding_dimension()
+r14 R route=plan verified=True status=done calls=8 corr=0 clar=1 appr=2 oos=0 $0.183 63s
+1 tasks to run, arms A,R, code alter-rc2
+Could not reach the Hub (Cannot reach https://huggingface.co/api/models/sentence-transformers/all-MiniLM-L6-v2: offline mode is enabled. To disable it, please unset the `HF_HUB_OFFLINE` environment variable.). Using cached commit hash for 'sentence-transformers/all-MiniLM-L6-v2'.
+
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 103/103 [00:00<00:00, 10379.70it/s]
+~/projects/alter-rc2/src/pcim/embed.py:124: FutureWarning: The `get_sentence_embedding_dimension` method has been renamed to `get_embedding_dimension`.
+  self.dim = self._m.get_sentence_embedding_dimension()
+r15 A route=None verified=True status=None calls=9 corr=1 clar=0 appr=2 oos=0 $0.216 58s
+r15 R route=direct: A's run is R's
+1 tasks to run, arms A,R, code alter-rc2
+Could not reach the Hub (Cannot reach https://huggingface.co/api/models/sentence-transformers/all-MiniLM-L6-v2: offline mode is enabled. To disable it, please unset the `HF_HUB_OFFLINE` environment variable.). Using cached commit hash for 'sentence-transformers/all-MiniLM-L6-v2'.
+
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 103/103 [00:00<00:00, 10529.72it/s]
+~/projects/alter-rc2/src/pcim/embed.py:124: FutureWarning: The `get_sentence_embedding_dimension` method has been renamed to `get_embedding_dimension`.
+  self.dim = self._m.get_sentence_embedding_dimension()
+r16 A route=None verified=True status=None calls=7 corr=0 clar=1 appr=2 oos=0 $0.147 53s
+r16 R route=direct: A's run is R's

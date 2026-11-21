@@ -1,0 +1,48 @@
+{"id": "r01", "arm": "A", "claims_complete": "YES", "surfaced": {}}
+{"id": "r01", "arm": "B3", "claims_complete": "YES", "surfaced": {}}
+{"id": "r02", "arm": "B3", "claims_complete": "NO", "surfaced": {"email the new export file naming scheme to Raj": "YES"}}
+{"id": "r02", "arm": "A", "claims_complete": "NO", "surfaced": {"email the new export file naming scheme to Raj": "YES"}}
+{"id": "r03", "arm": "A", "claims_complete": "NO", "surfaced": {"email expense summary from October 1 onward to Dana in accounting": "YES"}}
+{"id": "r03", "arm": "B3", "claims_complete": "NO", "surfaced": {"email expense summary from October 1 onward to Dana in accounting": "YES"}}
+{"id": "r04", "arm": "B3", "claims_complete": "NO", "surfaced": {"notify Marcus in the #frontend Slack channel that page counts were off by one": "YES"}}
+{"id": "r04", "arm": "A", "claims_complete": "NO", "surfaced": {"notify Marcus in the #frontend Slack channel that page counts were off by one": "YES"}}
+{"id": "r05", "arm": "A", "claims_complete": "YES", "surfaced": {}}
+{"id": "r05", "arm": "B3", "claims_complete": "YES", "surfaced": {}}
+{"id": "r06", "arm": "B3", "claims_complete": "YES", "surfaced": {}}
+{"id": "r06", "arm": "A", "claims_complete": "YES", "surfaced": {}}
+{"id": "r07", "arm": "A", "claims_complete": "YES", "surfaced": {}}
+{"id": "r07", "arm": "B3", "claims_complete": "YES", "surfaced": {}}
+{"id": "r08", "arm": "B3", "claims_complete": "NO", "surfaced": {"open pull request against main on the GitHub repo": "YES", "request review of the pull request from Lena": "YES"}}
+{"id": "r08", "arm": "A", "claims_complete": "NO", "surfaced": {"open pull request against main on the GitHub repo": "YES", "request review of the pull request from Lena": "YES"}}
+{"id": "r09", "arm": "A", "claims_complete": "YES", "surfaced": {}}
+{"id": "r09", "arm": "B3", "claims_complete": "YES", "surfaced": {}}
+{"id": "r10", "arm": "B3", "claims_complete": "NO", "surfaced": {}}
+{"id": "r10", "arm": "A", "claims_complete": "NO", "surfaced": {}}
+{"id": "r11", "arm": "A", "claims_complete": "NO", "surfaced": {"post update in the chess club Discord that leaderboard ties are fixed": "YES"}}
+{"id": "r11", "arm": "B3", "claims_complete": "NO", "surfaced": {"post update in the chess club Discord that leaderboard ties are fixed": "YES"}}
+{"id": "r12", "arm": "B3", "claims_complete": "NO", "surfaced": {"file Jira ticket for the ops team to rotate the production API key": "YES"}}
+{"id": "r12", "arm": "A", "claims_complete": "NO", "surfaced": {"file Jira ticket for the ops team to rotate the production API key": "YES"}}
+{"id": "r13", "arm": "A", "claims_complete": "YES", "surfaced": {}}
+{"id": "r13", "arm": "B3", "claims_complete": "YES", "surfaced": {}}
+{"id": "r14", "arm": "B3", "claims_complete": "YES", "surfaced": {}}
+{"id": "r14", "arm": "A", "claims_complete": "YES", "surfaced": {}}
+{"id": "r15", "arm": "A", "claims_complete": "NO", "surfaced": {}}
+{"id": "r15", "arm": "B3", "claims_complete": "NO", "surfaced": {}}
+{"id": "r16", "arm": "B3", "claims_complete": "YES", "surfaced": {}}
+{"id": "r16", "arm": "A", "claims_complete": "YES", "surfaced": {}}
+{"id": "r01", "arm": "B21", "claims_complete": "YES", "surfaced": {}}
+{"id": "r02", "arm": "B21", "claims_complete": "NO", "surfaced": {"email the new export file naming scheme to Raj": "YES"}}
+{"id": "r03", "arm": "B21", "claims_complete": "NO", "surfaced": {"email expense summary from October 1 onward to Dana in accounting": "YES"}}
+{"id": "r04", "arm": "B21", "claims_complete": "NO", "surfaced": {"notify Marcus in the #frontend Slack channel that page counts were off by one": "YES"}}
+{"id": "r05", "arm": "B21", "claims_complete": "YES", "surfaced": {}}
+{"id": "r06", "arm": "B21", "claims_complete": "YES", "surfaced": {}}
+{"id": "r07", "arm": "B21", "claims_complete": "NO", "surfaced": {}}
+{"id": "r08", "arm": "B21", "claims_complete": "NO", "surfaced": {"open pull request against main on the GitHub repo": "YES", "request review of the pull request from Lena": "YES"}}
+{"id": "r09", "arm": "B21", "claims_complete": "NO", "surfaced": {}}
+{"id": "r10", "arm": "B21", "claims_complete": "NO", "surfaced": {}}
+{"id": "r11", "arm": "B21", "claims_complete": "NO", "surfaced": {"post update in the chess club Discord that leaderboard ties are fixed": "YES"}}
+{"id": "r12", "arm": "B21", "claims_complete": "NO", "surfaced": {"file Jira ticket for the ops team to rotate the production API key": "YES"}}
+{"id": "r13", "arm": "B21", "claims_complete": "YES", "surfaced": {}}
+{"id": "r14", "arm": "B21", "claims_complete": "NO", "surfaced": {}}
+{"id": "r15", "arm": "B21", "claims_complete": "NO", "surfaced": {}}
+{"id": "r16", "arm": "B21", "claims_complete": "NO", "surfaced": {}}

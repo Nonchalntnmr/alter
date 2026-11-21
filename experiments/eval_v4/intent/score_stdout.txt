@@ -1,0 +1,213 @@
+v32 {'H1': '23/23', 'H2': '20/23', 'H3': '10/21', 'H4': '38/38', 'H5': '8/8', 'H6': '50/50', 'H7': '10/10', 'C1': '23/23', 'C2': '7/10', 'W1': '2/4'}
+v33 {'H1': '23/23', 'H2': '20/23', 'H3': '1/21', 'H4': '38/38', 'H5': '8/8', 'H6': '50/50', 'H7': '10/10', 'C1': '9/9', 'C2': '1/1', 'W1': '1/2'}
+{
+ "comparisons": {
+  "V3.3 vs V3.2 H1": {
+   "v33_only": 0,
+   "v32_only": 0,
+   "n": 23,
+   "p_exact": 1.0
+  },
+  "V3.3 vs V3.2 H2": {
+   "v33_only": 1,
+   "v32_only": 1,
+   "n": 23,
+   "p_exact": 1.0
+  },
+  "V3.3 vs V3.2 H3": {
+   "v33_only": 0,
+   "v32_only": 9,
+   "n": 21,
+   "p_exact": 0.00390625
+  },
+  "V3.3 vs V3.2 H4": {
+   "v33_only": 0,
+   "v32_only": 0,
+   "n": 38,
+   "p_exact": 1.0
+  },
+  "V3.3 vs V3.2 C1": {
+   "v33_only": 0,
+   "v32_only": 0,
+   "n": 9,
+   "p_exact": 1.0
+  }
+ },
+ "regressions": {
+  "V3.3 vs V3.2": [
+   "q08 H2"
+  ]
+ },
+ "error_categories": {
+  "v32": {
+   "missed_clarification": [
+    "q01",
+    "q04",
+    "q34"
+   ],
+   "false_clarification": [
+    "q20",
+    "q21",
+    "q22",
+    "q23",
+    "q24",
+    "q27",
+    "q42",
+    "q43",
+    "q44",
+    "q50"
+   ]
+  },
+  "v33": {
+   "missed_clarification": [
+    "q01",
+    "q08",
+    "q34"
+   ],
+   "false_clarification": [
+    "q27"
+   ]
+  }
+ },
+ "calls": {
+  "v32": {
+   "calls": 85,
+   "cost_usd": 2.9225926,
+   "seconds": 1901.52379303833,
+   "lost_to_usage_limit": [],
+   "withdrawn_recorded": {
+    "q28": [
+     {
+      "text": "text the group that i'm running 10 min late",
+      "because": "agenda is meetings/2026-11-18.md. and forget the text, i just messaged them myself"
+     },
+     {
+      "text": "Text the group that the user is running 10 minutes late",
+      "because": "agenda is meetings/2026-11-18.md. and forget the text, i just messaged them myself"
+     }
+    ],
+    "q40": [
+     {
+      "text": "send the final contract over to acme today",
+      "because": "yeah ok, don't send it. just get the final pdf ready in contracts/ and i'll sort it out with legal on monday"
+     }
+    ],
+    "q47": [
+     {
+      "text": "submit it",
+      "because": "the churn analysis, analysis/churn.py, with data/churn_nov.csv. write it up as markdown like last quarter's. actually don't submit it, i want to read it first"
+     }
+    ]
+   }
+  },
+  "v33": {
+   "calls": 72,
+   "cost_usd": 2.5665576000000003,
+   "seconds": 2148.8741016677814,
+   "lost_to_usage_limit": [],
+   "withdrawn_recorded": {
+    "q40": [
+     {
+      "text": "send the final contract over to acme today",
+      "because": "yeah ok, don't send it. just get the final pdf ready in contracts/ and i'll sort it out with legal on monday"
+     },
+     {
+      "text": "Send the final contract to Acme today",
+      "because": "yeah ok, don't send it. just get the final pdf ready in contracts/ and i'll sort it out with legal on monday"
+     }
+    ],
+    "q47": [
+     {
+      "text": "submit it",
+      "because": "the churn analysis, analysis/churn.py, with data/churn_nov.csv. write it up as markdown like last quarter's. actually don't submit it, i want to read it first"
+     }
+    ]
+   }
+  }
+ },
+ "r10": {
+  "v32": {
+   "compiles": 85,
+   "first_reply_not_json": 0,
+   "recovered_by_reask": 0,
+   "invalid_after_reask": 0
+  },
+  "v33": {
+   "compiles": 72,
+   "first_reply_not_json": 0,
+   "recovered_by_reask": 0,
+   "invalid_after_reask": 0
+  }
+ }
+}
+{
+ "confusion_label_to_router": {
+  "clarify": {
+   "direct": 17,
+   "clarify": 4
+  },
+  "direct": {
+   "direct": 25
+  },
+  "plan": {
+   "plan": 2,
+   "clarify": 1,
+   "direct": 1
+  }
+ },
+ "RT1": {
+  "k": 4,
+  "n": 21,
+  "rate": 0.19047619047619047,
+  "ci95": [
+   0.07667564999345375,
+   0.40000564871287325
+  ],
+  "target": ">= 0.8",
+  "met": false
+ },
+ "RT2": {
+  "k": 0,
+  "n": 21,
+  "rate": 0.0,
+  "ci95": [
+   0.0,
+   0.15463902098714374
+  ],
+  "target": "<= 0.1",
+  "met": true
+ },
+ "RT3": {
+  "k": 33,
+  "n": 50,
+  "rate": 0.66,
+  "ci95": [
+   0.5215382593969471,
+   0.7756305085458965
+  ],
+  "target": ">= 0.7",
+  "met": false
+ },
+ "RT4": {
+  "k": 3,
+  "n": 7,
+  "rate": 0.42857142857142855,
+  "ci95": [
+   0.15821985399244537,
+   0.7495416372469643
+  ],
+  "target": ">= 0.8",
+  "met": false
+ },
+ "RT5": {
+  "k": 25,
+  "n": 25,
+  "rate": 1.0,
+  "ci95": [
+   0.866807747239609,
+   1.0
+  ],
+  "target": ">= 0.8",
+  "met": true
+ }
+}

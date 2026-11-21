@@ -29,7 +29,9 @@ import dataclasses
 
 from .assist import GROWTH_MODES
 
-MODES = ("execute", "amplify", "learn", "challenge")
+MODES = ("execute", "amplify", "learn", "challenge", "plan")
+# Operations, not ways of helping: chosen by a command (`ci plan`), never as a default.
+INTERNAL_MODES = frozenset({"plan"})
 DEFAULT_MODE = "execute"
 ALIASES = {"e": "execute", "x": "execute", "exec": "execute", "a": "amplify", "amp": "amplify",
            "l": "learn", "teach": "learn", "c": "challenge", "adversarial": "challenge"}
@@ -50,6 +52,43 @@ CHALLENGE_FORMAT = (
     "\"what_would_change_my_mind\": string, \"verdict\": one or two sentences}. List at least two assumptions and "
     "one counterexample. Mark an assumption high only if the claim fails without it. Never invent facts about the "
     "person; work only from what the request and the provided context say.")
+
+
+# The task specification intent_compiler.py parses and gates. Confidences are the model's
+# estimates; the gate that decides what happens next is code, not the model.
+PLAN_FORMAT = (
+    "The request may be one word, shorthand or a rough idea. Do not do the work: reconstruct what the person most "
+    "likely wants and plan it. Reply with ONE JSON object and nothing else: {\"interpretations\": [{\"goal\": "
+    "string, \"p\": probability 0 to 1}] (the readings you considered, most likely first, p summing to at most 1), "
+    "\"goal\": the most likely goal in one sentence, \"outcomes\": [{\"id\": \"o1\", \"text\": what the person "
+    "asked to end up with or to have happened, \"kind\": \"deliverable\"|\"external_action\"|"
+    "\"destructive_change\", \"quote\": the words of the request it comes from, \"done_when\": a checkable "
+    "condition}] (an external_action is anything that sends, posts, publishes, books, buys, pays, schedules, "
+    "submits, deploys, shares or contacts someone; a destructive_change deletes, overwrites or resets something; "
+    "keep every action the person asked for as an outcome even if you can only prepare it), \"deliverables\": "
+    "[what the person ends up with], \"constraints\": [{\"text\", \"source\": \"request\"|\"notes\"|"
+    "\"profile\"|\"assumed\", \"notes\": [the numbers of the notes it comes from, only for source notes]}], "
+    "\"conflicts\": [constraints in the request that cannot both hold], \"success_criteria\": [checkable "
+    "statements], \"dependencies\": [what must exist or be true first], \"steps\": [{\"id\": \"s1\", "
+    "\"action\": string, \"kind\": \"think\"|\"read\"|\"run\"|\"write\"|\"external\", \"serves\": "
+    "[outcome ids], \"role\": \"preparatory\"|\"fulfilling\", \"depends_on\": [step ids]}], \"assumptions\": "
+    "[{\"text\", \"confidence\": 0 to 1, \"consequential\": true if acting on it wrongly would cause an "
+    "irreversible/destructive change, spend money, or contact/act externally (never mark routine code, "
+    "file-location, or implementation-detail questions as consequential inside a project: plan a read step to "
+    "inspect the code instead), \"about\": [the ids of the outcomes it affects]}] (CI cannot send, post, book, "
+    "pay or contact anyone, so an external_action is the person's to do; an assumption that only matters to how "
+    "the person does their own part, such as which channel, which address or which payment method, goes in "
+    "assumptions with its about, and is not a question), \"questions\": [only the fewest questions that settle truly consequential "
+    "ambiguity; omit questions when reading the code can answer them]}. Kinds: think = reasoning or writing an "
+    "answer; read = reading the person's files; run = running code or tests; write = creating or changing files; "
+    "external = doing an external_action. Keep steps minimal and direct: do only what the request asks. Do not add "
+    "backup or copy steps, steps that run deletions or resets on existing data, temporary scratch scripts, or outcomes "
+    "and prerequisites the request does not ask for; a feature that deletes when used is a deliverable, not a "
+    "destructive_change. Drafting something is preparatory, never a replacement for sending or "
+    "posting it. You cannot see the person's files while planning: CI's agent reads them in the person's "
+    "authorized project folder when it executes, so plan read steps instead of asking where files are. Any "
+    "working directory you are told about is your own process's and has nothing to do with the project. "
+    "Never invent facts about the person; cite a note only if it says what you claim.")
 
 
 def normalize(mode: str | None) -> str | None:
@@ -89,4 +128,6 @@ def resolve(requested: str | None, default: str | None, task_type: str, growth_t
         return ModeDecision(mode, source, why, "amplify", None, ())
     if mode == "challenge":
         return ModeDecision(mode, source, why, "challenge", None, (CHALLENGE_FORMAT,))
+    if mode == "plan":
+        return ModeDecision(mode, source, why, "plan", None, (PLAN_FORMAT,))
     return ModeDecision(mode, source, why, None, GROWTH_MODES, (LEARN_DIRECTIVE,))

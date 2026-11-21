@@ -424,6 +424,7 @@ class PersonalCI:
             "usage": dataclasses.asdict(resp.usage), "cost_usd": cost,
             "latency_ms": round(resp.latency_ms + (plan.latency_ms if plan is not None else 0.0), 1),
             "stop_reason": resp.stop_reason, "refusal": resp.refusal, "prompt_sha256": prompt.digest(),
+            "provider_context": getattr(resp, "provider_context", None),
             "egress_audit_hash": decision.audit_hash,
             "intelligence_mode": md.as_dict() if md else None, "project_id": project_id, "route": route,
         }
@@ -482,6 +483,8 @@ class PersonalCI:
 
     def set_intelligence_mode(self, user_id: str, mode: str) -> str:
         m = intelligence.normalize(mode)
+        if m in intelligence.INTERNAL_MODES:
+            raise ValueError(f"{m} is a command (`ci {m}`), not a default mode")
         self._set_setting(user_id, SETTING_MODE, m)
         self.audit.append(user_id, "mode.default", mode=m)
         return m
@@ -563,6 +566,12 @@ class PersonalCI:
                 return self.ask(user_id, task, c.entry.provider, c.entry.model or None, budget_tokens,
                                 _mode=md, project_id=project_id, route=info)
             except fallback_errors() as e:
+                if isinstance(e, BrokenPipeError):
+                    # This process's own stdout or stderr was closed (`ci … | head -1`), not the
+                    # provider failing. Adapters raise ProviderError or httpx errors for their
+                    # transport, and the CLI adapter's subprocess absorbs a broken pipe to its child.
+                    # Falling back would record a provider failure for every model and still fail.
+                    raise
                 # Every failure still falls back: another vendor or model is a different request. A
                 # non-retryable failure is not retried in place (the SDKs already retry transient ones).
                 kind, status = getattr(e, "kind", "unknown"), getattr(e, "status", None)
@@ -753,7 +762,8 @@ class PersonalCI:
             "interactions": self.store.list_interactions(user_id, with_payload=True),
             "dna": self.dna(user_id),
             "growth": {"attempts": self.attempts(user_id), "weekly_reviews": self.weekly_snapshots(user_id),
-                       "challenges": self._state_json(user_id, CHALLENGES_STATE, [])[1]},
+                       "challenges": self._state_json(user_id, CHALLENGES_STATE, [])[1],
+                       "plans": self._state_json(user_id, "pcim-plans", [])[1]},
             "audit": self.audit.entries(user_id),
             "audit_head": self.audit.head(),
         }

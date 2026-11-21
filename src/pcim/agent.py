@@ -22,14 +22,17 @@ briefing if it was included, and which memory items were sent or withheld.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import datetime as dt
+import fcntl
 import hashlib
 import json
 import os
 import secrets
 import threading
 import time
+from pathlib import Path
 
 from .adapters.mock_agent import MockAgentAdapter
 from .adapters.render import _clean, _label
@@ -140,8 +143,23 @@ class Agent:
         return self._adapters[key]
 
     # ------------------------------------------------------------------ session state
-    def _lock(self, sid: str) -> threading.Lock:
-        return self._locks.setdefault(sid, threading.Lock())
+    @contextlib.contextmanager
+    def _lock(self, sid: str):
+        with self._locks.setdefault(sid, threading.Lock()):
+            db_path = getattr(self.store, "path", ":memory:")
+            if db_path == ":memory:":
+                yield
+                return
+            lock_path = Path(db_path).parent / f".session-{sid}.lock"
+            fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+            try:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    raise RuntimeError("this session is being driven in another process; wait for it to finish") from None
+                yield
+            finally:
+                os.close(fd)
 
     def _load(self, user_id: str, project_id: str, sid: str) -> dict:
         rows = self.store.query("SELECT * FROM sessions WHERE id=? AND user_id=? AND project_id=?",
@@ -191,7 +209,8 @@ class Agent:
              % ",".join("?" * len(self._CONTEXT_EVENTS)))
         return self.store.query(q, (user_id, *self._CONTEXT_EVENTS))[0]["s"] or 0
 
-    def _new_session(self, user_id: str, project_id: str, provider: str, model: str | None) -> tuple[str, dict]:
+    def _new_session(self, user_id: str, project_id: str, provider: str, model: str | None,
+                     directives: str | None = None) -> tuple[str, dict]:
         prev = self.open_session(user_id, project_id)
         if prev:
             self.close_session(user_id, project_id, prev)
@@ -200,6 +219,8 @@ class Agent:
         prefs = self._collab_prefs(user_id, project_id, provider, ad.model, ref=sid)
         system = SYSTEM + (("\n\nHow this person has asked you to work with them:\n" +
                             "\n".join(f"- {_clean(p.content)}" for p in prefs)) if prefs else "")
+        if directives:
+            system += "\n\n" + directives
         st = {"provider": provider, "model": model, "system": system, "messages": [], "pending": None,
               "display": [], "cost_usd": 0.0, "cost_unknown": False, "reflection": None, "briefing_sent": False,
               "system_memory_items": [p.id for p in prefs], "context_epoch": self._context_epoch(user_id)}
@@ -212,7 +233,9 @@ class Agent:
 
     # ------------------------------------------------------------------ the loop
     def send(self, user_id: str, project_id: str, text: str, provider: str = "mock", model: str | None = None,
-             new_session: bool = False) -> AgentTurn:
+             new_session: bool = False, directives: str | None = None) -> AgentTurn:
+        """`directives` are appended to the system prompt of a session this call creates; an
+        existing session keeps the instructions it began with."""
         if not text.strip():
             raise ValueError("empty message")
         vendor = self.ws.require_provider(user_id, project_id, provider)  # before anything is read or sent
@@ -226,12 +249,19 @@ class Agent:
             elif st.get("context_epoch", 0) != self._context_epoch(user_id) and not st["pending"]:
                 sid = None  # consent or memory changed since this session began
         if not sid:
-            sid, st = self._new_session(user_id, project_id, provider, model)
+            sid, st = self._new_session(user_id, project_id, provider, model, directives)
             st = self._load(user_id, project_id, sid)
         with self._lock(sid):
             st = self._load(user_id, project_id, sid)  # again under the lock: a concurrent turn may have advanced it
             if st["pending"]:
-                raise RuntimeError("this session is waiting on an approval; approve or deny it first")
+                p = st["pending"]
+                tasks = {tu: self.queue.get(user_id, tid) for tu, tid in p["tasks"].items()}
+                if any(x.status not in TERMINAL and x.status != "succeeded" for x in tasks.values()):
+                    raise RuntimeError("this session is waiting on an approval; approve or deny it first")
+                results = dict(p["results"])
+                results.update({tu: self._result_block(x) for tu, x in tasks.items()})
+                st["messages"].append({"role": "user", "content": [results[tu] for tu in p["order"]]})
+                st["pending"] = None
             ad = self.adapter(provider, model)
             parts = []
             disclosure = {"at": utcnow().isoformat(), "session": sid, "provider": provider, "vendor": vendor,
@@ -310,6 +340,21 @@ class Agent:
         return {"type": "tool_result", "tool_use_id": t.tool_use_id, "is_error": True,
                 "content": f"{t.status}: {(t.reason or '')[:1900]} [{t.id}]"}
 
+    def _tools(self, user_id: str, project_id: str) -> list[dict]:
+        """Tools enabled for this project and ledger configuration."""
+        disabled = set()
+        if self.ledger is None:
+            disabled.add("record_claim")
+        ws_info = self.ws.briefing(user_id, project_id).get("workspace")
+        if ws_info is None:
+            disabled.update(("read_file", "list_files", "search_code", "git_status", "write_file", "run_tests"))
+        else:
+            if not ws_info.get("can_write"):
+                disabled.add("write_file")
+            if not ws_info.get("can_run_tests"):
+                disabled.add("run_tests")
+        return [t for t in TOOLS if t["name"] not in disabled]
+
     def _run(self, user_id: str, project_id: str, sid: str, st: dict) -> AgentTurn:
         ad = self.adapter(st["provider"], st["model"])
         touched: list[str] = []
@@ -327,7 +372,7 @@ class Agent:
             if why:
                 return self._stop(user_id, project_id, sid, st, touched, turn, "stopped", why, _STOP_NOTES[why])
             try:
-                step = ad.agent_step(st["system"], st["messages"], TOOLS)
+                step = ad.agent_step(st["system"], st["messages"], self._tools(user_id, project_id))
             except Exception as e:  # recorded and re-raised, never swallowed; the transcript so far is saved
                 self.audit.append(user_id, "model.error", project=project_id, session=sid, provider=st["provider"],
                                   error=type(e).__name__)

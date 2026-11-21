@@ -1,0 +1,378 @@
+[
+  {
+    "id": "t01",
+    "visible_pass_original": true,
+    "hidden_fails_original": true,
+    "hidden_pass_reference": true,
+    "visible_pass_reference": true,
+    "hidden_fails_other_reading": true,
+    "exit_codes": {
+      "visible_original": 0,
+      "hidden_original": 1,
+      "hidden_reference": 0,
+      "visible_reference": 0,
+      "hidden_other_reading": 1
+    },
+    "all_checks_true": true
+  },
+  {
+    "id": "t02",
+    "visible_pass_original": true,
+    "hidden_fails_original": true,
+    "hidden_pass_reference": true,
+    "visible_pass_reference": true,
+    "hidden_fails_other_reading": true,
+    "exit_codes": {
+      "visible_original": 0,
+      "hidden_original": 1,
+      "hidden_reference": 0,
+      "visible_reference": 0,
+      "hidden_other_reading": 1
+    },
+    "all_checks_true": true
+  },
+  {
+    "id": "t03",
+    "visible_pass_original": true,
+    "hidden_fails_original": true,
+    "hidden_pass_reference": true,
+    "visible_pass_reference": true,
+    "hidden_fails_other_reading": true,
+    "exit_codes": {
+      "visible_original": 0,
+      "hidden_original": 1,
+      "hidden_reference": 0,
+      "visible_reference": 0,
+      "hidden_other_reading": 1
+    },
+    "all_checks_true": true
+  },
+  {
+    "id": "t04",
+    "visible_pass_original": true,
+    "hidden_fails_original": true,
+    "hidden_pass_reference": true,
+    "visible_pass_reference": true,
+    "hidden_fails_other_reading": true,
+    "exit_codes": {
+      "visible_original": 0,
+      "hidden_original": 1,
+      "hidden_reference": 0,
+      "visible_reference": 0,
+      "hidden_other_reading": 1
+    },
+    "all_checks_true": true
+  },
+  {
+    "id": "t05",
+    "visible_pass_original": true,
+    "hidden_fails_original": true,
+    "hidden_pass_reference": true,
+    "visible_pass_reference": true,
+    "hidden_fails_other_reading": true,
+    "exit_codes": {
+      "visible_original": 0,
+      "hidden_original": 1,
+      "hidden_reference": 0,
+      "visible_reference": 0,
+      "hidden_other_reading": 1
+    },
+    "all_checks_true": true
+  },
+  {
+    "id": "t06",
+    "visible_pass_original": true,
+    "hidden_fails_original": true,
+    "hidden_pass_reference": true,
+    "visible_pass_reference": true,
+    "hidden_fails_other_reading": true,
+    "exit_codes": {
+      "visible_original": 0,
+      "hidden_original": 1,
+      "hidden_reference": 0,
+      "visible_reference": 0,
+      "hidden_other_reading": 1
+    },
+    "all_checks_true": true
+  },
+  {
+    "id": "t07",
+    "visible_pass_original": true,
+    "hidden_fails_original": true,
+    "hidden_pass_reference": true,
+    "visible_pass_reference": true,
+    "hidden_fails_other_reading": true,
+    "exit_codes": {
+      "visible_original": 0,
+      "hidden_original": 1,
+      "hidden_reference": 0,
+      "visible_reference": 0,
+      "hidden_other_reading": 1
+    },
+    "all_checks_true": true
+  },
+  {
+    "id": "t08",
+    "visible_pass_original": true,
+    "hidden_fails_original": true,
+    "hidden_pass_reference": true,
+    "visible_pass_reference": true,
+    "hidden_fails_other_reading": true,
+    "exit_codes": {
+      "visible_original": 0,
+      "hidden_original": 1,
+      "hidden_reference": 0,
+      "visible_reference": 0,
+      "hidden_other_reading": 1
+    },
+    "all_checks_true": true
+  },
+  {
+    "id": "t09",
+    "visible_pass_original": true,
+    "hidden_fails_original": true,
+    "hidden_pass_reference": true,
+    "visible_pass_reference": true,
+    "hidden_fails_other_reading": true,
+    "exit_codes": {
+      "visible_original": 0,
+      "hidden_original": 1,
+      "hidden_reference": 0,
+      "visible_reference": 0,
+      "hidden_other_reading": 1
+    },
+    "all_checks_true": true
+  },
+  {
+    "id": "t10",
+    "visible_pass_original": true,
+    "hidden_fails_original": true,
+    "hidden_pass_reference": true,
+    "visible_pass_reference": true,
+    "hidden_fails_other_reading": true,
+    "exit_codes": {
+      "visible_original": 0,
+      "hidden_original": 1,
+      "hidden_reference": 0,
+      "visible_reference": 0,
+      "hidden_other_reading": 1
+    },
+    "all_checks_true": true
+  },
+  {
+    "id": "t11",
+    "visible_pass_original": true,
+    "hidden_fails_original": true,
+    "hidden_pass_reference": true,
+    "visible_pass_reference": true,
+    "hidden_fails_other_reading": true,
+    "exit_codes": {
+      "visible_original": 0,
+      "hidden_original": 1,
+      "hidden_reference": 0,
+      "visible_reference": 0,
+      "hidden_other_reading": 1
+    },
+    "all_checks_true": true
+  },
+  {
+    "id": "t12",
+    "visible_pass_original": true,
+    "hidden_fails_original": true,
+    "hidden_pass_reference": true,
+    "visible_pass_reference": true,
+    "hidden_fails_other_reading": true,
+    "exit_codes": {
+      "visible_original": 0,
+      "hidden_original": 1,
+      "hidden_reference": 0,
+      "visible_reference": 0,
+      "hidden_other_reading": 1
+    },
+    "all_checks_true": true
+  },
+  {
+    "id": "t13",
+    "visible_pass_original": true,
+    "hidden_fails_original": true,
+    "hidden_pass_reference": true,
+    "visible_pass_reference": true,
+    "hidden_fails_other_reading": null,
+    "exit_codes": {
+      "visible_original": 0,
+      "hidden_original": 1,
+      "hidden_reference": 0,
+      "visible_reference": 0
+    },
+    "all_checks_true": true
+  },
+  {
+    "id": "t14",
+    "visible_pass_original": true,
+    "hidden_fails_original": true,
+    "hidden_pass_reference": true,
+    "visible_pass_reference": true,
+    "hidden_fails_other_reading": null,
+    "exit_codes": {
+      "visible_original": 0,
+      "hidden_original": 1,
+      "hidden_reference": 0,
+      "visible_reference": 0
+    },
+    "all_checks_true": true
+  },
+  {
+    "id": "t15",
+    "visible_pass_original": true,
+    "hidden_fails_original": true,
+    "hidden_pass_reference": true,
+    "visible_pass_reference": true,
+    "hidden_fails_other_reading": null,
+    "exit_codes": {
+      "visible_original": 0,
+      "hidden_original": 1,
+      "hidden_reference": 0,
+      "visible_reference": 0
+    },
+    "all_checks_true": true
+  },
+  {
+    "id": "t16",
+    "visible_pass_original": true,
+    "hidden_fails_original": true,
+    "hidden_pass_reference": true,
+    "visible_pass_reference": true,
+    "hidden_fails_other_reading": null,
+    "exit_codes": {
+      "visible_original": 0,
+      "hidden_original": 1,
+      "hidden_reference": 0,
+      "visible_reference": 0
+    },
+    "all_checks_true": true
+  },
+  {
+    "id": "t17",
+    "visible_pass_original": true,
+    "hidden_fails_original": true,
+    "hidden_pass_reference": true,
+    "visible_pass_reference": true,
+    "hidden_fails_other_reading": true,
+    "exit_codes": {
+      "visible_original": 0,
+      "hidden_original": 1,
+      "hidden_reference": 0,
+      "visible_reference": 0,
+      "hidden_other_reading": 1
+    },
+    "all_checks_true": true
+  },
+  {
+    "id": "t18",
+    "visible_pass_original": true,
+    "hidden_fails_original": true,
+    "hidden_pass_reference": true,
+    "visible_pass_reference": true,
+    "hidden_fails_other_reading": true,
+    "exit_codes": {
+      "visible_original": 0,
+      "hidden_original": 1,
+      "hidden_reference": 0,
+      "visible_reference": 0,
+      "hidden_other_reading": 1
+    },
+    "all_checks_true": true
+  },
+  {
+    "id": "t19",
+    "visible_pass_original": true,
+    "hidden_fails_original": true,
+    "hidden_pass_reference": true,
+    "visible_pass_reference": true,
+    "hidden_fails_other_reading": true,
+    "exit_codes": {
+      "visible_original": 0,
+      "hidden_original": 1,
+      "hidden_reference": 0,
+      "visible_reference": 0,
+      "hidden_other_reading": 1
+    },
+    "all_checks_true": true
+  },
+  {
+    "id": "t20",
+    "visible_pass_original": true,
+    "hidden_fails_original": true,
+    "hidden_pass_reference": true,
+    "visible_pass_reference": true,
+    "hidden_fails_other_reading": true,
+    "exit_codes": {
+      "visible_original": 0,
+      "hidden_original": 1,
+      "hidden_reference": 0,
+      "visible_reference": 0,
+      "hidden_other_reading": 1
+    },
+    "all_checks_true": true
+  },
+  {
+    "id": "t21",
+    "visible_pass_original": true,
+    "hidden_fails_original": true,
+    "hidden_pass_reference": true,
+    "visible_pass_reference": true,
+    "hidden_fails_other_reading": null,
+    "exit_codes": {
+      "visible_original": 0,
+      "hidden_original": 1,
+      "hidden_reference": 0,
+      "visible_reference": 0
+    },
+    "all_checks_true": true
+  },
+  {
+    "id": "t22",
+    "visible_pass_original": true,
+    "hidden_fails_original": true,
+    "hidden_pass_reference": true,
+    "visible_pass_reference": true,
+    "hidden_fails_other_reading": null,
+    "exit_codes": {
+      "visible_original": 0,
+      "hidden_original": 1,
+      "hidden_reference": 0,
+      "visible_reference": 0
+    },
+    "all_checks_true": true
+  },
+  {
+    "id": "t23",
+    "visible_pass_original": true,
+    "hidden_fails_original": true,
+    "hidden_pass_reference": true,
+    "visible_pass_reference": true,
+    "hidden_fails_other_reading": null,
+    "exit_codes": {
+      "visible_original": 0,
+      "hidden_original": 1,
+      "hidden_reference": 0,
+      "visible_reference": 0
+    },
+    "all_checks_true": true
+  },
+  {
+    "id": "t24",
+    "visible_pass_original": true,
+    "hidden_fails_original": true,
+    "hidden_pass_reference": true,
+    "visible_pass_reference": true,
+    "hidden_fails_other_reading": null,
+    "exit_codes": {
+      "visible_original": 0,
+      "hidden_original": 1,
+      "hidden_reference": 0,
+      "visible_reference": 0
+    },
+    "all_checks_true": true
+  }
+]

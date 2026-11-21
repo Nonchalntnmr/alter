@@ -1,0 +1,6 @@
+frozen_at_utc=2026-11-13T13:50:41Z
+set_sha256=dbfa356c647a5b18a586f756fa5600f1f649b6bd72bdf64eeb8f2b8f152f9c1d  (~/projects/ci-sealed/paired_v1/tasks.json, 16 tasks, outside git, written by an agent that could not see CI's code; content unread by the implementer at freeze, only key names and types checked)
+prereg_sha256=3bb2c13590fb7c051e32c97a4e0f428e606a912702a023da7c7a2ecbc0d3e421
+harness_sha256=3890b887a0948f0c6db80ef8222235aec092321751dd3354ec06a50da17051e7
+code=a9ddcfa  (src/ under test: V2.1. Amended 2026-11-13T13:58:48Z, still before the task set was read)
+code_amended_from=58348cc  (V2. The held-out run found that common words one edit from an action verb, such as look/book and test/text, were read as typos and restored as actions for the person; arm B on V2 would have measured that defect. The harness, pre-registration and set hashes are unchanged.)

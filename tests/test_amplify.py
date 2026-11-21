@@ -252,7 +252,8 @@ def test_modes_never_change_autonomy_permissions_or_routing_filters(env, tmp_pat
     p = ws.create_project("u", "P", objective="o")
     before = (ws.get_mode("u"), ws.all_auths("u"), ws.provider_vendors("u", p.id))
     for m in modes.MODES:
-        ci.set_intelligence_mode("u", m)
+        if m not in modes.INTERNAL_MODES:  # `plan` is a command; it is still routed below, like every mode
+            ci.set_intelligence_mode("u", m)
         ci.ask_routed("u", LIGHT, mode=m)
     assert (ws.get_mode("u"), ws.all_auths("u"), ws.provider_vendors("u", p.id)) == before
     for g in ci.ledger.grants("u"):

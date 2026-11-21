@@ -107,11 +107,19 @@ class SentenceEmbedder:
     def _load(self):
         with self._lock:
             if self._m is None:
+                import os
+                from pathlib import Path
+                cached = (Path.home() / ".cache" / "huggingface" / "hub" /
+                          ("models--" + self.model.replace("/", "--"))).exists()
+                if cached:
+                    os.environ.setdefault("HF_HUB_OFFLINE", "1")
                 try:
                     from sentence_transformers import SentenceTransformer
                 except ImportError as e:
-                    raise RuntimeError("the semantic embedder needs the `semantic` extra: "
-                                       "pip install 'contextual-intelligence[semantic]'") from e
+                    raise EmbedderUnavailable(
+                        f"this store's memory is embedded with {self.name}, which needs the `semantic` extra: "
+                        "pip install 'contextual-intelligence[semantic]' (a store keeps the embedder it was "
+                        "written with, so its memory never mixes two vector spaces)") from e
                 self._m = SentenceTransformer(self.model, device="cpu")
                 self.dim = self._m.get_sentence_embedding_dimension()
         return self._m
@@ -129,6 +137,10 @@ def embedder_from_name(name: str) -> Embedder:
     if name.startswith("st:"):
         return SentenceEmbedder(name[3:])
     raise ValueError(f"unknown embedder {name!r}")
+
+
+class EmbedderUnavailable(RuntimeError):
+    """The store's recorded embedder cannot run here (for example, its extra is not installed)."""
 
 
 def semantic_available() -> bool:

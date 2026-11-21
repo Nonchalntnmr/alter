@@ -11,3 +11,7 @@ data/
 *.key
 experiments/*/runs/
 !src/pcim/data/
+
+# packaging output (pip wheel / setuptools)
+build/
+dist/

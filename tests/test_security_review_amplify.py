@@ -266,8 +266,6 @@ def test_m9_terminal_control_sequences_from_stored_and_model_text_are_printed_ra
     assert "\x1b" not in out and "\x07" not in out
 
 
-@pytest.mark.xfail(strict=True, reason="M10: deleting a project keeps the `ci` requests made inside it (and "
-                                       "--deep still quotes them)")
 def test_m10_deleting_a_project_keeps_the_requests_made_inside_it(env, tmp_path):
     ci, _ = make(tmp_path)
     ws = Workspace(ci)

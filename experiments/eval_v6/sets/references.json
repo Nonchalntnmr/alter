@@ -1,0 +1,178 @@
+{
+  "t01": {
+    "reference": {
+      "contacts.py": "\"\"\"Clean up the contacts export before it goes into the mailing tool.\"\"\"\nimport csv\nfrom datetime import date\n\n\ndef read_contacts(path):\n    \"\"\"Read the exported CSV (name, email, phone, updated) into dicts.\"\"\"\n    with open(path, newline=\"\", encoding=\"utf-8\") as fh:\n        return list(csv.DictReader(fh))\n\n\ndef tidy(row):\n    \"\"\"Trim stray spaces and lowercase the email.\"\"\"\n    return {\n        \"name\": row[\"name\"].strip(),\n        \"email\": row[\"email\"].strip().lower(),\n        \"phone\": row[\"phone\"].strip(),\n        \"updated\": row[\"updated\"].strip(),\n    }\n\n\ndef clean(rows):\n    \"\"\"The clean-up step run on every export.\n\n    One row per email address. When an address appears more than once, the\n    row with the latest 'updated' date is kept; older rows are stale.\n    \"\"\"\n    latest = {}\n    for row in rows:\n        contact = tidy(row)\n        seen = latest.get(contact[\"email\"])\n        newer = seen is None or (date.fromisoformat(contact[\"updated\"])\n                                 > date.fromisoformat(seen[\"updated\"]))\n        if newer:\n            latest[contact[\"email\"]] = contact\n    return list(latest.values())\n"
+    },
+    "other_reading": {
+      "contacts.py": "\"\"\"Clean up the contacts export before it goes into the mailing tool.\"\"\"\nimport csv\n\n\ndef read_contacts(path):\n    \"\"\"Read the exported CSV (name, email, phone, updated) into dicts.\"\"\"\n    with open(path, newline=\"\", encoding=\"utf-8\") as fh:\n        return list(csv.DictReader(fh))\n\n\ndef tidy(row):\n    \"\"\"Trim stray spaces and lowercase the email.\"\"\"\n    return {\n        \"name\": row[\"name\"].strip(),\n        \"email\": row[\"email\"].strip().lower(),\n        \"phone\": row[\"phone\"].strip(),\n        \"updated\": row[\"updated\"].strip(),\n    }\n\n\ndef clean(rows):\n    \"\"\"The clean-up step run on every export; one row per email address.\"\"\"\n    seen = set()\n    out = []\n    for row in rows:\n        contact = tidy(row)\n        if contact[\"email\"] not in seen:\n            seen.add(contact[\"email\"])\n            out.append(contact)\n    return out\n"
+    }
+  },
+  "t02": {
+    "reference": {
+      "importer.py": "\"\"\"Load bank transactions into our budget format.\"\"\"\nfrom datetime import datetime\n\n\ndef parse_date(text):\n    \"\"\"Turn the date column into a date.\n\n    Handles 2024-03-15 style dates, and the new account's slash dates,\n    which are day/month/year.\n    \"\"\"\n    text = text.strip()\n    if \"/\" in text:\n        return datetime.strptime(text, \"%d/%m/%Y\").date()\n    return datetime.strptime(text, \"%Y-%m-%d\").date()\n\n\ndef parse_amount(text):\n    \"\"\"'1,234.50' -> 1234.5; a trailing '-' means money going out.\"\"\"\n    text = text.strip().replace(\",\", \"\")\n    if text.endswith(\"-\"):\n        return -float(text[:-1])\n    return float(text)\n\n\ndef parse_row(row):\n    \"\"\"One row of the bank's CSV export.\"\"\"\n    return {\n        \"date\": parse_date(row[\"Date\"]),\n        \"description\": row[\"Description\"].strip(),\n        \"amount\": parse_amount(row[\"Amount\"]),\n    }\n"
+    },
+    "other_reading": {
+      "importer.py": "\"\"\"Load bank transactions into our budget format.\"\"\"\nfrom datetime import datetime\n\n\ndef parse_date(text):\n    \"\"\"Turn the date column into a date.\n\n    Handles 2024-03-15 style dates, and the new account's slash dates,\n    which are month/day/year.\n    \"\"\"\n    text = text.strip()\n    if \"/\" in text:\n        return datetime.strptime(text, \"%m/%d/%Y\").date()\n    return datetime.strptime(text, \"%Y-%m-%d\").date()\n\n\ndef parse_amount(text):\n    \"\"\"'1,234.50' -> 1234.5; a trailing '-' means money going out.\"\"\"\n    text = text.strip().replace(\",\", \"\")\n    if text.endswith(\"-\"):\n        return -float(text[:-1])\n    return float(text)\n\n\ndef parse_row(row):\n    \"\"\"One row of the bank's CSV export.\"\"\"\n    return {\n        \"date\": parse_date(row[\"Date\"]),\n        \"description\": row[\"Description\"].strip(),\n        \"amount\": parse_amount(row[\"Amount\"]),\n    }\n"
+    }
+  },
+  "t03": {
+    "reference": {
+      "orders.py": "\"\"\"Totals for the order sheet the shop staff fill in.\"\"\"\nimport csv\n\n\ndef read_lines(path):\n    with open(path, newline=\"\", encoding=\"utf-8\") as fh:\n        return list(csv.DictReader(fh))\n\n\ndef line_total(line):\n    \"\"\"Price times quantity for one line of the sheet, in cents.\"\"\"\n    price = round(float(line[\"price\"]) * 100)\n    text = line[\"qty\"].strip()\n    qty = int(text) if text else 1\n    return price * qty\n\n\ndef order_total(lines):\n    return sum(line_total(line) for line in lines)\n"
+    },
+    "other_reading": {
+      "orders.py": "\"\"\"Totals for the order sheet the shop staff fill in.\"\"\"\nimport csv\n\n\ndef read_lines(path):\n    with open(path, newline=\"\", encoding=\"utf-8\") as fh:\n        return list(csv.DictReader(fh))\n\n\ndef line_total(line):\n    \"\"\"Price times quantity for one line of the sheet, in cents.\"\"\"\n    price = round(float(line[\"price\"]) * 100)\n    text = line[\"qty\"].strip()\n    qty = int(text) if text else 0\n    return price * qty\n\n\ndef order_total(lines):\n    return sum(line_total(line) for line in lines)\n"
+    }
+  },
+  "t04": {
+    "reference": {
+      "recipes.py": "\"\"\"Recipe cards for the cafe kitchen.\"\"\"\nimport math\n\n\ndef parse_ingredient(line):\n    \"\"\"'200 g flour' -> {'qty': 200.0, 'unit': 'g', 'name': 'flour'}.\n\n    Things counted rather than measured use the unit 'x', as in '3 x eggs'.\n    \"\"\"\n    qty, unit, name = line.split(maxsplit=2)\n    return {\"qty\": float(qty), \"unit\": unit, \"name\": name}\n\n\ndef format_ingredient(ing):\n    qty = ing[\"qty\"]\n    text = str(int(qty)) if qty == int(qty) else f\"{qty:g}\"\n    return f\"{text} {ing['unit']} {ing['name']}\"\n\n\ndef load_card(text):\n    \"\"\"First line is 'serves N'; every other line is an ingredient.\"\"\"\n    lines = [l.strip() for l in text.strip().splitlines() if l.strip()]\n    serves = int(lines[0].split()[1])\n    return {\"serves\": serves,\n            \"ingredients\": [parse_ingredient(l) for l in lines[1:]]}\n\n\ndef card_text(card):\n    lines = [f\"serves {card['serves']}\"]\n    lines += [format_ingredient(i) for i in card[\"ingredients\"]]\n    return \"\\n\".join(lines)\n\n\ndef scale(card, serves):\n    \"\"\"A copy of the card for a different number of servings.\n\n    Measured ingredients scale in proportion. Counted ones (unit 'x') are\n    rounded up to a whole number: you can't use part of an egg.\n    \"\"\"\n    factor = serves / card[\"serves\"]\n    ingredients = []\n    for ing in card[\"ingredients\"]:\n        qty = ing[\"qty\"] * factor\n        if ing[\"unit\"] == \"x\":\n            qty = float(math.ceil(round(qty, 9)))\n        ingredients.append({**ing, \"qty\": qty})\n    return {\"serves\": serves, \"ingredients\": ingredients}\n"
+    },
+    "other_reading": {
+      "recipes.py": "\"\"\"Recipe cards for the cafe kitchen.\"\"\"\n\n\ndef parse_ingredient(line):\n    \"\"\"'200 g flour' -> {'qty': 200.0, 'unit': 'g', 'name': 'flour'}.\n\n    Things counted rather than measured use the unit 'x', as in '3 x eggs'.\n    \"\"\"\n    qty, unit, name = line.split(maxsplit=2)\n    return {\"qty\": float(qty), \"unit\": unit, \"name\": name}\n\n\ndef format_ingredient(ing):\n    qty = ing[\"qty\"]\n    text = str(int(qty)) if qty == int(qty) else f\"{qty:g}\"\n    return f\"{text} {ing['unit']} {ing['name']}\"\n\n\ndef load_card(text):\n    \"\"\"First line is 'serves N'; every other line is an ingredient.\"\"\"\n    lines = [l.strip() for l in text.strip().splitlines() if l.strip()]\n    serves = int(lines[0].split()[1])\n    return {\"serves\": serves,\n            \"ingredients\": [parse_ingredient(l) for l in lines[1:]]}\n\n\ndef card_text(card):\n    lines = [f\"serves {card['serves']}\"]\n    lines += [format_ingredient(i) for i in card[\"ingredients\"]]\n    return \"\\n\".join(lines)\n\n\ndef scale(card, serves):\n    \"\"\"A copy of the card for a different number of servings.\"\"\"\n    factor = serves / card[\"serves\"]\n    ingredients = [{**ing, \"qty\": ing[\"qty\"] * factor} for ing in card[\"ingredients\"]]\n    return {\"serves\": serves, \"ingredients\": ingredients}\n"
+    }
+  },
+  "t05": {
+    "reference": {
+      "logtool.py": "\"\"\"Helpers for the booking app's JSON-lines activity log.\"\"\"\nimport json\nfrom datetime import datetime\n\n\ndef read_log(path):\n    with open(path, encoding=\"utf-8\") as fh:\n        return [json.loads(line) for line in fh if line.strip()]\n\n\ndef write_log(path, entries):\n    with open(path, \"w\", encoding=\"utf-8\") as fh:\n        for entry in entries:\n            fh.write(json.dumps(entry) + \"\\n\")\n\n\ndef age_days(entry, now):\n    \"\"\"Whole days since the entry's ISO timestamp in 'ts'.\"\"\"\n    return (now - datetime.fromisoformat(entry[\"ts\"])).days\n\n\nMAX_AGE_DAYS = 30\n\n\ndef prune(entries, now):\n    \"\"\"Entries to keep after a clean-out.\n\n    Anything older than 30 days goes, except errors, which are kept however\n    old they are because incident reviews go back to them.\n    \"\"\"\n    return [e for e in entries\n            if e.get(\"level\") == \"error\" or age_days(e, now) <= MAX_AGE_DAYS]\n"
+    },
+    "other_reading": {
+      "logtool.py": "\"\"\"Helpers for the booking app's JSON-lines activity log.\"\"\"\nimport json\nfrom datetime import datetime\n\n\ndef read_log(path):\n    with open(path, encoding=\"utf-8\") as fh:\n        return [json.loads(line) for line in fh if line.strip()]\n\n\ndef write_log(path, entries):\n    with open(path, \"w\", encoding=\"utf-8\") as fh:\n        for entry in entries:\n            fh.write(json.dumps(entry) + \"\\n\")\n\n\ndef age_days(entry, now):\n    \"\"\"Whole days since the entry's ISO timestamp in 'ts'.\"\"\"\n    return (now - datetime.fromisoformat(entry[\"ts\"])).days\n\n\nMAX_AGE_DAYS = 30\n\n\ndef prune(entries, now):\n    \"\"\"Entries to keep after a clean-out: the last 30 days.\"\"\"\n    return [e for e in entries if age_days(e, now) <= MAX_AGE_DAYS]\n"
+    }
+  },
+  "t06": {
+    "reference": {
+      "prefs.py": "\"\"\"User preferences for the notes app.\"\"\"\nimport json\n\nDEFAULTS = {\n    \"theme\": \"light\",\n    \"font_size\": 14,\n    \"language\": \"en\",\n    \"autosave_minutes\": 5,\n    \"show_line_numbers\": False,\n}\n\n\ndef load(path):\n    \"\"\"Saved preferences laid over the defaults.\"\"\"\n    try:\n        with open(path, encoding=\"utf-8\") as fh:\n            saved = json.load(fh)\n    except FileNotFoundError:\n        saved = {}\n    return {**DEFAULTS, **saved}\n\n\ndef save(path, prefs):\n    with open(path, \"w\", encoding=\"utf-8\") as fh:\n        json.dump(prefs, fh, indent=2)\n\n\nKEEP_ON_RESET = (\"language\",)\n\n\ndef reset(prefs):\n    \"\"\"Preferences after the user presses 'Reset to defaults'.\n\n    Everything goes back to DEFAULTS except the language the person chose.\n    \"\"\"\n    out = dict(DEFAULTS)\n    for key in KEEP_ON_RESET:\n        if key in prefs:\n            out[key] = prefs[key]\n    return out\n"
+    },
+    "other_reading": {
+      "prefs.py": "\"\"\"User preferences for the notes app.\"\"\"\nimport json\n\nDEFAULTS = {\n    \"theme\": \"light\",\n    \"font_size\": 14,\n    \"language\": \"en\",\n    \"autosave_minutes\": 5,\n    \"show_line_numbers\": False,\n}\n\n\ndef load(path):\n    \"\"\"Saved preferences laid over the defaults.\"\"\"\n    try:\n        with open(path, encoding=\"utf-8\") as fh:\n            saved = json.load(fh)\n    except FileNotFoundError:\n        saved = {}\n    return {**DEFAULTS, **saved}\n\n\ndef save(path, prefs):\n    with open(path, \"w\", encoding=\"utf-8\") as fh:\n        json.dump(prefs, fh, indent=2)\n\n\ndef reset(prefs):\n    \"\"\"Preferences after the user presses 'Reset to defaults'.\"\"\"\n    return dict(DEFAULTS)\n"
+    }
+  },
+  "t07": {
+    "reference": {
+      "catalog.py": "\"\"\"The product catalog behind the online shop.\"\"\"\nimport json\n\n\ndef load(path):\n    with open(path, encoding=\"utf-8\") as fh:\n        return json.load(fh)[\"products\"]\n\n\ndef save(path, products):\n    with open(path, \"w\", encoding=\"utf-8\") as fh:\n        json.dump({\"products\": products}, fh, indent=2)\n\n\ndef find(products, sku):\n    for product in products:\n        if product[\"sku\"] == sku:\n            return product\n    return None\n\n\ndef remove_discontinued(products):\n    \"\"\"The catalog without the products we no longer carry.\n\n    A discontinued product stays listed while it still has stock, so the\n    leftovers can sell; it goes once it has sold out.\n    \"\"\"\n    return [p for p in products\n            if not (p[\"status\"] == \"discontinued\" and p[\"stock\"] <= 0)]\n"
+    },
+    "other_reading": {
+      "catalog.py": "\"\"\"The product catalog behind the online shop.\"\"\"\nimport json\n\n\ndef load(path):\n    with open(path, encoding=\"utf-8\") as fh:\n        return json.load(fh)[\"products\"]\n\n\ndef save(path, products):\n    with open(path, \"w\", encoding=\"utf-8\") as fh:\n        json.dump({\"products\": products}, fh, indent=2)\n\n\ndef find(products, sku):\n    for product in products:\n        if product[\"sku\"] == sku:\n            return product\n    return None\n\n\ndef remove_discontinued(products):\n    \"\"\"The catalog without the products we no longer carry.\"\"\"\n    return [p for p in products if p[\"status\"] != \"discontinued\"]\n"
+    }
+  },
+  "t08": {
+    "reference": {
+      "game.py": "\"\"\"Noughts and crosses for the kids' club laptop.\"\"\"\n\nEMPTY = \" \"\n\n\ndef new_game(players=(\"X\", \"O\")):\n    return {\n        \"board\": [EMPTY] * 9,\n        \"turn\": players[0],\n        \"players\": list(players),\n        \"scores\": {p: 0 for p in players},\n        \"moves\": 0,\n    }\n\n\ndef play(game, cell):\n    if game[\"board\"][cell] != EMPTY:\n        raise ValueError(\"cell taken\")\n    game[\"board\"][cell] = game[\"turn\"]\n    game[\"moves\"] += 1\n    first, second = game[\"players\"]\n    game[\"turn\"] = second if game[\"turn\"] == first else first\n\n\ndef record_win(game, player):\n    game[\"scores\"][player] += 1\n\n\ndef reset_round(game):\n    \"\"\"Get the game ready for another round.\n\n    The board is cleared; the scores carry over from round to round.\n    \"\"\"\n    game[\"board\"] = [EMPTY] * 9\n    game[\"turn\"] = game[\"players\"][0]\n    game[\"moves\"] = 0\n    return game\n"
+    },
+    "other_reading": {
+      "game.py": "\"\"\"Noughts and crosses for the kids' club laptop.\"\"\"\n\nEMPTY = \" \"\n\n\ndef new_game(players=(\"X\", \"O\")):\n    return {\n        \"board\": [EMPTY] * 9,\n        \"turn\": players[0],\n        \"players\": list(players),\n        \"scores\": {p: 0 for p in players},\n        \"moves\": 0,\n    }\n\n\ndef play(game, cell):\n    if game[\"board\"][cell] != EMPTY:\n        raise ValueError(\"cell taken\")\n    game[\"board\"][cell] = game[\"turn\"]\n    game[\"moves\"] += 1\n    first, second = game[\"players\"]\n    game[\"turn\"] = second if game[\"turn\"] == first else first\n\n\ndef record_win(game, player):\n    game[\"scores\"][player] += 1\n\n\ndef reset_round(game):\n    \"\"\"Get the game ready for another round.\"\"\"\n    fresh = new_game(game[\"players\"])\n    game.clear()\n    game.update(fresh)\n    return game\n"
+    }
+  },
+  "t09": {
+    "reference": {
+      "restock.py": "\"\"\"Weekly restock order for the stockroom.\"\"\"\n\n\ndef shortfall(item):\n    \"\"\"Units an item is below its target shelf level (never negative).\"\"\"\n    return max(0, item[\"target\"] - item[\"on_hand\"])\n\n\nBOX_SIZE = 12\n\n\ndef order_quantity(item):\n    \"\"\"Boxes of BOX_SIZE to put on the supplier order for one item.\n\n    Whole boxes only, and never past the target: the shelf only holds the\n    target amount, so a box that would overflow it is left off.\n    \"\"\"\n    return shortfall(item) // BOX_SIZE\n\n\ndef order_lines(items):\n    lines = []\n    for item in items:\n        qty = order_quantity(item)\n        if qty:\n            lines.append(f\"{item['name']}: {qty}\")\n    return lines\n"
+    },
+    "other_reading": {
+      "restock.py": "\"\"\"Weekly restock order for the stockroom.\"\"\"\n\n\ndef shortfall(item):\n    \"\"\"Units an item is below its target shelf level (never negative).\"\"\"\n    return max(0, item[\"target\"] - item[\"on_hand\"])\n\n\nBOX_SIZE = 12\n\n\ndef order_quantity(item):\n    \"\"\"Boxes of BOX_SIZE needed to bring an item back up to its target.\"\"\"\n    return -(-shortfall(item) // BOX_SIZE)\n\n\ndef order_lines(items):\n    lines = []\n    for item in items:\n        qty = order_quantity(item)\n        if qty:\n            lines.append(f\"{item['name']}: {qty}\")\n    return lines\n"
+    }
+  },
+  "t10": {
+    "reference": {
+      "splitter.py": "\"\"\"Split the group dinner bill.\"\"\"\n\n\ndef to_cents(amount):\n    \"\"\"'84.20' or 84.2 -> 8420\"\"\"\n    return round(float(amount) * 100)\n\n\ndef shares(total_cents, people):\n    \"\"\"What each person pays, in cents.\n\n    Everyone pays the same. When the bill doesn't divide evenly, each share\n    is rounded up to the next cent and the few extra cents go in the tip.\n    \"\"\"\n    if people < 1:\n        raise ValueError(\"need at least one person\")\n    each = -(-total_cents // people)\n    return [each] * people\n\n\ndef describe(total_cents, people):\n    return \", \".join(f\"{c / 100:.2f}\" for c in shares(total_cents, people))\n"
+    },
+    "other_reading": {
+      "splitter.py": "\"\"\"Split the group dinner bill.\"\"\"\n\n\ndef to_cents(amount):\n    \"\"\"'84.20' or 84.2 -> 8420\"\"\"\n    return round(float(amount) * 100)\n\n\ndef shares(total_cents, people):\n    \"\"\"What each person pays, in cents.\"\"\"\n    if people < 1:\n        raise ValueError(\"need at least one person\")\n    each, extra = divmod(total_cents, people)\n    return [each + 1 if i < extra else each for i in range(people)]\n\n\ndef describe(total_cents, people):\n    return \", \".join(f\"{c / 100:.2f}\" for c in shares(total_cents, people))\n"
+    }
+  },
+  "t11": {
+    "reference": {
+      "loans.py": "\"\"\"Loans report for the school library.\"\"\"\n\n\ndef days_out(loan, today):\n    \"\"\"Whole days since the book was borrowed.\"\"\"\n    return (today - loan[\"borrowed\"]).days\n\n\nLOAN_PERIOD_DAYS = 21\n\n\ndef is_overdue(loan, today):\n    \"\"\"True when a book has been out longer than the loan period (three weeks).\"\"\"\n    return days_out(loan, today) > LOAN_PERIOD_DAYS\n\n\ndef report(loans, today):\n    \"\"\"One line per loan, oldest loan first.\"\"\"\n    rows = []\n    for loan in sorted(loans, key=lambda l: l[\"borrowed\"]):\n        days = days_out(loan, today)\n        line = f\"{loan['title']} - {loan['student']} - {days} days\"\n        if is_overdue(loan, today):\n            line += \" - OVERDUE\"\n        rows.append(line)\n    return rows\n"
+    },
+    "other_reading": {
+      "loans.py": "\"\"\"Loans report for the school library.\"\"\"\n\n\ndef days_out(loan, today):\n    \"\"\"Whole days since the book was borrowed.\"\"\"\n    return (today - loan[\"borrowed\"]).days\n\n\nLOAN_PERIOD_DAYS = 14\n\n\ndef is_overdue(loan, today):\n    \"\"\"True when a book has been out longer than the loan period (two weeks).\"\"\"\n    return days_out(loan, today) > LOAN_PERIOD_DAYS\n\n\ndef report(loans, today):\n    \"\"\"One line per loan, oldest loan first.\"\"\"\n    rows = []\n    for loan in sorted(loans, key=lambda l: l[\"borrowed\"]):\n        days = days_out(loan, today)\n        line = f\"{loan['title']} - {loan['student']} - {days} days\"\n        if is_overdue(loan, today):\n            line += \" - OVERDUE\"\n        rows.append(line)\n    return rows\n"
+    }
+  },
+  "t12": {
+    "reference": {
+      "timesheet.py": "\"\"\"Weekly timesheet summary for the design studio.\"\"\"\nfrom collections import defaultdict\n\n\ndef parse_line(line):\n    \"\"\"'2024-03-04,client-a,5400' -> (day, project, seconds)\"\"\"\n    day, project, seconds = line.strip().split(\",\")\n    return day, project, int(seconds)\n\n\ndef totals(lines):\n    \"\"\"Seconds logged per project.\"\"\"\n    out = defaultdict(int)\n    for line in lines:\n        if line.strip():\n            _, project, seconds = parse_line(line)\n            out[project] += seconds\n    return dict(out)\n\n\ndef fmt_duration(seconds):\n    \"\"\"How a duration is shown in the summary, as on our invoices: '1h 05m'.\"\"\"\n    hours, rest = divmod(int(seconds), 3600)\n    return f\"{hours}h {rest // 60:02d}m\"\n\n\ndef summary(lines):\n    rows = sorted(totals(lines).items())\n    return [f\"{project}: {fmt_duration(secs)}\" for project, secs in rows]\n"
+    },
+    "other_reading": {
+      "timesheet.py": "\"\"\"Weekly timesheet summary for the design studio.\"\"\"\nfrom collections import defaultdict\n\n\ndef parse_line(line):\n    \"\"\"'2024-03-04,client-a,5400' -> (day, project, seconds)\"\"\"\n    day, project, seconds = line.strip().split(\",\")\n    return day, project, int(seconds)\n\n\ndef totals(lines):\n    \"\"\"Seconds logged per project.\"\"\"\n    out = defaultdict(int)\n    for line in lines:\n        if line.strip():\n            _, project, seconds = parse_line(line)\n            out[project] += seconds\n    return dict(out)\n\n\ndef fmt_duration(seconds):\n    \"\"\"How a duration is shown in the summary, e.g. '1h 5m' or '45m'.\"\"\"\n    hours, rest = divmod(int(seconds), 3600)\n    minutes = rest // 60\n    return f\"{hours}h {minutes}m\" if hours else f\"{minutes}m\"\n\n\ndef summary(lines):\n    rows = sorted(totals(lines).items())\n    return [f\"{project}: {fmt_duration(secs)}\" for project, secs in rows]\n"
+    }
+  },
+  "t13": {
+    "reference": {
+      "wordcount.py": "\"\"\"Count words in a text file: python wordcount.py FILE [--top N]\"\"\"\nimport argparse\nimport re\nfrom collections import Counter\n\n\ndef count_words(text):\n    return Counter(re.findall(r\"[a-z']+\", text.lower()))\n\n\ndef format_counts(counts):\n    \"\"\"Most common first; ties in alphabetical order.\"\"\"\n    items = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))\n    return [f\"{word} {n}\" for word, n in items]\n\n\ndef main(argv=None):\n    parser = argparse.ArgumentParser(description=\"Count words in a file.\")\n    parser.add_argument(\"path\")\n    parser.add_argument(\"--top\", type=int, default=None,\n                        help=\"show only the N most common words\")\n    args = parser.parse_args(argv)\n    with open(args.path, encoding=\"utf-8\") as fh:\n        counts = count_words(fh.read())\n    lines = format_counts(counts)\n    if args.top is not None:\n        lines = lines[:args.top]\n    for line in lines:\n        print(line)\n    return 0\n\n\nif __name__ == \"__main__\":\n    raise SystemExit(main())\n"
+    },
+    "other_reading": null
+  },
+  "t14": {
+    "reference": {
+      "envfile.py": "\"\"\"Read KEY=VALUE settings files for the deploy scripts.\"\"\"\n\n\ndef parse(text):\n    \"\"\"Turn the file contents into a dict.\n\n    Blank lines, and lines whose first non-space character is #, are skipped.\n    A # further along a line is part of the value.\n    \"\"\"\n    settings = {}\n    for line in text.splitlines():\n        stripped = line.strip()\n        if not stripped or stripped.startswith(\"#\"):\n            continue\n        key, value = stripped.split(\"=\", 1)\n        settings[key.strip()] = value.strip()\n    return settings\n\n\ndef load(path):\n    with open(path, encoding=\"utf-8\") as fh:\n        return parse(fh.read())\n"
+    },
+    "other_reading": null
+  },
+  "t15": {
+    "reference": {
+      "stats.py": "\"\"\"Small statistics helpers for the lab's plate-reader exports.\"\"\"\n\n\ndef mean(values):\n    values = list(values)\n    if not values:\n        raise ValueError(\"no values\")\n    return sum(values) / len(values)\n\n\ndef spread(values):\n    values = list(values)\n    if not values:\n        raise ValueError(\"no values\")\n    return max(values) - min(values)\n\n\ndef median(values):\n    \"\"\"Middle value of the readings; with an even count, the mean of the two\n    middle ones.\"\"\"\n    values = sorted(values)\n    if not values:\n        raise ValueError(\"no values\")\n    mid = len(values) // 2\n    if len(values) % 2:\n        return values[mid]\n    return (values[mid - 1] + values[mid]) / 2\n"
+    },
+    "other_reading": null
+  },
+  "t16": {
+    "reference": {
+      "blog.py": "\"\"\"Build the static blog from markdown posts.\"\"\"\nimport re\n\n\ndef read_post(text):\n    \"\"\"Split the '---' front matter (key: value lines) from the body.\"\"\"\n    _, front, body = text.split(\"---\", 2)\n    meta = {}\n    for line in front.strip().splitlines():\n        key, value = line.split(\":\", 1)\n        meta[key.strip()] = value.strip()\n    return meta, body.strip()\n\n\ndef slugify(title):\n    \"\"\"URL part for a post title: lowercase letters, digits and single hyphens.\"\"\"\n    text = title.lower().replace(\" \", \"-\")\n    text = re.sub(r\"[^a-z0-9-]\", \"\", text)\n    text = re.sub(r\"-{2,}\", \"-\", text)\n    return text.strip(\"-\")\n\n\ndef output_path(meta):\n    return f\"posts/{slugify(meta['title'])}.html\"\n"
+    },
+    "other_reading": null
+  },
+  "t17": {
+    "reference": {
+      "report.py": "\"\"\"Member report for the climbing gym's front desk.\n\nMember records have: name, plan, joined (a date) and last_visit (a date).\nEvery date in this report is shown with fmt_date(), e.g. '05 Mar 2024', so\nthe desk staff see one style throughout.\n\"\"\"\n\nHEADER = [\"Name\", \"Plan\", \"Joined\", \"Last visit\"]\n\n\ndef fmt_date(d):\n    return d.strftime(\"%d %b %Y\")\n\n\ndef member_row(m):\n    \"\"\"One row of the report as a list of strings.\"\"\"\n    return [m[\"name\"], m[\"plan\"], fmt_date(m[\"joined\"]),\n            fmt_date(m[\"last_visit\"])]\n\n\ndef build(members):\n    rows = [HEADER] + [member_row(m) for m in members]\n    return \"\\n\".join(\" | \".join(row) for row in rows)\n"
+    },
+    "other_reading": {
+      "report.py": "\"\"\"Member report for the climbing gym's front desk.\n\nMember records have: name, plan, joined (a date) and last_visit (a date).\nEvery date in this report is shown with fmt_date(), e.g. '05 Mar 2024', so\nthe desk staff see one style throughout.\n\"\"\"\n\nHEADER = [\"Name\", \"Plan\", \"Joined\", \"Last visit\"]\n\n\ndef fmt_date(d):\n    return d.strftime(\"%d %b %Y\")\n\n\ndef member_row(m):\n    \"\"\"One row of the report as a list of strings.\"\"\"\n    return [m[\"name\"], m[\"plan\"], fmt_date(m[\"joined\"]),\n            m[\"last_visit\"].isoformat()]\n\n\ndef build(members):\n    rows = [HEADER] + [member_row(m) for m in members]\n    return \"\\n\".join(\" | \".join(row) for row in rows)\n"
+    }
+  },
+  "t18": {
+    "reference": {
+      "ledger.py": "\"\"\"Household ledger: listings shown in the terminal.\n\nEvery listing in this tool is newest first, matching the bank's app,\nwhich is what the entries get checked against.\n\"\"\"\n\n\ndef by_newest(entries):\n    return sorted(entries, key=lambda e: e[\"date\"], reverse=True)\n\n\ndef recent(entries, n=10):\n    \"\"\"The last n entries.\"\"\"\n    return by_newest(entries)[:n]\n\n\ndef bills(entries):\n    \"\"\"Recurring bills only.\"\"\"\n    return by_newest(e for e in entries if e.get(\"recurring\"))\n\n\ndef in_category(entries, category):\n    \"\"\"Every entry in one category, in date order (newest first).\"\"\"\n    return by_newest(e for e in entries if e[\"category\"] == category)\n"
+    },
+    "other_reading": {
+      "ledger.py": "\"\"\"Household ledger: listings shown in the terminal.\n\nEvery listing in this tool is newest first, matching the bank's app,\nwhich is what the entries get checked against.\n\"\"\"\n\n\ndef by_newest(entries):\n    return sorted(entries, key=lambda e: e[\"date\"], reverse=True)\n\n\ndef recent(entries, n=10):\n    \"\"\"The last n entries.\"\"\"\n    return by_newest(entries)[:n]\n\n\ndef bills(entries):\n    \"\"\"Recurring bills only.\"\"\"\n    return by_newest(e for e in entries if e.get(\"recurring\"))\n\n\ndef in_category(entries, category):\n    \"\"\"Every entry in one category, in date order.\"\"\"\n    return sorted((e for e in entries if e[\"category\"] == category),\n                  key=lambda e: e[\"date\"])\n"
+    }
+  },
+  "t19": {
+    "reference": {
+      "notes.py": "\"\"\"Tagged notes for the reading group.\n\nTags are stored as people typed them, but wherever tags are compared,\ngrouped or shown, norm_tag() is used: 'Poetry', ' poetry' and 'POETRY' are\none tag, shown as 'poetry'.\n\"\"\"\n\n\ndef norm_tag(tag):\n    return tag.strip().lower()\n\n\ndef has_tag(note, tag):\n    return any(norm_tag(t) == norm_tag(tag) for t in note[\"tags\"])\n\n\ndef with_tag(notes, tag):\n    return [n for n in notes if has_tag(n, tag)]\n\n\ndef all_tags(notes):\n    \"\"\"Every tag in use, as shown in the tag list.\"\"\"\n    return sorted({norm_tag(t) for n in notes for t in n[\"tags\"]})\n\n\ndef tag_counts(notes):\n    \"\"\"How many notes carry each tag, keyed by norm_tag().\"\"\"\n    counts = {}\n    for n in notes:\n        for tag in {norm_tag(t) for t in n[\"tags\"]}:\n            counts[tag] = counts.get(tag, 0) + 1\n    return counts\n"
+    },
+    "other_reading": {
+      "notes.py": "\"\"\"Tagged notes for the reading group.\n\nTags are stored as people typed them, but wherever tags are compared,\ngrouped or shown, norm_tag() is used: 'Poetry', ' poetry' and 'POETRY' are\none tag, shown as 'poetry'.\n\"\"\"\n\n\ndef norm_tag(tag):\n    return tag.strip().lower()\n\n\ndef has_tag(note, tag):\n    return any(norm_tag(t) == norm_tag(tag) for t in note[\"tags\"])\n\n\ndef with_tag(notes, tag):\n    return [n for n in notes if has_tag(n, tag)]\n\n\ndef all_tags(notes):\n    \"\"\"Every tag in use, as shown in the tag list.\"\"\"\n    return sorted({norm_tag(t) for n in notes for t in n[\"tags\"]})\n\n\ndef tag_counts(notes):\n    \"\"\"How many notes carry each tag.\"\"\"\n    counts = {}\n    for n in notes:\n        for tag in n[\"tags\"]:\n            counts[tag] = counts.get(tag, 0) + 1\n    return counts\n"
+    }
+  },
+  "t20": {
+    "reference": {
+      "drafts.py": "\"\"\"Drafts folder for the newsletter tool.\"\"\"\nimport configparser\nfrom pathlib import Path\n\nCONFIG = Path(__file__).with_name(\"config.ini\")\n\n\ndef load_config(path=CONFIG):\n    cfg = configparser.ConfigParser()\n    cfg.read(path, encoding=\"utf-8\")\n    return cfg\n\n\ndef age_days(draft, today):\n    \"\"\"Whole days since the draft was last saved.\"\"\"\n    return (today - draft[\"saved\"]).days\n\n\ndef to_remove(drafts, today, cfg=None):\n    \"\"\"Drafts the clean-up should get rid of: those older than the\n    [drafts] retention_days setting in config.ini.\"\"\"\n    if cfg is None:\n        cfg = load_config()\n    keep_days = cfg.getint(\"drafts\", \"retention_days\")\n    return [d for d in drafts if age_days(d, today) > keep_days]\n"
+    },
+    "other_reading": {
+      "drafts.py": "\"\"\"Drafts folder for the newsletter tool.\"\"\"\nimport configparser\nfrom pathlib import Path\n\nCONFIG = Path(__file__).with_name(\"config.ini\")\n\n\ndef load_config(path=CONFIG):\n    cfg = configparser.ConfigParser()\n    cfg.read(path, encoding=\"utf-8\")\n    return cfg\n\n\ndef age_days(draft, today):\n    \"\"\"Whole days since the draft was last saved.\"\"\"\n    return (today - draft[\"saved\"]).days\n\n\nMAX_AGE_DAYS = 30\n\n\ndef to_remove(drafts, today):\n    \"\"\"Drafts the clean-up should get rid of: anything over a month old.\"\"\"\n    return [d for d in drafts if age_days(d, today) > MAX_AGE_DAYS]\n"
+    }
+  },
+  "t21": {
+    "reference": {
+      "expenses.py": "\"\"\"Monthly expense report for the charity shop.\"\"\"\nimport csv\n\n\ndef read_expenses(path):\n    with open(path, newline=\"\", encoding=\"utf-8\") as fh:\n        return [\n            {\"date\": r[\"date\"], \"item\": r[\"item\"], \"amount\": float(r[\"amount\"])}\n            for r in csv.DictReader(fh)\n        ]\n\n\ndef report_lines(expenses):\n    \"\"\"Plain-text lines for the report: one per expense, then the total.\"\"\"\n    lines = []\n    for e in expenses:\n        lines.append(f\"{e['date']}  {e['item']:<24}{e['amount']:>10.2f}\")\n    total = sum(e[\"amount\"] for e in expenses)\n    lines.append(f\"{'TOTAL':<36}{total:>10.2f}\")\n    return lines\n"
+    },
+    "other_reading": null
+  },
+  "t22": {
+    "reference": {
+      "signup.py": "\"\"\"Printable sign-up sheet for the community garden's work days.\"\"\"\n\nCOLUMNS = [(\"Name\", 24), (\"Email\", 30), (\"Phone\", 16)]\nBLANK_ROWS = 15\n\n\ndef header():\n    return \"\".join(title.ljust(width) for title, width in COLUMNS).rstrip()\n\n\ndef rule():\n    return \"-\" * sum(width for _, width in COLUMNS)\n\n\ndef sheet(event_title, date_text):\n    lines = [f\"{event_title} - {date_text}\", \"\", header(), rule()]\n    blank = \"\".join(\"_\" * (width - 2) + \"  \" for _, width in COLUMNS).rstrip()\n    lines += [blank] * BLANK_ROWS\n    return \"\\n\".join(lines)\n"
+    },
+    "other_reading": null
+  },
+  "t23": {
+    "reference": {
+      "prices.py": "\"\"\"Price list for the bakery counter.\"\"\"\nimport json\nfrom decimal import ROUND_HALF_UP, Decimal\n\n\ndef load(path):\n    with open(path, encoding=\"utf-8\") as fh:\n        return {name: Decimal(p) for name, p in json.load(fh).items()}\n\n\ndef money(value):\n    return Decimal(value).quantize(Decimal(\"0.01\"), rounding=ROUND_HALF_UP)\n\n\ndef price_card(prices):\n    \"\"\"Lines for the counter card, alphabetical.\"\"\"\n    return [f\"{name:<20}{money(p):>6}\" for name, p in sorted(prices.items())]\n\n\nFIVE_CENTS = Decimal(\"0.05\")\n\n\ndef raise_prices(prices, percent):\n    \"\"\"New prices after a percentage increase, to the nearest 5 cents.\"\"\"\n    factor = 1 + Decimal(str(percent)) / 100\n    out = {}\n    for name, price in prices.items():\n        steps = (Decimal(price) * factor / FIVE_CENTS).quantize(\n            Decimal(\"1\"), rounding=ROUND_HALF_UP)\n        out[name] = money(steps * FIVE_CENTS)\n    return out\n"
+    },
+    "other_reading": null
+  },
+  "t24": {
+    "reference": {
+      "labels.py": "\"\"\"Labels for the office move boxes.\"\"\"\nimport csv\n\n\ndef read_boxes(path):\n    \"\"\"CSV with columns: box, owner, room, fragile (yes/no).\"\"\"\n    with open(path, newline=\"\", encoding=\"utf-8\") as fh:\n        return list(csv.DictReader(fh))\n\n\ndef label(box):\n    \"\"\"Text for one label, one item per line.\"\"\"\n    lines = [f\"BOX {box['box']}\", box[\"owner\"], f\"ROOM {box['room']}\"]\n    if box.get(\"fragile\", \"\").lower() == \"yes\":\n        lines.append(\"FRAGILE\")\n    return \"\\n\".join(lines)\n\n\ndef sheet(boxes):\n    return \"\\n\\n\".join(label(b) for b in boxes)\n"
+    },
+    "other_reading": null
+  }
+}
