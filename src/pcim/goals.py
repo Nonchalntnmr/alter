@@ -305,7 +305,9 @@ class GoalRunner:
         from . import plan_exec as px
         from . import thirdeye
         if provider is None:
-            provider, model = px._model(self.here.vendors, None, None)
+            if not self.here.vendors - {"mock"}:  # never run a goal on the test double without being asked to
+                raise GoalError("no model may see this project yet: alter permissions provider claude-cli on")
+            provider, model = px._model(self.here.vendors - {"mock"}, None, None)
         g = self.gs.create(self.uid, self.here.project_id, objective, **limits)
         brief = thirdeye.gather(self.ci, self.uid, self.here, objective, use_github=use_github, use_vault=use_vault)
         g.payload.update(provider=provider, model=model,

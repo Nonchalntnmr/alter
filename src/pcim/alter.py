@@ -14,6 +14,7 @@
     alter tasks                            actions waiting for you, and the last actions in this project
     alter memory [forget ID | remember "…"]
     alter permissions [vault on [--path P] | vault off | github on|off | memory on|off
+                       | provider claude-cli|anthropic|openai|… on|off
                        | autonomy grant [--actions N] [--minutes M] | autonomy revoke]
     alter vault search "…" | eval [FILE] | download
     alter weekly · models · twin · mesh · audit · doctor · halt · resume · plan · do · …
@@ -123,6 +124,8 @@ def cmd_init(argv: list[str]) -> int:
     ap.add_argument("--tests", help='the test command, e.g. "python -m pytest -q" (default: detected)')
     ap.add_argument("--no-write", action="store_true", help="ALTER may read and run tests, never write")
     ap.add_argument("--no-memory", action="store_true", help="do not store goal outcomes in memory")
+    ap.add_argument("--provider", action="append", help="a model provider this project's content may go to "
+                                                       "(e.g. claude-cli); default: the ones chosen at pcim init")
     a = ap.parse_args(argv)
     ci, uid = T._open()
     root = Path.cwd().resolve()
@@ -133,7 +136,7 @@ def cmd_init(argv: list[str]) -> int:
         return 0
     run_argv = shlex.split(a.tests) if a.tests else _detect_tests(root)
     try:
-        p = ws.create_project(uid, a.name or root.name)
+        p = ws.create_project(uid, a.name or root.name, providers=a.provider)
         ws.authorize_workspace(uid, p.id, str(root), run_argv=run_argv, allow_write=not a.no_write)
     except WorkspaceError as e:
         print(f"alter init: {e}", file=sys.stderr)
@@ -146,6 +149,8 @@ def cmd_init(argv: list[str]) -> int:
           "first unless you grant autonomy.")
     print(f"  model providers that may see this project: {', '.join(ws.provider_vendors(uid, p.id)) or 'none'}")
     print("  goal outcomes are " + ("not stored" if a.no_memory else "stored in your memory (alter memory; forget any)"))
+    if not set(ws.provider_vendors(uid, p.id)) - {"mock"}:
+        print("  no model may see this project yet, so goals cannot start: alter permissions provider claude-cli on")
     print("Next: alter context   ·   alter \"what should we do next?\"   ·   alter permissions")
     return 0
 
@@ -230,7 +235,11 @@ def _exit_for(g: G.Goal) -> int:
 def start_goal(ci, uid, here, objective: str, *, background: bool = False, limits: dict | None = None,
                quiet: bool = False) -> tuple[G.Goal, int]:
     r = G.GoalRunner(ci, uid, here, out=(lambda s: None) if quiet else None)
-    g = r.start(objective, **(limits or {}))
+    try:
+        g = r.start(objective, **(limits or {}))
+    except G.GoalError as e:
+        print(f"alter: {e}", file=sys.stderr)
+        raise SystemExit(2) from None
     c = g.payload["context"]
     if not quiet:
         print(f"ALTER: goal {g.id} · context: {c['remembered']} remembered, {c['sourced']} sourced"
@@ -454,6 +463,21 @@ def cmd_permissions(argv: list[str]) -> int:
                 if gr.source == G.MEMORY_SOURCE:
                     ci.ledger.revoke(uid, gr.id)
         print(f"goal outcomes to memory: {argv[1]}")
+        return 0
+    if argv[:1] == ["provider"] and len(argv) == 3 and argv[2] in ("on", "off"):
+        if not _need_here(here):
+            return 2
+        from .registry import vendor_of
+        try:
+            vendor = argv[1] if argv[1] in ("anthropic", "openai", "google", "local", "mock") else vendor_of(argv[1])
+            if argv[2] == "on":
+                ws.grant_provider(uid, here.project_id, vendor, note="alter permissions")
+            else:
+                ws.revoke_provider(uid, here.project_id, vendor)
+        except (ValueError, WorkspaceError) as e:
+            print(f"alter: {e}", file=sys.stderr)
+            return 2
+        print(f"{here.name}: providers that may see this project: {', '.join(ws.provider_vendors(uid, here.project_id))}")
         return 0
     if argv[:1] == ["autonomy"]:
         if not _need_here(here):
@@ -706,7 +730,11 @@ class Conversation:
         if text.startswith("/new "):
             g, text = None, text[5:]
         if g is None:
-            g = G.GoalRunner(self.ci, self.uid, self.here, out=lambda s: None).start(text)
+            try:
+                g = G.GoalRunner(self.ci, self.uid, self.here, out=lambda s: None).start(text)
+            except G.GoalError as e:
+                self.out(f"ALTER: {e}")
+                return True
             c = g.payload["context"]
             self.out(f"ALTER: on it (goal {g.id}; context {c['remembered']} remembered, {c['sourced']} sourced). "
                      "Keep talking: I read what you say at my next step.")

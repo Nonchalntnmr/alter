@@ -199,3 +199,14 @@ def test_the_vault_copy_ranks_like_nos(home):
     v = V.Vault(str(vault))
     r = V.evaluate(v, [{"q": "demo on stage", "expect": ["Demo"]}, {"q": "add numbers correctly", "expect": ["Calc"]}])
     assert r["hit1"] == 2 and r["mrr"] == 1.0
+
+
+def test_a_goal_never_runs_on_the_test_double_unless_asked(home, capsys, monkeypatch):
+    tmp, repo, vault = home
+    assert alter.main(["init", "--tests", check_cmd(), "--provider", "mock"]) == 0
+    assert "no model may see this project yet" in capsys.readouterr().out
+    with pytest.raises(SystemExit) as e:
+        alter.main(["fix", "add()"])
+    assert e.value.code == 2 and "alter permissions provider claude-cli on" in capsys.readouterr().err
+    assert alter.main(["permissions", "provider", "claude-cli", "on"]) == 0
+    assert "anthropic" in capsys.readouterr().out
