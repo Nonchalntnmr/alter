@@ -13,7 +13,7 @@
 | full suite (`scripts/check.sh`, CI's rule set) | **642 passed, 4 skipped**, plus ALTER's own twin tests |
 | clean install from the wheel, fresh venv, fresh shell | `alter --version` → `alter 0.3.0a1 (alpha)`; `alter doctor` exits 0 against the real data (`claude` CLI 2.1.316, isolation verified) |
 | `scripts/e2e_terminal.py` against the installed wheel | **37 / 37** |
-| independent code review (a separate agent, read-only) | **18 findings**, 4 of them security; **all fixed**. Of the 18 regression tests, 17 failed on the reviewed code. Second pass: see the PR. |
+| independent code review (a separate agent, read-only), two passes | **Pass 1: 18 findings**, 4 of them security; all fixed. Of the 18 regression tests, 17 failed on the reviewed code. **Pass 2:** confirmed 13 fixes closed and found 8 more items, including one new bug that fix 18 introduced (cancelling a goal could resume the model). All 8 are fixed, and all 8 tests failed before the fix. Total: **654 passed, 4 skipped.** |
 | identity scan of the branch history | **clean**, after one redaction: ALTER had written the owner's name into a test (§ live runs) |
 
 **Live runs** through the installed `alter` with the real `claude` CLI (Opus), in a worktree of
