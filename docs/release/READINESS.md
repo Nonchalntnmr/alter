@@ -24,6 +24,10 @@ this repository, autonomy granted for that folder only:
 | "examine everything we've built … finish the next working version of my cognitive twin" (steered while it ran) | 3 | $4.56 | **done, verified** (the project's tests passed after the last change): `twin_do.py` + test |
 | "Continue what we were building." | 1 | $1.11 | changed nothing; refused to edit two large files it had received cut off, and asked two questions. **It exposed two bugs**, both fixed: silent truncation of tool results, and a goal ending "done" after asking questions. |
 | "Continue …" with the answers (paused after its first checkpoint, then resumed) | 3 | $4.33 | **done, verified**: one failing test run fixed. It used passage edits to `twin.py` and `terminal.py`, wiring `ci twin include/exclude do` and the weekly section. |
+| "In alter doctor, the vault check …" (foreground `alter "…"`, on the build with every review fix) | 1 | $1.67 | **done, verified**: `alter doctor` reports iCloud placeholders as fetched when needed. It left one question open as a note. |
+
+**In all:** 4 goals, 26 turns' worth of model steps, $11.67 as the CLI reports it. The goals were
+mostly input tokens: each step resends the conversation.
 
 **Still open for this alpha:**
 1. **No human evaluation.**
