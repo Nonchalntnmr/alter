@@ -14,6 +14,7 @@ action cannot loop past its limit.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import datetime as dt
 import hashlib
@@ -73,6 +74,74 @@ class TaskQueue:
         self.ttl = approval_ttl_s
         self.claims = claims  # exchange.ClaimLedger; record_claim fails without one
         self.store, self.audit = ws.store, ws.audit
+        if getattr(self.executor, "on_spawn", "absent") is None and self.store.path != ":memory:":
+            self.executor.on_spawn, self.executor.on_exit = self._record_run, self._forget_run
+
+    # ------------------------------------------------------------------ test runs whose worker died (audit R6)
+    def _run_dir(self):
+        from pathlib import Path
+        return Path(self.store.path).parent / "run"
+
+    def _record_run(self, task_id: str, pgid: int) -> None:
+        import json
+        import os
+        d = self._run_dir()
+        d.mkdir(mode=0o700, exist_ok=True)
+        (d / f"{task_id}.json").write_text(json.dumps({"task": task_id, "pgid": pgid, "owner": os.getpid()}))
+
+    def _forget_run(self, task_id: str) -> None:
+        (self._run_dir() / f"{task_id}.json").unlink(missing_ok=True)
+
+    def reap_orphans(self) -> dict:
+        """Stop test runs whose worker process is gone, and mark their tasks interrupted.
+
+        A run is recorded with the pid of the process that started it. While that process lives, its run
+        is never touched, whoever calls this. A reused pid reads as alive, which errs toward leaving a run
+        alone. A dead owner's process group gets SIGTERM, then SIGKILL after 3 s."""
+        import json
+        import os
+        import signal
+        import time as _t
+        stopped, marked = 0, 0
+        d = self._run_dir()
+        for f in sorted(d.glob("task_*.json")) if d.is_dir() else []:
+            try:
+                rec = json.loads(f.read_text())
+                os.kill(int(rec["owner"]), 0)
+                continue  # its worker still runs it
+            except ProcessLookupError:
+                pass
+            except PermissionError:
+                continue  # someone else's process holds that pid: not ours to judge
+            except (OSError, ValueError, KeyError):
+                f.unlink(missing_ok=True)
+                continue
+            pgid = int(rec["pgid"])
+            try:
+                os.killpg(pgid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass  # already gone: only the task is left to mark
+            except PermissionError:
+                continue  # not a group this user may signal: not ours
+            else:
+                stopped += 1
+                for _ in range(30):
+                    _t.sleep(0.1)
+                    try:
+                        os.killpg(pgid, 0)
+                    except (ProcessLookupError, PermissionError):  # exited (macOS answers EPERM for a zombie)
+                        break
+                else:
+                    with contextlib.suppress(ProcessLookupError, PermissionError):
+                        os.killpg(pgid, signal.SIGKILL)
+            now = utcnow().isoformat()
+            marked += self.store.execute(
+                "UPDATE tasks SET status='interrupted', reason='its worker stopped while it ran; the test process was "
+                "stopped', updated_at=? WHERE id=? AND status='running'", (now, rec["task"])).rowcount
+            f.unlink(missing_ok=True)
+        if stopped or marked:
+            self.audit.append("system", "task.reap", stopped=stopped, marked=marked)
+        return {"stopped": stopped, "interrupted": marked}
 
     # ------------------------------------------------------------------ persistence
     def _key(self, user_id: str, project_id: str) -> str:
