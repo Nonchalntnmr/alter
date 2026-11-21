@@ -71,6 +71,9 @@ alter approve · alter deny    what a goal waits on
 alter permissions [provider claude-cli on | vault on | vault topic "…" | github on | memory on|off
                    | autonomy grant --actions N --minutes M | autonomy revoke]
 alter vault search · eval · download
+alter report [--days N] [--json] [--project here|all]
+                              the V1 pilot's metrics from ALTER's own records (no model call)
+alter report --log "…" --estimate-minutes N    log a task and your own estimate before the run
 alter <any ci command>        `ci` itself is unchanged
 ```
 

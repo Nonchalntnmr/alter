@@ -3,6 +3,8 @@
 ## ALTER `0.3.0a1` (alpha), 2026-11-21
 
 **Gate decision: CONDITIONAL, unchanged.** This is an **alpha** for the owner's machine.
+**V1** has its own gate: `V1_GATE.md` (a narrower claim, criteria and a decision rule) and
+`PILOT.md` (the real-user pilot that measures it). It is CONDITIONAL until the pilot runs.
 - It makes no claim of research validation or performance over direct model execution.
 - It has had no human evaluation.
 - The evidence below is engineering evidence: it shows the product works, not that it helps
