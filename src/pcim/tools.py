@@ -294,12 +294,16 @@ class Executor:
         if tool == "write_file":
             p = jail(root, args["path"], for_write=True)
             before = p.read_bytes() if p.exists() else None
+            try:  # the previous version is kept for undo as text: it must be text, or undo could not restore it
+                text = before.decode("utf-8") if before is not None else None
+            except UnicodeDecodeError:
+                raise ToolError(f"{args['path']} is not UTF-8 text, so its current version could not be kept for "
+                                "undo; it was not changed") from None
             if "content" in args:
                 content = args["content"]
             else:  # a passage of an existing file: the rest of the file is kept exactly as it is
-                if before is None:
+                if text is None:
                     raise ToolError(f"{args['path']} does not exist; give content to create it")
-                text = before.decode("utf-8")
                 n = text.count(args["old"])
                 if n != 1:
                     raise ToolError(f"the passage to replace appears {n} times in {args['path']}; it must appear exactly once")
@@ -323,7 +327,7 @@ class Executor:
             return {"path": args["path"], "abs_path": str(p), "created": before is None, "bytes": len(content.encode()),
                     "sha256_before": _sha(before) if before is not None else None,
                     "sha256_after": _sha(content.encode()),
-                    "backup": before.decode("utf-8", errors="replace") if before is not None else None}
+                    "backup": text}
         if tool == "run_tests":
             argv, timeout = spec["run_argv"], int(spec.get("run_timeout_s", 300))
             t0 = time.time()

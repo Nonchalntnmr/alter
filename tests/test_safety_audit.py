@@ -140,3 +140,23 @@ def test_s3_undo_never_overwrites_a_change_made_after_the_write(tmp_path):
     q.undo("u", b.id)
     q.undo("u", a.id)
     assert not (repo / "two.txt").exists()
+
+
+# S4 -----------------------------------------------------------------------------------------------
+def test_s4_a_file_undo_could_not_restore_is_not_overwritten(tmp_path):
+    """The old write kept a non-UTF-8 file's previous version decoded with errors="replace", so undo
+    wrote back U+FFFD in place of the original bytes: the "kept for undo" version was already lost."""
+    q, repo, write = _queue(tmp_path)
+    raw = "café, en latin-1\n".encode("latin-1")
+    (repo / "latin.txt").write_bytes(raw)
+    t = write("latin.txt", "replaced\n")
+    assert t.status == "failed" and "not UTF-8 text" in (t.reason or "")
+    assert (repo / "latin.txt").read_bytes() == raw
+
+    # UTF-8 text, with a BOM and CRLF line ends: undo restores the exact bytes
+    utf = "﻿café — ok\r\nsecond line\r\n".encode("utf-8")
+    (repo / "utf.txt").write_bytes(utf)
+    w = write("utf.txt", "replaced\n")
+    assert w.status == "succeeded" and (repo / "utf.txt").read_text() == "replaced\n"
+    q.undo("u", w.id)
+    assert (repo / "utf.txt").read_bytes() == utf

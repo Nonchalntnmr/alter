@@ -320,7 +320,7 @@ class TaskQueue:
         if t.result["created"]:
             p.unlink(missing_ok=True)
         else:
-            p.write_text(t.result["backup"])
+            p.write_bytes(t.result["backup"].encode("utf-8"))  # the bytes it had, whatever the locale
         res = dict(t.result, undone=True, undone_at=utcnow().isoformat())
         self._set(task_id, result_ct=self._seal(user_id, t.project_id, res, task_id, "result"))
         self.audit.append(user_id, "task.undo", task=task_id)
