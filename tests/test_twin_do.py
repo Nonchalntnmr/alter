@@ -58,3 +58,48 @@ def test_the_twin_counts_ci_do_work_only_after_opt_in_and_forgets_what_ci_do_for
     # opting out stops the twin reading again
     twin_do.exclude_do(ci, "u")
     assert twin_do.do_summary(ci, "u", since, until) is None
+
+
+def test_the_weekly_review_and_snapshot_hold_ci_do_counts_only_after_opt_in(env, tmp_path):
+    from pcim.twin import CognitiveTwin, render
+    ci, _ = make(tmp_path)
+    now = utcnow()
+    terminal._do_save(ci, "u", _rec("do_bbbb0001", now - dt.timedelta(hours=2), verdict="verified"))
+    terminal._do_save(ci, "u", _rec("do_bbbb0002", now - dt.timedelta(hours=1), answers="use pytest",
+                                    verdict="not_verified", claim_unverified=True))
+    twin = CognitiveTwin(ci)
+
+    # default off: the review, snapshot and render say nothing about ci do
+    rv = twin.review("u")
+    assert rv.do is None and rv.snapshot()["do"] is None
+    assert "CI DO" not in render(rv)
+
+    twin_do.include_do(ci, "u")
+    rv = twin.review("u")
+    snap = rv.snapshot()
+    assert snap["do"]["requests"] == 2 and snap["do"]["verified"] == 1 and snap["do"]["not_verified"] == 1
+    assert snap["do"]["answered_a_question"] == 1 and snap["do"]["claimed_done_unverified"] == 1
+    assert all(isinstance(v, int) for v in snap["do"].values())
+    dumped = json.dumps(snap, default=str)
+    assert SECRET not in dumped and "pytest" not in dumped and "do_bbbb" not in dumped
+    text = render(rv)
+    assert "CI DO" in text and SECRET not in text
+
+
+def test_ci_twin_include_and_exclude_do_from_the_terminal(env, tmp_path, monkeypatch, capsys):
+    from pcim import cli
+    monkeypatch.setenv("PCIM_HOME", str(tmp_path / "home"))
+    assert cli.main(["init", "--user", "u", "--name", "U", "--providers", "claude-cli"]) == 0
+    ci, uid = terminal._open()
+    assert not twin_do.do_included(ci, uid)
+    assert terminal.cmd_twin(["include", "do"]) == 0
+    ci, uid = terminal._open()
+    assert twin_do.do_included(ci, uid)
+    capsys.readouterr()
+    assert terminal.cmd_twin([]) == 0
+    assert "ci do records: included" in capsys.readouterr().out
+    assert terminal.cmd_twin(["exclude", "do"]) == 0
+    ci, uid = terminal._open()
+    assert not twin_do.do_included(ci, uid)
+    assert terminal.cmd_twin(["include", "everything"]) == 2
+    capsys.readouterr()

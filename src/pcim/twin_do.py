@@ -12,7 +12,8 @@ The first, smallest piece of docs/engineering/TWIN_DO_OUTCOMES.md (a proposal un
 - **Removable.** `ci do forget` rewrites or deletes the `pcim-do` log, so a forgotten request is
   absent from the next summary. tests/test_twin_do.py checks this.
 
-Not yet wired into `ci twin include|exclude do` or into `ci weekly`'s review and snapshot.
+Wired into `ci twin include|exclude do` (terminal.cmd_twin) and into `ci weekly`'s review, render and
+snapshot (twin.py).
 """
 
 from __future__ import annotations

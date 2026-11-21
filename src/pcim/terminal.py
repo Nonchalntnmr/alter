@@ -691,6 +691,19 @@ def cmd_twin(argv: list[str]) -> int:
     from .types import utcnow
     ci, uid = _open()
     twin = CognitiveTwin(ci)
+    if argv:
+        from . import twin_do
+        if len(argv) == 2 and argv[0] in ("include", "exclude") and argv[1] == "do":
+            if argv[0] == "include":
+                twin_do.include_do(ci, uid)
+                print("The twin now counts your `ci do` requests in `ci weekly` (counts only, no request text). "
+                      "Undo: ci twin exclude do")
+            else:
+                twin_do.exclude_do(ci, uid)
+                print("The twin no longer reads your `ci do` records.")
+            return 0
+        print("usage: ci twin [include do | exclude do]", file=sys.stderr)
+        return 2
     dna = ci.dna(uid)
     rep = independence_report(ci.store.list_skills(uid), ci.attempts(uid), utcnow())
     print(f"{twin.name(uid)} — a model of how {uid} works, built from what you recorded. It is not you, and it says which parts are facts.")
@@ -719,6 +732,9 @@ def cmd_twin(argv: list[str]) -> int:
     print(f"\nOpen challenges (experiments not yet run): {len(open_ch)}")
     print(f"Plans: {sum(1 for p in plans if p['status'] == 'needs_answers')} waiting on your answers, "
           f"{sum(1 for p in plans if p['status'] in ('awaiting_approval', 'ready'))} waiting on approval")
+    from . import twin_do
+    print("ci do records: " + ("included (counts only) · ci twin exclude do" if twin_do.do_included(ci, uid)
+                               else "not read (default) · ci twin include do"))
     print("\nWeekly review: ci weekly   ·   evidence behind any of this: ci audit, pcim export")
     return 0
 

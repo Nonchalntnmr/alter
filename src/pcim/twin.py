@@ -37,6 +37,7 @@ import re
 import numpy as np
 
 from . import modes as intelligence
+from . import twin_do
 from .engine import RoutingError, fallback_errors
 from .evaluation import ROUTED_TASK_TYPES, scorecard, window_interactions
 from .registry import vendor_of
@@ -126,6 +127,8 @@ class Review:
     facts: dict = dataclasses.field(default_factory=dict, repr=False)
     labels: dict = dataclasses.field(default_factory=dict, repr=False)  # «goal:…»/«note:…» → current text
 
+    do: dict | None = None  # counts from `ci do` records (twin_do.do_summary); None unless opted in
+
     def snapshot(self) -> dict:
         """What is saved as this week's version: derived evidence and decisions, no transcripts."""
         return {"format": "pcim-twin/1", "week": self.week, "name": self.name,
@@ -135,7 +138,9 @@ class Review:
                 # Counts-only statements: a snapshot outlives the notes, goals and requests a full
                 # statement would quote. Priorities name goals and notes by id («goal:…», «note:…»).
                 "challenges": [{"kind": c.kind, "rule": c.rule, "statement": c.redacted} for c in self.challenges],
-                "adjustments": self.adjustments, "scorecard": self.scorecard}
+                "adjustments": self.adjustments, "scorecard": self.scorecard,
+                # Integers only (twin_do): no request text, answers or ids. None unless `ci twin include do`.
+                "do": self.do}
 
     def as_dict(self) -> dict:
         return self.snapshot() | {"did": self.did, "stuck": self.stuck, "next": self.next, "thin": self.thin}
@@ -472,7 +477,7 @@ class CognitiveTwin:
                        for p in projects for n in p.notes})
         return Review(self.name(user_id), user_id, since, until, week, did, stuck, nxt, accountability, cands,
                       priorities, adjustments, skills, sc, prev["version"] if prev else None, thin, facts=f,
-                      labels=labels)
+                      labels=labels, do=twin_do.do_summary(self.ci, user_id, since, until))
 
     def labels_now(self, user_id: str) -> dict:
         """Token labels from current records, for showing a stored snapshot's priorities."""
@@ -690,6 +695,13 @@ def _render(review: Review, saved_version: int | None = None, deep: dict | None 
     w.append(f"  orchestration  {o['routed']} routed · {o['recovered_by_fallback']} recovered by fallback · "
              f"{o['route_refusals']} refused ({o['refused_for_credentials']} for credentials) · "
              f"{o['served_below_requirement']} served below requirement")
+    if review.do is not None:
+        d = review.do
+        w.append("\nCI DO (counts only, because you opted in; `ci twin exclude do` stops it)")
+        w.append(f"  {d['requests']} requests · {d['verified']} verified · {d['not_verified']} not verified · "
+                 f"{d['unchanged']} unchanged · {d['no_verdict']} no verdict · "
+                 f"{d['claimed_done_unverified']} claimed done without verification · "
+                 f"{d['answered_a_question']} answered a question · {d['waiting_for_answer']} waiting for an answer")
     if deep:
         w.append(f"\nMODEL-WRITTEN CHALLENGE ({deep['model']}; not evidence, did not change your profile)")
         w += ["  " + line for line in deep["text"].strip().splitlines()]
