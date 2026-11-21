@@ -150,8 +150,15 @@ class GoalStore:
         return self._goal(rows[0])
 
     def resolve(self, uid: str, ref: str, project_id: str | None = None) -> str:
+        """An exact id, a unique prefix ("goal_ebfa"), or a unique suffix of at least 4 characters."""
         from .intent_compiler import resolve_id
-        return resolve_id([g.id for g in self.list(uid, project_id, limit=500)], ref, "goal")
+        ids = [g.id for g in self.list(uid, project_id, limit=500)]
+        pre = [i for i in ids if len(ref) >= 6 and i.startswith(ref)]
+        if ref not in ids and len(pre) > 1:
+            raise ValueError(f"{ref} matches {len(pre)} goals; give more of the id")
+        if ref not in ids and len(pre) == 1:
+            return pre[0]
+        return resolve_id(ids, ref, "goal")
 
     def list(self, uid: str, project_id: str | None = None, limit: int = 50) -> list[Goal]:
         if project_id:
@@ -308,8 +315,9 @@ class GoalRunner:
             if not self.here.vendors - {"mock"}:  # never run a goal on the test double without being asked to
                 raise GoalError("no model may see this project yet: alter permissions provider claude-cli on")
             provider, model = px._model(self.here.vendors - {"mock"}, None, None)
-        g = self.gs.create(self.uid, self.here.project_id, objective, **limits)
+        # gathered before the goal exists, so the brief never lists the goal itself as remembered
         brief = thirdeye.gather(self.ci, self.uid, self.here, objective, use_github=use_github, use_vault=use_vault)
+        g = self.gs.create(self.uid, self.here.project_id, objective, **limits)
         g.payload.update(provider=provider, model=model,
                          context={"text": brief.for_model(), "cites": brief.cites(), "withheld": brief.withheld,
                                   "remembered": sum(e.kind == "remembered" for e in brief.evidence),

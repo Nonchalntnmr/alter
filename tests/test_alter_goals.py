@@ -251,3 +251,14 @@ def test_the_context_brief_reports_what_it_left_out(env):
     b = thirdeye.gather(ci, "u", here, "add")
     assert any("not a git repository" in w for w in b.withheld)
     assert any(w.startswith("vault: off") for w in b.withheld) and any(w.startswith("github: off") for w in b.withheld)
+
+
+def test_a_new_goal_is_not_its_own_memory_and_goals_resolve_by_prefix_or_suffix(env):
+    ci, ws, p, repo, here = env
+    r, _ = runner(ci, here, [{"text": "ok"}])
+    g = start(r)
+    assert g.payload["context"]["remembered"] == 0
+    assert r.gs.resolve("u", g.id[:9]) == g.id and r.gs.resolve("u", g.id[-5:]) == g.id
+    start(r, "another")
+    with pytest.raises((ValueError, KeyError)):
+        r.gs.resolve("u", "goal_")
