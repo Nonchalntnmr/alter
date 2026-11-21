@@ -148,17 +148,23 @@ def _repo(root: Path, history: int = 20) -> tuple[list[Evidence], list[str]]:
     if Path(top.stdout.strip()).resolve() == Path.home().resolve():
         return [], ["git: the repository is the home directory; not read"]
     br = _git(root, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
-    st = [x for x in _git(root, "status", "--porcelain").stdout.splitlines() if x.strip()]
+    # dirty: otherwise git runs inside each submodule under that submodule's own config (tools.py)
+    st = [x for x in _git(root, "status", "--porcelain", "--ignore-submodules=dirty").stdout.splitlines() if x.strip()]
     ev.append(Evidence("sourced", "git", "git:status",
                        f"branch {br}; {len(st)} uncommitted change(s)" + (": " + ", ".join(x[3:] for x in st[:8]) if st else "")))
-    log = _git(root, "log", f"-{int(history)}", "--date=short", "--format=%h%x09%ad%x09%s").stdout.splitlines()
+    log = _git(root, "log", "--no-show-signature", f"-{int(history)}", "--date=short",
+               "--format=%h%x09%ad%x09%s").stdout.splitlines()
     for line in log:
         parts = line.split("\t", 2)
         if len(parts) == 3:
             ev.append(Evidence("sourced", "git", f"git:{parts[0]}", parts[2][:200], parts[1]))
+    from .governor import PathError, jail
     for name in ("README.md", "README.rst", "README"):
-        f = root / name
-        if f.is_file():
+        try:  # the governor's jail: a README symlinked outside the workspace, or to a secret, is not read
+            f = jail(root, name)
+        except PathError:
+            continue
+        if f.is_file() and not (root / name).is_symlink():
             head = f.read_text(errors="replace")[:MAX_TEXT].strip()
             ev.append(Evidence("sourced", "git", f"file:{name}", head))
             break
@@ -208,18 +214,22 @@ def _vault(path: str, query: str, k: int = 6) -> tuple[list[Evidence], list[str]
     return ev, withheld
 
 
-def _remembered(ci, uid: str, project_id: str) -> list[Evidence]:
+def _remembered(ci, uid: str, project_id: str, vendor: str | None = None, exclude_goal: str | None = None) -> list[Evidence]:
+    """ALTER's goals in this project, and the project's notes as the vendor that will see them may see
+    them (the agent's own briefing filter). With no vendor, notes derived from memory are left out."""
     from . import goals
     from .workspace import Workspace
     ev = []
-    for g in goals.GoalStore(ci).list(uid, project_id)[:8]:
+    for g in [x for x in goals.GoalStore(ci).list(uid, project_id) if x.id != exclude_goal][:8]:
         p = g.payload
         v = (p.get("verification") or {}).get("verdict")
         ev.append(Evidence("remembered", "alter", f"goal:{g.id}",
                            f"{g.status}{' (' + v + ')' if v else ''}: {p['objective'][:200]}", g.updated_at[:10]))
-    b = Workspace(ci).briefing(uid, project_id)
+    b = Workspace(ci).briefing(uid, project_id, vendor=vendor)
     for kind in ("decisions", "open_questions", "next_steps"):
         for n in b.get(kind, [])[:5]:
+            if vendor is None and n.get("lineage"):
+                continue
             label = {"decisions": "decision", "open_questions": "open question", "next_steps": "next step"}[kind]
             src = "model-written " if n.get("source") == "model" else ""
             ev.append(Evidence("remembered", "project", f"note:{n['id']}", f"{src}{label}: {n['text'][:300]}",
@@ -228,12 +238,12 @@ def _remembered(ci, uid: str, project_id: str) -> list[Evidence]:
 
 
 def gather(ci, uid: str, here, query: str, *, use_github: bool | None = None, use_vault: bool | None = None,
-           history: int = 20) -> Brief:
+           history: int = 20, vendor: str | None = None, exclude_goal: str | None = None) -> Brief:
     from .workspace import Workspace
     ws = Workspace(ci)
     s = settings(ws, uid)
     root = Path(here.root)
-    evidence: list[Evidence] = _remembered(ci, uid, here.project_id)
+    evidence: list[Evidence] = _remembered(ci, uid, here.project_id, vendor, exclude_goal)
     withheld: list[str] = []
     e, w = _repo(root, history)
     evidence += e

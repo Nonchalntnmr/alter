@@ -18,6 +18,7 @@ from pcim.workspace import Workspace
 
 PY = sys.executable
 GOOD = "def add(a, b):\n    return a + b\n"
+BAD_OK = "def add(a, b):\n    return a * b\n"  # breaks the check (2*3 != 5)
 CHECK = [PY, "-c", "import sys; sys.path.insert(0, '.'); import calc; assert calc.add(2, 3) == 5; print('1 passed')"]
 
 

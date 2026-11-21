@@ -166,15 +166,29 @@ class GoalStore:
                                     (uid, project_id, limit))
         else:
             rows = self.store.query("SELECT * FROM goals WHERE user_id=? ORDER BY created_at DESC LIMIT ?", (uid, limit))
-        return [self._goal(r) for r in rows]
+        out = []
+        for r in rows:
+            try:
+                out.append(self._goal(r))
+            except KeyError:  # its project was deleted, and its key with it: nothing left to show
+                continue
+        return out
 
     def save(self, g: Goal) -> None:
         g.updated_at = utcnow().isoformat()
-        self.store.execute("UPDATE goals SET status=?, updated_at=?, worker_pid=?, payload_ct=? WHERE id=? AND user_id=?",
-                           (g.status, g.updated_at, g.worker_pid,
-                            self.store.seal_json(self._key(g.user_id, g.project_id), g.payload, g.id), g.id, g.user_id))
+        n = self.store.execute("UPDATE goals SET status=?, updated_at=?, worker_pid=?, payload_ct=? WHERE id=? AND user_id=?",
+                               (g.status, g.updated_at, g.worker_pid,
+                                self.store.seal_json(self._key(g.user_id, g.project_id), g.payload, g.id), g.id,
+                                g.user_id)).rowcount
+        if n != 1:
+            raise GoalError(f"goal {g.id} no longer exists (it was forgotten)")
 
     def delete(self, uid: str, gid: str) -> None:
+        if self.is_live(gid):
+            raise GoalError(f"goal {gid} is running; pause or cancel it first (alter pause {gid})")
+        for suffix in (".lock", ".log"):
+            if self.dir is not None:
+                (self.dir / f"{gid}{suffix}").unlink(missing_ok=True)
         self.store.execute("DELETE FROM goal_events WHERE goal_id=? AND user_id=?", (gid, uid))
         self.store.execute("DELETE FROM goals WHERE id=? AND user_id=?", (gid, uid))
         self.store.flush_deleted()
@@ -217,13 +231,19 @@ class GoalStore:
         return self.dir / f"{gid}.lock"
 
     @contextlib.contextmanager
-    def worker_lock(self, gid: str):
+    def worker_lock(self, gid: str, wait_s: float = 0.0):
+        import time
         f = open(self._lock_file(gid), "a")
         try:
-            try:
-                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                raise GoalBusy(f"goal {gid} is already being worked on by another ALTER process") from None
+            deadline = time.monotonic() + wait_s
+            while True:
+                try:
+                    fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= deadline:
+                        raise GoalBusy(f"goal {gid} is already being worked on by another ALTER process") from None
+                    time.sleep(0.1)
             yield
         finally:
             f.close()
@@ -233,7 +253,7 @@ class GoalStore:
             return False
         with open(self.dir / f"{gid}.lock", "a") as f:
             try:
-                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(f, fcntl.LOCK_SH | fcntl.LOCK_NB)
             except BlockingIOError:
                 return True
             fcntl.flock(f, fcntl.LOCK_UN)
@@ -257,14 +277,27 @@ def evidence(ci, uid: str, project_id: str, session_ids: list[str]) -> list[dict
 
 
 def verify(ci, uid: str, project_id: str, session_ids: list[str], final_text: str = "") -> dict:
-    """The same evidence rule as `ci do` (terminal._session_verification), across every session of a goal."""
+    """The `ci do` evidence rule (verify_tasks), across every session of a goal."""
+    return verify_tasks(evidence(ci, uid, project_id, session_ids), final_text)
+
+
+def _at(t: dict, key: str) -> str:
+    return t.get(key) or t.get("updated_at") or t["created_at"]
+
+
+def verify_tasks(ts: list[dict], final_text: str = "") -> dict:
+    """Verified means a test run that STARTED after the last write FINISHED passed, and it is the
+    latest such run. Ordered by when things ran, not when they were proposed: a write approved after
+    a test run that was proposed later must not borrow that run's pass."""
     from .terminal import _CLAIMS_DONE
-    ts = evidence(ci, uid, project_id, session_ids)
-    writes = [i for i, t in enumerate(ts) if t["tool"] == "write_file" and t["status"] == "succeeded"]
-    runs = [(i, not t.get("reason")) for i, t in enumerate(ts) if t["tool"] == "run_tests" and t["status"] == "succeeded"]
+    writes = sorted((t for t in ts if t["tool"] == "write_file" and t["status"] == "succeeded"),
+                    key=lambda t: _at(t, "finished_at"))
+    runs = sorted((t for t in ts if t["tool"] == "run_tests" and t["status"] == "succeeded"),
+                  key=lambda t: _at(t, "started_at"))
     refused = [{"tool": t["tool"], "path": (t.get("args") or {}).get("path"), "status": t["status"]}
                for t in ts if t["status"] in ("denied", "cancelled", "expired")]
-    after = [ok for i, ok in runs if writes and i > writes[-1]]
+    last_write = _at(writes[-1], "finished_at") if writes else None
+    after = [not t.get("reason") for t in runs if last_write and _at(t, "started_at") > last_write]
     if not writes:
         verdict, line = "unchanged", "no file was changed"
     elif after and after[-1]:
@@ -273,10 +306,10 @@ def verify(ci, uid: str, project_id: str, session_ids: list[str], final_text: st
         verdict, line = "not_verified", "not verified: the last test run after the last change did not pass"
     else:
         verdict, line = "not_verified", "not verified: the tests were not run after the last change"
-    files = list(dict.fromkeys((ts[i].get("args") or {}).get("path") for i in writes))
+    files = list(dict.fromkeys((w.get("args") or {}).get("path") for w in writes))
     claims = bool(_CLAIMS_DONE.search(final_text or ""))
     return {"verdict": verdict, "line": line, "refused": refused, "writes": len(writes), "files": files,
-            "test_runs": len(runs), "tests_passed": sum(ok for _, ok in runs), "claims_done": claims,
+            "test_runs": len(runs), "tests_passed": sum(not t.get("reason") for t in runs), "claims_done": claims,
             "claim_unverified": claims and verdict != "verified"}
 
 
@@ -301,30 +334,46 @@ def here_for(ci, uid: str, project_id: str):
 class GoalRunner:
     def __init__(self, ci, uid: str, here, agent=None, out=None):
         from .terminal import _workspace_agent
+        from .textsafe import terminal_safe
         self.ci, self.uid, self.here = ci, uid, here
         self.gs = GoalStore(ci)
         self.agent = agent or _workspace_agent(ci)
-        self.out = out or (lambda s: print(s, flush=True))
+        self.out = out or (lambda s: print(terminal_safe(s), flush=True))  # model text never drives the terminal
 
     # ---- start
     def start(self, objective: str, provider: str | None = None, model: str | None = None,
               use_github: bool | None = None, use_vault: bool | None = None, **limits) -> Goal:
         from . import plan_exec as px
-        from . import thirdeye
         if provider is None:
             if not self.here.vendors - {"mock"}:  # never run a goal on the test double without being asked to
                 raise GoalError("no model may see this project yet: alter permissions provider claude-cli on")
             provider, model = px._model(self.here.vendors - {"mock"}, None, None)
-        # gathered before the goal exists, so the brief never lists the goal itself as remembered
-        brief = thirdeye.gather(self.ci, self.uid, self.here, objective, use_github=use_github, use_vault=use_vault)
+        # One goal at a time per project folder: the agent keeps one open session per project, and a
+        # second goal would close the first one's (with any approval it waits on).
+        for other in self.gs.list(self.uid, self.here.project_id, limit=50):
+            if other.status == "running" and self.gs.is_live(other.id):
+                raise GoalError(f"goal {other.id} is running in this project; pause or cancel it first")
+        open_sid = self.agent.open_session(self.uid, self.here.project_id)
+        if open_sid and self.agent._load(self.uid, self.here.project_id, open_sid).get("pending"):
+            raise GoalError("a conversation in this project waits on your approval (alter tasks); resolve it first")
         g = self.gs.create(self.uid, self.here.project_id, objective, **limits)
-        g.payload.update(provider=provider, model=model,
-                         context={"text": brief.for_model(), "cites": brief.cites(), "withheld": brief.withheld,
-                                  "remembered": sum(e.kind == "remembered" for e in brief.evidence),
-                                  "sourced": sum(e.kind == "sourced" for e in brief.evidence)})
+        g.payload.update(provider=provider, model=model, use_github=use_github, use_vault=use_vault)
+        self._brief(g, exclude=g.id)
+        return g
+
+    def _brief(self, g: Goal, exclude: str | None = None) -> str:
+        """A fresh brief, under the person's current settings and the goal's vendor; recorded and disclosed."""
+        from . import thirdeye
+        from .registry import vendor_of
+        brief = thirdeye.gather(self.ci, self.uid, self.here, g.objective, use_github=g.payload.get("use_github"),
+                                use_vault=g.payload.get("use_vault"), vendor=vendor_of(g.payload["provider"]),
+                                exclude_goal=exclude or g.id)
+        g.payload["context"] = {"text": brief.for_model(), "cites": brief.cites(), "withheld": brief.withheld,
+                                "remembered": sum(e.kind == "remembered" for e in brief.evidence),
+                                "sourced": sum(e.kind == "sourced" for e in brief.evidence)}
         self.gs.save(g)
         thirdeye.disclose(self.ci, self.uid, self.here.project_id, brief, g.id)
-        return g
+        return g.payload["context"]["text"]
 
     # ---- messages
     def _first_message(self, g: Goal) -> str:
@@ -333,79 +382,106 @@ class GoalRunner:
     def _resume_message(self, g: Goal) -> str:
         v = verify(self.ci, self.uid, g.project_id, g.payload["sessions"])
         done = ", ".join(v["files"]) or "none"
-        return (f"{g.payload['context']['text']}\n\nYou are resuming this goal in a new conversation. The records so far: "
+        return (f"{self._brief(g)}\n\nYou are resuming this goal in a new conversation. The records so far: "
                 f"files changed: {done}; test runs: {v['test_runs']} ({v['tests_passed']} passed); {v['line']}.\n\n"
                 f"Goal: {g.objective}\n\n{HOW}")
 
     # ---- the loop
-    def run(self, gid: str, window_s: int | None = None, first_turn=None) -> Goal:
+    def run(self, gid: str, window_s: int | None = None, first_turn=None, resume: bool = False) -> Goal:
+        """Work on a goal. A paused goal runs only when `resume` is True: a pause the person gave must
+        never be undone by a worker that happened to start late."""
+        with self.gs.worker_lock(gid, wait_s=2.0):
+            return self._run_locked(gid, window_s, first_turn, resume)
+
+    def _limits_exhausted(self, g: Goal) -> str | None:
+        if g.payload["turns"] >= g.payload["max_turns"]:
+            return f"turn limit ({g.payload['max_turns']}) reached"
+        cost = sum(c for c in g.payload["session_costs"].values() if c is not None)
+        if cost >= g.payload["max_cost_usd"]:
+            return f"cost limit (${g.payload['max_cost_usd']:.2f}) reached"
+        return None
+
+    def _run_locked(self, gid: str, window_s: int | None, first_turn, resume: bool) -> Goal:
+        import dataclasses as dc
         import time
-        with self.gs.worker_lock(gid):
-            g = self.gs.get(self.uid, gid)
-            if g.status in FINAL:
-                return g
-            g.status, g.worker_pid, g.payload["reason"] = "running", os.getpid(), None
-            self.gs.save(g)
-            self.agent.pause_check = lambda: self.gs.has_pending_event(gid)
-            deadline = time.monotonic() + (window_s or g.payload["window_s"])
-            message = None
-            pending_turn = first_turn
-            try:
-                while True:
-                    if pending_turn is None:
-                        ev = self.gs.pending_events(self.uid, gid)
-                        if any(e["kind"] == "cancel" for e in ev):
-                            self.gs.consume([e["id"] for e in ev])
-                            return self._finish(g, "cancelled", "cancelled by you")
-                        if any(e["kind"] == "pause" for e in ev):
-                            self.gs.consume([e["id"] for e in ev if e["kind"] == "pause"])
-                            return self._park(g, "paused", "paused by you")
-                        steers = [e for e in ev if e["kind"] == "steer"]
-                        if steers:
-                            self.gs.consume([e["id"] for e in steers])
-                            g.payload["steers"] += [{"at": e["at"], "text": e["text"]} for e in steers]
-                            said = "\n".join(f"- {e['text']}" for e in steers)
-                            message = (f"While you were working, the person added:\n{said}\nTake it into account from "
-                                       "here. Keep what is already done unless it conflicts, and say what you changed "
-                                       "because of it.")
-                            self.out("ALTER: taking your new instruction into account.")
-                        if g.status == "waiting_answer" and not steers:
-                            return self._park(g, "waiting_answer", "waiting for your answer")
-                        if g.payload["turns"] >= g.payload["max_turns"]:
-                            return self._finish(g, "stopped", f"turn limit ({g.payload['max_turns']}) reached")
-                        cost = sum(c for c in g.payload["session_costs"].values() if c is not None)
-                        if cost >= g.payload["max_cost_usd"]:
-                            return self._finish(g, "stopped", f"cost limit (${g.payload['max_cost_usd']:.2f}) reached")
-                        if time.monotonic() > deadline:
-                            return self._park(g, "paused", "its time window ended; resume to continue")
-                        sid = g.payload["sessions"][-1] if g.payload["sessions"] else None
-                        same = (sid is not None and not g.payload.pop("force_new", False)
-                                and self.agent.open_session(self.uid, g.project_id) == sid)
-                        if not same:
-                            text = self._first_message(g) if not sid else self._resume_message(g)
-                            if message:
-                                text += "\n\n" + message
-                        else:
-                            text = message or "Continue the goal from where you stopped."
-                        message = None
-                        g.status = "running"
-                        self.gs.save(g)
-                        turn = self._send(g, text, new_session=not same)
-                        if turn is None:
-                            return g
+        g = self.gs.get(self.uid, gid)
+        incoming = g.status
+        if incoming in FINAL:
+            return g
+        if first_turn is None and incoming == "paused" and not resume:
+            return g
+        if first_turn is None and incoming == "waiting_approval" and pending_tasks(self.ci, self.uid, g):
+            return g  # nothing to do until the person approves or refuses
+        awaiting_answer = incoming == "waiting_answer" and first_turn is None
+        g.status, g.worker_pid, g.payload["reason"] = "running", os.getpid(), None
+        self.gs.save(g)
+        self.agent.pause_check = lambda: self.gs.has_pending_event(gid)
+        base_limits = self.agent.limits
+        deadline = time.monotonic() + (window_s or g.payload["window_s"])
+        message = None
+        pending_turn = first_turn
+        try:
+            while True:
+                if pending_turn is None:
+                    ev = self.gs.pending_events(self.uid, gid)
+                    if any(e["kind"] == "cancel" for e in ev):
+                        self.gs.consume([e["id"] for e in ev])
+                        return self._cancel(g)
+                    if any(e["kind"] == "pause" for e in ev):
+                        self.gs.consume([e["id"] for e in ev if e["kind"] == "pause"])
+                        return self._park(g, "paused", "paused by you")
+                    steers = [e for e in ev if e["kind"] == "steer"]
+                    if awaiting_answer and not steers:
+                        return self._park(g, "waiting_answer", "waiting for your answer")
+                    awaiting_answer = False
+                    if steers:
+                        self.gs.consume([e["id"] for e in steers])
+                        g.payload["steers"] += [{"at": e["at"], "text": e["text"]} for e in steers]
+                        said = "\n".join(f"- {e['text']}" for e in steers)
+                        message = (f"While you were working, the person added:\n{said}\nTake it into account from "
+                                   "here. Keep what is already done unless it conflicts, and say what you changed "
+                                   "because of it.")
+                        self.out("ALTER: taking your new instruction into account.")
+                    why = self._limits_exhausted(g)
+                    if why:
+                        return self._finish(g, "stopped", why)
+                    left = deadline - time.monotonic()
+                    if left <= 0:
+                        return self._park(g, "paused", "its time window ended; resume to continue")
+                    sid = g.payload["sessions"][-1] if g.payload["sessions"] else None
+                    same = (sid is not None and not g.payload.pop("force_new", False)
+                            and self.agent.would_continue(self.uid, g.project_id, sid, g.payload["provider"],
+                                                          g.payload["model"]))
+                    if not same:
+                        text = self._first_message(g) if not sid else self._resume_message(g)
+                        if message:
+                            text += "\n\n" + message
                     else:
-                        turn, pending_turn = pending_turn, None
-                    g.payload["turns"] += 1
-                    self._checkpoint(g, turn)
-                    nxt = self._after(g, turn)
-                    if nxt == "stop":
+                        text = message or "Continue the goal from where you stopped."
+                    message = None
+                    g.status = "running"
+                    self.gs.save(g)
+                    # a turn may not run past the goal's window
+                    self.agent.limits = dc.replace(base_limits, max_seconds=max(30.0, min(base_limits.max_seconds, left)))
+                    turn = self._send(g, text, new_session=not same)
+                    self.agent.limits = base_limits
+                    if turn is None:
                         return g
-                    if nxt:
-                        message = nxt
-            except KeyboardInterrupt:
-                return self._park(g, "paused", "interrupted by you (Ctrl-C); resume to continue")
-            finally:
-                self.agent.pause_check = None
+                else:
+                    turn, pending_turn = pending_turn, None
+                g.payload["turns"] += 1
+                self._checkpoint(g, turn)
+                nxt = self._after(g, turn)
+                if nxt == "stop":
+                    return g
+                if nxt:
+                    message = nxt
+        except KeyboardInterrupt:
+            return self._park(g, "paused", "interrupted by you (Ctrl-C); resume to continue")
+        finally:
+            self.agent.pause_check = None
+            self.agent.limits = base_limits
+            with contextlib.suppress(KeyError, GoalError):
                 cur = self.gs.get(self.uid, gid)
                 if cur.worker_pid == os.getpid():
                     cur.worker_pid = None
@@ -413,10 +489,18 @@ class GoalRunner:
 
     def _send(self, g: Goal, text: str, new_session: bool):
         import time
+        from .adapters.base import ProviderError
         for attempt in (1, 2):
             try:
                 return self.agent.send(self.uid, g.project_id, text, g.payload["provider"], g.payload["model"],
                                        new_session=new_session)
+            except ProviderError as e:  # a RuntimeError too: decide by the provider's own retryable flag
+                if not e.retryable or attempt == 2:
+                    self._park(g, "paused", f"the model call failed ({'twice; ' if attempt == 2 else ''}"
+                                            f"{type(e).__name__}: {str(e)[:120]}); resume to try again")
+                    return None
+                self.out(f"ALTER: the model call failed ({type(e).__name__}); retrying once.")
+                time.sleep(3)
             except RuntimeError as e:  # halted, or a session waiting on an approval
                 waiting = "waiting on an approval" in str(e)
                 self._park(g, "waiting_approval" if waiting else "paused", str(e)[:200])
@@ -424,7 +508,7 @@ class GoalRunner:
             except (PermissionError, ValueError) as e:
                 self._finish(g, "failed", str(e)[:200])
                 return None
-            except Exception as e:  # noqa: BLE001 - a provider failure: retry once, then park, never lose state
+            except Exception as e:  # noqa: BLE001 - an unclassified failure: retry once, then park, never lose state
                 if attempt == 2:
                     self._park(g, "paused", f"the model call failed twice ({type(e).__name__}: {str(e)[:120]}); "
                                             "resume to try again")
@@ -476,6 +560,10 @@ class GoalRunner:
             if any(line.rstrip().endswith("?") for line in (turn.text or "").splitlines()):
                 self._park(g, "waiting_answer", "ALTER asked you a question")
                 return "stop"
+            refused = [r for r in v["refused"] if r["tool"] == "write_file"]
+            if refused:  # the change was refused: that is not "done"
+                self._finish(g, "stopped", f"you refused {len(refused)} change(s); no file was changed")
+                return "stop"
             self._finish(g, "done", "answered; no file was changed")
             return "stop"
         if g.payload["nudges"] < MAX_NUDGES and g.payload["turns"] < g.payload["max_turns"]:
@@ -493,6 +581,16 @@ class GoalRunner:
         self.out(f"ALTER: goal {g.id} is {status}: {reason}.")
         return g
 
+    def _cancel(self, g: Goal) -> Goal:
+        """Cancel the goal, every action it still waits on, and its conversation."""
+        for t in pending_tasks(self.ci, self.uid, g):
+            with contextlib.suppress(Exception):
+                self.agent.cancel(self.uid, t["id"])
+        if g.payload["sessions"]:
+            with contextlib.suppress(Exception):
+                self.agent.close_session(self.uid, g.project_id, g.payload["sessions"][-1])
+        return self._finish(g, "cancelled", "cancelled by you")
+
     def _finish(self, g: Goal, status: str, reason: str) -> Goal:
         g.status, g.payload["reason"] = status, reason
         if g.payload["sessions"] and g.payload["verification"] is None:
@@ -504,21 +602,59 @@ class GoalRunner:
         self.out(f"ALTER: goal {g.id} is {status}: {reason}.")
         return g
 
+    # ---- control without a model call
+    def apply_events(self, gid: str) -> Goal | None:
+        """Apply pause and cancel now, when no worker holds the goal. Never calls a model; steers wait for
+        the next run. Returns None when a worker holds the goal (it reads the events itself)."""
+        try:
+            with self.gs.worker_lock(gid):
+                g = self.gs.get(self.uid, gid)
+                if g.status in FINAL:
+                    return g
+                ev = self.gs.pending_events(self.uid, gid)
+                if any(e["kind"] == "cancel" for e in ev):
+                    self.gs.consume([e["id"] for e in ev if e["kind"] in ("cancel", "pause")])
+                    return self._cancel(g)
+                if any(e["kind"] == "pause" for e in ev):
+                    self.gs.consume([e["id"] for e in ev if e["kind"] == "pause"])
+                    return self._park(g, "paused", "paused by you")
+                return g
+        except GoalBusy:
+            return None
+
     # ---- approvals for a goal that waits on them
-    def resolve_pending(self, gid: str, approve: bool, reason: str = "", window_s: int | None = None) -> Goal:
-        g = self.gs.get(self.uid, gid)
-        if g.status != "waiting_approval":
-            raise GoalError(f"goal {gid} is {self.gs.shown_status(g)}, not waiting on an approval")
-        sid = g.payload["sessions"][-1]
-        pend = [t for t in evidence(self.ci, self.uid, g.project_id, [sid]) if t["status"] == "awaiting_approval"]
-        if not pend:
-            return self.run(gid, window_s)
-        turn = None
-        for t in pend:
-            out = self.agent.resolve(self.uid, t["id"], approve, reason)
-            if hasattr(out, "session_id"):
-                turn = out
-        return self.run(gid, window_s, first_turn=turn)
+    def resolve_pending(self, gid: str, approve: bool, reason: str = "", window_s: int | None = None,
+                        task_ids: list[str] | None = None) -> Goal:
+        """Approve or refuse what a goal waits on: the named tasks only, or all of them. The turn this
+        resumes runs under the goal's lock and pause check, like any other turn."""
+        with self.gs.worker_lock(gid):
+            g = self.gs.get(self.uid, gid)
+            if g.status != "waiting_approval":
+                raise GoalError(f"goal {gid} is {self.gs.shown_status(g)}, not waiting on an approval")
+            pend = pending_tasks(self.ci, self.uid, g)
+            if task_ids:
+                unknown = set(task_ids) - {t["id"] for t in pend}
+                if unknown:
+                    raise GoalError(f"goal {gid} is not waiting on {', '.join(sorted(unknown))}")
+                pend = [t for t in pend if t["id"] in task_ids]
+            if not pend:
+                return self._run_locked(gid, window_s, None, True)
+            if approve:
+                why = self._limits_exhausted(g)
+                if why:
+                    raise GoalError(f"goal {gid}: {why}; start a new goal to go further")
+            self.agent.pause_check = lambda: self.gs.has_pending_event(gid)
+            turn = None
+            try:
+                for t in pend:
+                    out = self.agent.resolve(self.uid, t["id"], approve, reason)
+                    if hasattr(out, "session_id"):
+                        turn = out
+            finally:
+                self.agent.pause_check = None
+            if turn is None:  # other actions of that step still wait on the person
+                return self.gs.get(self.uid, gid)
+            return self._run_locked(gid, window_s, turn, True)
 
 
 def pending_tasks(ci, uid: str, g: Goal) -> list[dict]:
@@ -606,11 +742,16 @@ def report(ci, uid: str, g: Goal, gs: GoalStore | None = None) -> str:
 
 
 # --------------------------------------------------------------------------- background worker
-def spawn_worker(ci, gid: str, root: str, window_s: int) -> int:
-    log = GoalStore(ci)._lock_file(gid).with_suffix(".log")
-    with open(log, "a") as f:
-        p = subprocess.Popen([sys.executable, "-m", "pcim.goals", "run", gid, "--window", str(int(window_s))],
-                             cwd=root, stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+def spawn_worker(ci, gid: str, root: str, window_s: int, resume: bool = False) -> int:
+    """A detached worker. `-P` and a working directory outside the project: `python -m` would
+    otherwise import a project file named like a module it uses (argparse.py, json.py) before
+    anything was approved. Its log holds ids and statuses only, never model text."""
+    lock = GoalStore(ci)._lock_file(gid)
+    with open(lock.with_suffix(".log"), "a") as f:
+        os.chmod(f.name, 0o600)
+        p = subprocess.Popen([sys.executable, "-P", "-m", "pcim.goals", "run", gid, "--window", str(int(window_s)),
+                              *(["--resume"] if resume else [])],
+                             cwd=str(lock.parent), stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                              start_new_session=True, env=dict(os.environ))
     return p.pid
 
@@ -622,16 +763,17 @@ def _worker_main(argv: list[str]) -> int:
     ap.add_argument("cmd", choices=["run"])
     ap.add_argument("goal")
     ap.add_argument("--window", type=int, default=None)
+    ap.add_argument("--resume", action="store_true")
     a = ap.parse_args(argv)
     ci, uid = _open()
-    g = GoalStore(ci).get(uid, a.goal)
-    r = GoalRunner(ci, uid, here_for(ci, uid, g.project_id))
     try:
-        g = r.run(a.goal, a.window)
-    except GoalBusy as e:
-        print(e, flush=True)
+        g = GoalStore(ci).get(uid, a.goal)
+        r = GoalRunner(ci, uid, here_for(ci, uid, g.project_id), out=lambda s: None)
+        g = r.run(a.goal, a.window, resume=a.resume)
+    except (GoalError, KeyError) as e:
+        print(json.dumps({"goal": a.goal, "error": type(e).__name__}), flush=True)
         return 3
-    print(json.dumps({"goal": g.id, "status": g.status, "reason": g.payload.get("reason")}), flush=True)
+    print(json.dumps({"goal": g.id, "status": g.status, "at": utcnow().isoformat()}), flush=True)
     return 0
 
 

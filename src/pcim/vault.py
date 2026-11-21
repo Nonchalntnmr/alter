@@ -33,16 +33,25 @@ def dataless(path) -> bool:
 def materialize(paths, timeout: float = 20.0) -> None:
     """Ask iCloud for placeholder files by reading them, in parallel, for at most `timeout` seconds.
     A read that has not finished by then is left running in a daemon thread and its file skipped."""
+    import queue
     import threading
     import time
+    todo = queue.Queue()
+    for p in paths:
+        todo.put(p)
 
-    def pull(p):
-        try:
-            with open(p, "rb") as f:
-                f.read(1)
-        except OSError:
-            pass
-    threads = [threading.Thread(target=pull, args=(p,), daemon=True) for p in paths]
+    def pull():
+        while True:
+            try:
+                p = todo.get_nowait()
+            except queue.Empty:
+                return
+            try:
+                with open(p, "rb") as f:
+                    f.read(1)
+            except OSError:
+                pass
+    threads = [threading.Thread(target=pull, daemon=True) for _ in range(min(32, len(paths)))]  # bounded
     for t in threads:
         t.start()
     deadline = time.monotonic() + timeout

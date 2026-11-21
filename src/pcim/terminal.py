@@ -889,27 +889,15 @@ def _session_verification(ci, uid: str, project_id: str, sid: str, final_text: s
     from .governor import Governor
     from .tasks import TaskQueue
     ws = Workspace(ci)
-    ts = sorted((t.public() for t in TaskQueue(ws, Governor(ws)).list(uid, project_id, limit=1000) if t.session_id == sid),
-                key=lambda t: t["created_at"])
-    writes = [i for i, t in enumerate(ts) if t["tool"] == "write_file" and t["status"] == "succeeded"]
-    # a test run that ran is "succeeded" as a tool call; a failing suite carries a reason ("tests exited 1")
-    runs = [(i, not t.get("reason")) for i, t in enumerate(ts) if t["tool"] == "run_tests" and t["status"] == "succeeded"]
-    refused = [{"tool": t["tool"], "path": (t.get("args") or {}).get("path"), "status": t["status"]}
-               for t in ts if t["status"] in ("denied", "cancelled", "expired")]
-    after = [passed for i, passed in runs if writes and i > writes[-1]]  # only what ran after the last change counts
-    if not writes:
-        verdict, line = "unchanged", "no file was changed"
-    elif after and after[-1]:
-        verdict, line = "verified", "verified: the project's tests passed after the last change"
-    elif after:
-        verdict, line = "not_verified", "not verified: the last test run after the change did not pass"
-    else:
-        verdict, line = "not_verified", ("not verified: the tests were not run after the last change "
-                                         "(ask CI to run them, or run them yourself)")
-    # what the reply claims, against what the records show: executed is not the same as verified
-    claims = bool(_CLAIMS_DONE.search(final_text or ""))
-    return {"verdict": verdict, "line": line, "refused": refused, "writes": len(writes), "test_runs": len(runs),
-            "claims_done": claims, "claim_unverified": claims and verdict != "verified"}
+    from .goals import verify_tasks
+    ts = [t.public() for t in TaskQueue(ws, Governor(ws)).list(uid, project_id, limit=1000) if t.session_id == sid]
+    v = verify_tasks(ts, final_text)  # ordered by when actions ran, not when they were proposed
+    out = {k: v[k] for k in ("verdict", "line", "refused", "writes", "test_runs", "claims_done", "claim_unverified")}
+    if v["verdict"] == "not_verified":  # ci do's own wording, kept
+        out["line"] = ("not verified: the last test run after the change did not pass" if "did not pass" in v["line"] else
+                       "not verified: the tests were not run after the last change "
+                       "(ask CI to run them, or run them yourself)")
+    return out
 
 
 def _print_verification(v: dict) -> None:

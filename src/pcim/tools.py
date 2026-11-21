@@ -195,7 +195,10 @@ def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
     keys = subprocess.run(["git", "-C", str(root), "config", "--null", "--name-only", "--get-regexp", r"^filter\."],
                           capture_output=True, text=True, timeout=15, env=env).stdout.split("\0")
     drivers = dict.fromkeys(k[len("filter."):k.rindex(".")] for k in keys if k.count(".") >= 2)
-    over = [("core.fsmonitor", "false"), ("core.hooksPath", "/dev/null")]
+    # log.showSignature would make `git log` run gpg.program (or its ssh/x509 variants), which the
+    # repository's config may name; signatures are never checked here, so all of them are off.
+    over = [("core.fsmonitor", "false"), ("core.hooksPath", "/dev/null"), ("log.showSignature", "false"),
+            ("gpg.program", "false"), ("gpg.ssh.program", "false"), ("gpg.x509.program", "false")]
     for d in drivers:
         over += [(f"filter.{d}.clean", ""), (f"filter.{d}.smudge", ""), (f"filter.{d}.process", ""),
                  (f"filter.{d}.required", "false")]
@@ -209,7 +212,8 @@ def _search_in_child(root: Path, pattern: str, glob: str, timeout_s: float, excl
     """The model writes the regex, and Python's re has no timeout: a pattern like (a+)+$ can
     backtrack for hours. The search runs in a child process that is killed at the deadline."""
     try:
-        r = subprocess.run([sys.executable, "-m", "pcim.tools"], input=json.dumps(
+        # -P: `python -m` would otherwise put the working directory (possibly the project) on sys.path
+        r = subprocess.run([sys.executable, "-P", "-m", "pcim.tools"], input=json.dumps(
             {"root": str(root), "pattern": pattern, "glob": glob, "exclude": sorted(exclude)}), capture_output=True,
             text=True, timeout=timeout_s, env=scrubbed_env())
     except subprocess.TimeoutExpired:

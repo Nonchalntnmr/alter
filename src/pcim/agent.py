@@ -195,6 +195,17 @@ class Agent:
             return None
         return rows[0]["id"]
 
+    def would_continue(self, user_id: str, project_id: str, sid: str | None, provider: str, model: str | None) -> bool:
+        """Would send(new_session=False) continue session `sid`? The same rules send() applies: the
+        project's open session, the same provider and model, and the same context epoch unless the
+        session waits on an approval. When not, a caller must restate what the new session needs."""
+        if not sid or self.open_session(user_id, project_id) != sid:
+            return False
+        st = self._load(user_id, project_id, sid)
+        if st["provider"] != provider or st["model"] != model:
+            return False
+        return bool(st["pending"]) or st.get("context_epoch", 0) == self._context_epoch(user_id)
+
     def _collab_prefs(self, user_id: str, project_id: str, provider: str, model_label: str, ref: str) -> list:
         items = [i for i in self.ci.memory.current(user_id)
                  if i.pinned and i.trust.rank >= Trust.USER_STATED.rank and i.kind == "preference"

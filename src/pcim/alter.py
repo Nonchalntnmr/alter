@@ -17,6 +17,7 @@
                        | provider claude-cli|anthropic|openai|… on|off
                        | autonomy grant [--actions N] [--minutes M] | autonomy revoke]
     alter vault search "…" | eval [FILE] | download
+    alter resume GOAL                      resume a paused goal (`alter resume` alone clears Stop-all, as `ci resume`)
     alter weekly · models · twin · mesh · audit · doctor · halt · resume · plan · do · …
                                            every `ci` command works here too (`ci` itself still works)
 
@@ -215,10 +216,10 @@ def cmd_tasks(argv: list[str]) -> int:
 
 
 # --------------------------------------------------------------------------- goals
-def _run_foreground(ci, uid, here, g: G.Goal, window_s: int | None = None) -> int:
+def _run_foreground(ci, uid, here, g: G.Goal, window_s: int | None = None, resume: bool = False) -> int:
     r = G.GoalRunner(ci, uid, here)
     try:
-        g = r.run(g.id, window_s)
+        g = r.run(g.id, window_s, resume=resume)
     except G.GoalBusy as e:
         print(f"alter: {e}. Watch it with: alter goals show {g.id}", file=sys.stderr)
         return 3
@@ -286,7 +287,11 @@ def cmd_goals(argv: list[str]) -> int:
         print(G.report(ci, uid, g, gs))
         return 0
     if a.action == "forget":
-        gs.delete(uid, g.id)
+        try:
+            gs.delete(uid, g.id)
+        except G.GoalError as e:
+            print(f"alter: {e}", file=sys.stderr)
+            return 2
         print(f"Forgot goal {g.id} and its events. Kept: the record of each action (alter tasks, ci audit), and its "
               "outcome in memory if one was stored (alter memory forget <id>).")
         return 0
@@ -301,10 +306,10 @@ def cmd_goals(argv: list[str]) -> int:
         print(f"Goal {g.id} is already running. alter goals show {g.id}")
         return 0
     if a.background:
-        p = G.spawn_worker(ci, g.id, h.root, (a.minutes or 0) * 60 or g.payload["window_s"])
+        p = G.spawn_worker(ci, g.id, h.root, (a.minutes or 0) * 60 or g.payload["window_s"], resume=True)
         print(f"ALTER: resumed in the background (pid {p}).")
         return 0
-    return _run_foreground(ci, uid, h, g, (a.minutes or 0) * 60 or None)
+    return _run_foreground(ci, uid, h, g, (a.minutes or 0) * 60 or None, resume=True)
 
 
 def _event(ci, uid, g: G.Goal, kind: str, text: str = "") -> int:
@@ -322,9 +327,8 @@ def _event(ci, uid, g: G.Goal, kind: str, text: str = "") -> int:
     print({"steer": f"Noted. ALTER will take it into account {when}.",
            "pause": f"ALTER will pause {when if live else 'at once: it is not running'}.",
            "cancel": f"ALTER will cancel the goal {when}."}[kind])
-    if not live and kind in ("pause", "cancel"):  # nothing running reads the event: apply it now
-        with contextlib.suppress(G.GoalBusy):
-            G.GoalRunner(ci, uid, G.here_for(ci, uid, g.project_id), out=lambda s: None).run(g.id)
+    if not live and kind in ("pause", "cancel"):  # nothing running reads the event: apply it now, no model call
+        G.GoalRunner(ci, uid, G.here_for(ci, uid, g.project_id), out=lambda s: None).apply_events(g.id)
     return 0
 
 
@@ -345,9 +349,10 @@ def cmd_event(kind: str, argv: list[str]) -> int:
 def cmd_resolve(argv: list[str], approve: bool) -> int:
     ci, uid, here = _ctx()
     gs = G.GoalStore(ci)
-    reason = ""
+    reason, only = "", None
     if argv and argv[0].startswith("task_"):
         task = argv[0]
+        only = [task]
         reason = " ".join(argv[1:])
         owner = next((g for g in gs.list(uid, None, limit=200)
                       if g.status == "waiting_approval" and any(t["id"] == task for t in G.pending_tasks(ci, uid, g))), None)
@@ -361,13 +366,13 @@ def cmd_resolve(argv: list[str], approve: bool) -> int:
             print("Nothing waits for your approval." + ("" if here else " (Not in a project folder.)"))
             return 0
         g = cands[0]
-    pend = G.pending_tasks(ci, uid, g)
+    pend = [t for t in G.pending_tasks(ci, uid, g) if only is None or t["id"] in only]
     print(f"{'Approving' if approve else 'Refusing'} for goal {g.id}:")
     for t in pend:
         print(terminal_safe(f"  {t['id']}  {t['tool']} {t['what']}"))
-    h = G.here_for(ci, uid, g.project_id)
     try:
-        g = G.GoalRunner(ci, uid, h).resolve_pending(g.id, approve, reason)
+        h = G.here_for(ci, uid, g.project_id)
+        g = G.GoalRunner(ci, uid, h).resolve_pending(g.id, approve, reason, task_ids=only)
     except (G.GoalError, ValueError, RuntimeError) as e:
         print(f"alter: {e}", file=sys.stderr)
         return 2
@@ -450,6 +455,9 @@ def cmd_permissions(argv: list[str]) -> int:
         print(f"{here.name} is searched in the vault as: {', '.join([here.name, *tp])}")
         return 0
     if argv[:1] in (["vault"], ["github"]) and len(argv) >= 2 and argv[1] in ("on", "off"):
+        if "--path" in argv and argv.index("--path") + 1 >= len(argv):
+            print("alter: --path needs a folder", file=sys.stderr)
+            return 2
         path = argv[argv.index("--path") + 1] if "--path" in argv else None
         try:
             s = thirdeye.set_source(ws, uid, argv[0], argv[1] == "on", path)
@@ -699,8 +707,8 @@ class Conversation:
             with contextlib.suppress(Exception):
                 self.poll()
 
-    def _spawn(self, g: G.Goal) -> None:
-        G.spawn_worker(self.ci, g.id, self.here.root, g.payload["window_s"])
+    def _spawn(self, g: G.Goal, resume: bool = False) -> None:
+        G.spawn_worker(self.ci, g.id, self.here.root, g.payload["window_s"], resume=resume)
         self.watch(g.id)
 
     def handle(self, line: str) -> bool:
@@ -747,12 +755,13 @@ class Conversation:
             elif g.status == "waiting_approval":
                 self.out("ALTER: it waits on your approval: say yes or no.")
             else:
-                self._spawn(g)
+                self._spawn(g, resume=True)
                 self.out(f"ALTER: resuming goal {g.id}.")
-        elif k in ("approve", "deny") and g.status == "waiting_approval" and not live:
-            for t in G.pending_tasks(self.ci, self.uid, g):
-                self.ci.audit.append(self.uid, "alter.resolve", goal=g.id, task=t["id"], approve=k == "approve")
-            self._resolve_in_background(g, k == "approve")
+        elif k in ("approve", "deny") and g.status == "waiting_approval":
+            if live:
+                self.out("ALTER: that is already being handled.")
+            else:
+                self._resolve_in_background(g, k == "approve")
         else:
             self.gs.add_event(self.uid, g.id, "steer", text)
             if live:
@@ -760,7 +769,7 @@ class Conversation:
             elif g.status == "waiting_approval":
                 self.out("ALTER: noted for after the action that waits on you (say yes or no).")
             else:
-                self._spawn(g)
+                self._spawn(g, resume=True)
                 self.out("ALTER: noted; continuing with it.")
         return True
 
@@ -770,11 +779,12 @@ class Conversation:
 
         def go():
             from .engine import PersonalCI
-            ci2 = PersonalCI(T._home())
-            with contextlib.suppress(Exception):
-                G.GoalRunner(ci2, self.uid, self.here, out=lambda s: None).resolve_pending(g.id, approve)
+            try:
+                G.GoalRunner(PersonalCI(T._home()), self.uid, self.here, out=lambda s: None).resolve_pending(g.id, approve)
+            except Exception as e:  # noqa: BLE001 - said to the person, never swallowed
+                self.out(terminal_safe(f"ALTER: that did not go through: {e}"))
         threading.Thread(target=go, daemon=True).start()
-        self.out("ALTER: " + ("approved; continuing." if approve else "refused; telling the agent."))
+        self.out("ALTER: " + ("approving; continuing." if approve else "refusing; telling the agent."))
 
     def run(self, inp=input) -> int:
         self.out(f"ALTER {__version__} (alpha) · " + (f"project {self.here.name} ({self.here.root})" if self.here
@@ -836,13 +846,23 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if cmd in table:
             return table[cmd](rest)
+        if cmd == "resume" and rest:  # `alter resume <goal>`: the goal, never Stop-all
+            return cmd_goals(["resume", *rest])
         if cmd in CI_COMMANDS:
             return T.main(argv)
+        words = " ".join(argv).split()
+        if len(words) == 1 and re.fullmatch(r"[a-z][a-z-]*", words[0]):  # `alter stop`, `alter list`: a typo, not work
+            print(f"alter: unknown command {words[0]!r}. To give ALTER a goal, say it in a few words; "
+                  "alter --help lists the commands.", file=sys.stderr)
+            return 2
         ci, uid, here = _ctx()
         if here is None:  # no project here: a question, answered from cited context
             return cmd_ask(argv)
         return start_goal(ci, uid, here, " ".join(argv))[1]
     except EmbedderUnavailable as e:
+        print(f"alter: {e}", file=sys.stderr)
+        return 2
+    except G.GoalError as e:
         print(f"alter: {e}", file=sys.stderr)
         return 2
 
