@@ -18,8 +18,11 @@ import contextlib
 import dataclasses
 import datetime as dt
 import hashlib
+import json
 import logging
+import subprocess
 import time
+from pathlib import Path
 
 from .governor import RISK, Governor, jail
 from .registry import vendor_of
@@ -35,6 +38,10 @@ MODEL_HIDDEN = ("backup", "lineage", "abs_path")  # CI's bookkeeping in a task r
 
 
 class TaskStateError(RuntimeError):
+    pass
+
+
+class _TestRunBusy(RuntimeError):
     pass
 
 
@@ -74,74 +81,6 @@ class TaskQueue:
         self.ttl = approval_ttl_s
         self.claims = claims  # exchange.ClaimLedger; record_claim fails without one
         self.store, self.audit = ws.store, ws.audit
-        if getattr(self.executor, "on_spawn", "absent") is None and self.store.path != ":memory:":
-            self.executor.on_spawn, self.executor.on_exit = self._record_run, self._forget_run
-
-    # ------------------------------------------------------------------ test runs whose worker died (audit R6)
-    def _run_dir(self):
-        from pathlib import Path
-        return Path(self.store.path).parent / "run"
-
-    def _record_run(self, task_id: str, pgid: int) -> None:
-        import json
-        import os
-        d = self._run_dir()
-        d.mkdir(mode=0o700, exist_ok=True)
-        (d / f"{task_id}.json").write_text(json.dumps({"task": task_id, "pgid": pgid, "owner": os.getpid()}))
-
-    def _forget_run(self, task_id: str) -> None:
-        (self._run_dir() / f"{task_id}.json").unlink(missing_ok=True)
-
-    def reap_orphans(self) -> dict:
-        """Stop test runs whose worker process is gone, and mark their tasks interrupted.
-
-        A run is recorded with the pid of the process that started it. While that process lives, its run
-        is never touched, whoever calls this. A reused pid reads as alive, which errs toward leaving a run
-        alone. A dead owner's process group gets SIGTERM, then SIGKILL after 3 s."""
-        import json
-        import os
-        import signal
-        import time as _t
-        stopped, marked = 0, 0
-        d = self._run_dir()
-        for f in sorted(d.glob("task_*.json")) if d.is_dir() else []:
-            try:
-                rec = json.loads(f.read_text())
-                os.kill(int(rec["owner"]), 0)
-                continue  # its worker still runs it
-            except ProcessLookupError:
-                pass
-            except PermissionError:
-                continue  # someone else's process holds that pid: not ours to judge
-            except (OSError, ValueError, KeyError):
-                f.unlink(missing_ok=True)
-                continue
-            pgid = int(rec["pgid"])
-            try:
-                os.killpg(pgid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass  # already gone: only the task is left to mark
-            except PermissionError:
-                continue  # not a group this user may signal: not ours
-            else:
-                stopped += 1
-                for _ in range(30):
-                    _t.sleep(0.1)
-                    try:
-                        os.killpg(pgid, 0)
-                    except (ProcessLookupError, PermissionError):  # exited (macOS answers EPERM for a zombie)
-                        break
-                else:
-                    with contextlib.suppress(ProcessLookupError, PermissionError):
-                        os.killpg(pgid, signal.SIGKILL)
-            now = utcnow().isoformat()
-            marked += self.store.execute(
-                "UPDATE tasks SET status='interrupted', reason='its worker stopped while it ran; the test process was "
-                "stopped', updated_at=? WHERE id=? AND status='running'", (now, rec["task"])).rowcount
-            f.unlink(missing_ok=True)
-        if stopped or marked:
-            self.audit.append("system", "task.reap", stopped=stopped, marked=marked)
-        return {"stopped": stopped, "interrupted": marked}
 
     # ------------------------------------------------------------------ persistence
     def _key(self, user_id: str, project_id: str) -> str:
@@ -263,15 +202,137 @@ class TaskQueue:
         """Call at startup. Nothing that was mid-flight when the process died is re-run."""
         now = utcnow().isoformat()
         a = self.store.execute("UPDATE tasks SET status='interrupted', reason='process stopped while running', "
-                               "updated_at=? WHERE status='running'", (now,)).rowcount
+                               "updated_at=? WHERE status='running' AND tool!='run_tests'", (now,)).rowcount
+        for row in self.store.query("SELECT DISTINCT user_id, project_id FROM tasks "
+                                    "WHERE status='running' AND tool='run_tests'"):
+            a += self.recover_project_tests(row["user_id"], row["project_id"]) or 0
         cutoff = (utcnow() - dt.timedelta(seconds=self.ttl)).isoformat()
         b = self.store.execute("UPDATE tasks SET status='expired', reason='approval window passed before restart', "
                                "updated_at=? WHERE status IN ('approved','awaiting_approval') AND COALESCE(approved_at, created_at) < ?",
                                (now, cutoff)).rowcount
         return {"interrupted": a, "expired": b}
 
+    @contextlib.contextmanager
+    def _test_lock(self, project_id: str, wait_s: float = 0.0):
+        """The worker and its test supervisor share this lock until both have exited."""
+        if self.store.path == ":memory:":
+            yield None
+            return
+        import fcntl
+
+        path = self._test_lock_path(project_id)
+        path.parent.mkdir(mode=0o700, exist_ok=True)
+        with path.open("a") as lock:
+            deadline = time.monotonic() + wait_s
+            while True:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError as e:
+                    if time.monotonic() >= deadline:
+                        raise _TestRunBusy("a test command is still running in this project") from e
+                    time.sleep(0.05)
+            yield lock.fileno()
+
+    def _test_lock_path(self, project_id: str) -> Path:
+        return Path(self.store.path).parent / "test-runs" / f"{project_id}.lock"
+
+    def unreconciled_test_count(self, user_id: str) -> int:
+        """Count running records whose project has no test supervisor holding its lock."""
+        import fcntl
+
+        rows = self.store.query(
+            "SELECT project_id, COUNT(*) AS n FROM tasks WHERE user_id=? AND status='running' "
+            "AND tool='run_tests' GROUP BY project_id",
+            (user_id,),
+        )
+        count = 0
+        for row in rows:
+            if self.store.path == ":memory:":
+                count += row["n"]
+                continue
+            try:
+                with self._test_lock_path(row["project_id"]).open("rb") as lock:
+                    fcntl.flock(lock, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            except BlockingIOError:
+                continue
+            except FileNotFoundError:
+                pass
+            count += row["n"]
+        return count
+
+    def _check_legacy_test_runs(self, user_id: str, project_id: str) -> None:
+        """Older installs recorded numeric process groups. Wait for a live group to exit."""
+        directory = Path(self.store.path).parent / "run"
+        if self.store.path == ":memory:" or not directory.is_dir():
+            return
+        groups = set()
+        for row in self.store.query(
+            "SELECT id FROM tasks WHERE user_id=? AND project_id=? AND status='running' AND tool='run_tests'",
+            (user_id, project_id),
+        ):
+            try:
+                record = json.loads((directory / f"{row['id']}.json").read_text())
+                group = int(record["pgid"])
+                if group < 2:
+                    raise ValueError("invalid test process group")
+                groups.add(group)
+            except FileNotFoundError:
+                continue
+            except (OSError, ValueError, KeyError, TypeError) as error:
+                raise _TestRunBusy("an older test run could not be checked") from error
+        if not groups:
+            return
+        try:
+            processes = subprocess.check_output(["ps", "-axo", "pgid=,stat="], text=True, timeout=2)
+        except (OSError, subprocess.SubprocessError) as error:
+            raise _TestRunBusy("an older test run could not be checked") from error
+        for entry in processes.splitlines():
+            group, status = entry.split()
+            if int(group) in groups and not status.startswith("Z"):
+                raise _TestRunBusy("an older test command is still running in this project")
+
+    def _interrupt_tests(self, user_id: str, project_id: str) -> int:
+        self._check_legacy_test_runs(user_id, project_id)
+        now = utcnow().isoformat()
+        count = self.store.execute(
+            "UPDATE tasks SET status='interrupted', reason='worker stopped during the test command', "
+            "updated_at=?, finished_at=? WHERE user_id=? AND project_id=? AND status='running' AND tool='run_tests'",
+            (now, now, user_id, project_id),
+        ).rowcount
+        if count:
+            self.audit.append(user_id, "task.tests_interrupted", project=project_id, count=count)
+        return count
+
+    def recover_project_tests(self, user_id: str, project_id: str, wait_s: float = 0.0) -> int | None:
+        """Count interrupted tests, or return None while a command still holds the project lock."""
+        try:
+            with self._test_lock(project_id, wait_s):
+                return self._interrupt_tests(user_id, project_id)
+        except _TestRunBusy:
+            return None
+
     def _execute(self, user_id: str, task_id: str) -> None:
         t = self.get(user_id, task_id)
+        if t.tool != "run_tests":
+            self._execute_task(user_id, t)
+            return
+        try:
+            with self._test_lock(t.project_id) as lock_fd:
+                self._interrupt_tests(user_id, t.project_id)
+                self._execute_task(user_id, t, test_lock_fd=lock_fd)
+        except (OSError, _TestRunBusy) as error:
+            now = utcnow().isoformat()
+            changed = self.store.execute(
+                "UPDATE tasks SET status='failed', reason=?, updated_at=?, finished_at=? "
+                "WHERE id=? AND status='approved'",
+                (str(error)[:500], now, now, task_id),
+            ).rowcount
+            if changed:
+                self.audit.append(user_id, "task.finish", task=task_id, tool=t.tool, status="failed", ms=0)
+
+    def _execute_task(self, user_id: str, t: Task, test_lock_fd: int | None = None) -> None:
+        task_id = t.id
         d = self.gov.recheck(user_id, t.project_id, t.tool, t.args, t.authorization_id)
         if d.action != "execute":
             self._set(task_id, status="denied", reason=f"at execution: {d.reason}"[:500])
@@ -297,7 +358,10 @@ class TaskQueue:
                 result = self._read(user_id, t, self.ws.workspace_auth(user_id, t.project_id)["spec"])
             else:
                 spec = self.ws.workspace_auth(user_id, t.project_id)["spec"]
-                result = self.executor.run(task_id, t.tool, t.args, spec)
+                if t.tool == "run_tests":
+                    result = self.executor.run(task_id, t.tool, t.args, spec, test_lock_fd=test_lock_fd)
+                else:
+                    result = self.executor.run(task_id, t.tool, t.args, spec)
                 if t.tool == "write_file" and (lineage := self.exposure(user_id, t)):
                     result["lineage"] = lineage  # the file now carries what its writer was shown (file_lineage)
             status, reason = "succeeded", None

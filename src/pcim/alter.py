@@ -46,7 +46,6 @@ import argparse
 import contextlib
 import io
 import json
-import os
 import re
 import shlex
 import shutil
@@ -957,7 +956,8 @@ def cmd_doctor(argv: list[str]) -> int:
     home_ok = (T._home() / "token").is_file() and not any(c["name"] == "master_key" for c in checks)
     if home_ok:
         ci, uid = T._open()
-        s = thirdeye.settings(Workspace(ci), uid)
+        workspace = Workspace(ci)
+        s = thirdeye.settings(workspace, uid)
         vp = Path(s["vault_path"]) if s["vault_path"] else None
         if not s["vault"]:
             add("vault", "ok", f"off (alter permissions vault on); " + (f"found {vp}" if vp else "none found"))
@@ -969,17 +969,12 @@ def cmd_doctor(argv: list[str]) -> int:
             # placeholders are not a problem: Vault() asks iCloud for them when it reads the vault
             fetched = f"; iCloud placeholders: {dl}, fetched when needed (now: alter vault download)" if dl else ""
             add("vault", "ok", f"{len(notes)} notes at {vp}{fetched}")
-        orphans = 0  # test runs whose worker died (audit R6): read-only here; a resume stops them
-        for f in (T._home() / "run").glob("task_*.json") if (T._home() / "run").is_dir() else []:
-            try:
-                os.kill(int(json.loads(f.read_text())["owner"]), 0)
-            except ProcessLookupError:
-                orphans += 1
-            except (OSError, ValueError, KeyError):
-                pass
-        add("test_runs", "warn" if orphans else "ok",
-            f"{orphans} test run(s) left by a stopped worker (alter goals resume <goal> stops them)" if orphans
-            else "no orphaned test run")
+        from .governor import Governor
+        from .tasks import TaskQueue
+        interrupted_tests = TaskQueue(workspace, Governor(workspace)).unreconciled_test_count(uid)
+        add("test_runs", "warn" if interrupted_tests else "ok",
+            f"{interrupted_tests} test run(s) need recovery (alter goals resume <goal>)" if interrupted_tests
+            else "no test runs need recovery")
         gs = G.GoalStore(ci)
         stale = [g.id for g in gs.list(uid, None, limit=200) if gs.shown_status(g) == "interrupted"]
         add("goals", "warn" if stale else "ok",
