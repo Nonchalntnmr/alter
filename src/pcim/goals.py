@@ -108,7 +108,7 @@ def outcome(text: str | None) -> tuple[str | None, str]:
     ms = list(_OUTCOME.finditer(text or ""))
     if not ms:
         return None, ""
-    return ms[-1].group(1).lower(), ms[-1].group(2).strip().strip("`*_ ")
+    return ms[-1].group(1).lower(), ms[-1].group(2).strip().strip("`*_ ").rstrip(".")
 
 
 class GoalError(RuntimeError):
@@ -628,7 +628,9 @@ class GoalRunner:
             g.payload["cost_unknown"] = True
         g.payload["checkpoints"].append({"at": utcnow().isoformat(), "turn": g.payload["turns"], "session": turn.session_id,
                                          "status": turn.status, "stop_reason": turn.stop_reason,
-                                         "text": (turn.text or "")[:4000], "model_written": True,
+                                         # a stopped or blocked turn's text is the agent's own stop note
+                                         "text": (turn.text or "")[:4000],
+                                         "model_written": turn.status not in ("stopped", "blocked"),
                                          "tasks": [_task_line(t) for t in turn.tasks], "pending": list(turn.pending)})
         self.gs.save(g)
         self.out(render_turn(turn))
@@ -884,9 +886,13 @@ def report(ci, uid: str, g: Goal, gs: GoalStore | None = None) -> str:
     if g.payload["steers"]:
         out.append(f"  your added instructions: {len(g.payload['steers'])}")
     if g.payload["checkpoints"]:
-        last = g.payload["checkpoints"][-1]["text"].strip()
-        if last:
+        cp = g.payload["checkpoints"][-1]
+        last = cp["text"].strip()
+        if last and cp.get("model_written", True):
             out.append("  last message from ALTER (model-written):")
+            out += ["    " + x for x in last.splitlines()[-12:]]
+        elif last and g.status not in FINAL:  # a stop note ("Resume to continue") matters only while it can continue
+            out.append("  last note (from ALTER's records, not the model):")
             out += ["    " + x for x in last.splitlines()[-12:]]
     for h in g.payload.get("identifiers") or []:
         out.append(f"  WARNING: {h['file']} holds your {', '.join(h['labels'])}: review before you commit or push")

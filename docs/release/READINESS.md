@@ -1,5 +1,68 @@
 # Release readiness
 
+## ALTER V1 release candidate, 2026-11-22 (branch `release/v1-gate`)
+
+**Gate decision: CONDITIONAL.**
+- The V1 eval gate **passes on eval_v8**, after **eval_v7 failed it**. Both results stand.
+- The human pilot (`PILOT.md`; V1_GATE.md §3, C1–C11) has not run, and nothing below substitutes
+  for it.
+- The version stays `0.3.0a1`.
+
+| Check | Result |
+|---|---|
+| Local gate (`scripts/check.sh`) | Ruff and pytest pass: **731 passed, 4 skipped**. |
+| Clean install | **Passed.** Details below. |
+| Live goal lifecycle | **Passed: 4 goals, $0.24.** Details below. |
+| Found by that check, and fixed | Two display issues; details below. |
+| **eval_v7** (frozen at `d19bce6`) | **FAILS on 3a**, false done: G 1, A 0. Every other item held. `experiments/eval_v7/RESULTS.md`, `DEVIATIONS.md`. |
+| **eval_v8** (fresh pool, frozen at `0db915c`) | **Passes all six items:** non-inferior to direct, and no superiority is claimed. Details below. `experiments/eval_v8/RESULTS.md`, `NOTES.md`. |
+| Identity scan | **Clean** on the content, messages and blobs of every pushed commit. The commits carry the owner's git identity as author, as all earlier ones do (H1–H3, the owner's decision). |
+
+**Clean install.**
+- The wheel was built from this branch by `scripts/install_alter.sh` into a fresh `ALTER_HOME` and
+  `ALTER_BIN`: a fresh venv, without the semantic extra.
+- It ran in a fresh shell (an empty environment and a minimal PATH) with a fresh `PCIM_HOME`.
+- `alter setup --init` passed. The identity probe recorded the CLI clean (4 Haiku calls).
+- `alter doctor` exits 0. Its one warning: `gh` is not on the minimal PATH.
+
+**Live goal lifecycle**, run with the installed `alter` and the real `claude` CLI (sonnet), under an
+autonomy grant:
+1. **A fix:** done and verified in 13 s.
+2. **Cancelled mid-turn:** the worker exited within 7 s. No file was changed, and no test process
+   was left behind.
+3. **Worker killed with SIGKILL mid-run:**
+   - the goal was shown as interrupted, and `alter doctor` warned of it;
+   - `alter goals resume` finished it, done and verified, in 19 s;
+   - the tests pass when run independently.
+4. **A request the folder cannot satisfy:** ALTER changed nothing, wrote `Outcome: not reached`, and
+   the goal waits for the person. Before the fix it would have ended "done": its reply contained no
+   question mark.
+
+`alter report` agrees: 2 verified of 3 finished goals, false done 0, unauthorized 0, recovery 1/1.
+
+**Found by that check, and fixed**, with tests that fail before the fix:
+- a cancelled goal showed the agent's "Resume to continue" stop note, labelled as model-written;
+- a waiting goal's reason ended with "..".
+
+**eval_v8 in detail.**
+- **3a passes on equality:** 1 false done in each arm, on the same pair, which both arms failed.
+- **Secondary results are against G**, none significant:
+  - first pass: 15 against 18 (McNemar p = 0.25);
+  - asked when a question was needed: 2/12 against 4/12.
+- **The code differs slightly from what eval_v8 measured.** eval_v8 measured `src/` at `0db915c`.
+  This branch adds main's #19 (the test supervisor), the help text and the two display fixes above.
+  The honest-done diff itself is unchanged.
+
+**Open, and why this stays CONDITIONAL:**
+1. **The human pilot** (`PILOT.md`) measures C1–C11. It has not run.
+2. **Asking.** On both evaluations, G asked for a missing fact less often than direct. V1 does not
+   claim better asking (V1_GATE.md §2 and §4), but a person using it should know.
+3. **A follow-up goal after a correction that changes nothing can still end "done"** on the model's
+   own word (eval_v8, P01-t04). Recommended: such a goal waits for the person. It is not
+   implemented here; it needs its own test and evaluation.
+4. **The owner's decisions from the safety audit:** history (H1–H3, H7), GitHub settings (H9) and
+   egress (E2, E3).
+
 ## ALTER V1 integration candidate, 2026-11-21
 
 **Gate decision: CONDITIONAL.** The candidate retains the `0.3.0a1` alpha version.

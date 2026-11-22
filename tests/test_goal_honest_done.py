@@ -76,3 +76,36 @@ def test_the_outcome_line_is_read_strictly_and_the_last_one_counts():
     assert G.outcome("Outcome: not reached: x\n...\nOutcome: reached") == ("reached", "")
     assert G.outcome("OUTCOME: Not Reached: needs the key names") == ("not reached", "needs the key names")
     assert G.outcome(None) == (None, "")
+
+
+# Found by the live check on a clean install (docs/release/READINESS.md): a cancelled goal showed the
+# agent's "Paused ... Resume to continue" stop note, labelled model-written, and a reason ended "..".
+def test_a_cancelled_goal_never_shows_the_stop_note_as_the_models_words(env):
+    from test_alter_goals import SteeredAdapter
+
+    class CancelledAdapter(SteeredAdapter):
+        def agent_step(self, system, messages, tools, max_tokens=None):
+            step = super(SteeredAdapter, self).agent_step(system, messages, tools, max_tokens)
+            if len(self.requests) == 1:
+                self.gs.add_event("u", self.gid_box[0], "cancel")
+            return step
+
+    ci, ws, p, repo, here = env
+    box = [None]
+    r, _ = runner(ci, here, [W(), RUN(), {"text": "Done."}])
+    adapter = CancelledAdapter(r.gs, box, [W(), RUN(), {"text": "Done."}])
+    r.agent.set_adapter("mock", None, adapter)
+    g = start(r)
+    box[0] = g.id
+    g = r.run(g.id)
+    assert g.status == "cancelled"
+    assert g.payload["checkpoints"][-1]["model_written"] is False
+    shown = G.report(ci, "u", g, r.gs)
+    assert "Resume to continue" not in shown and "(model-written)" not in shown
+
+
+def test_the_reason_never_ends_with_two_full_stops(env):
+    ci, ws, p, repo, here = env
+    r, _ = runner(ci, here, [{"text": "Outcome: not reached: the chart code is not in this workspace."}])
+    g = r.run(start(r, "make the chart blue").id)
+    assert g.payload["reason"].endswith("not in this workspace") and ".." not in g.payload["reason"]

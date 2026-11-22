@@ -133,7 +133,9 @@ alter report --log "one line saying what the task is" --estimate-minutes N
 **Deliberate interruptions,** so that recovery (C4) is measured:
 - If fewer than 5 goals have been paused or interrupted by the 20th finished goal, interrupt the
   next goals mid-run until there are 5.
-- Alternate the two ways: Ctrl-C in the foreground, and closing the terminal on a background goal.
+- Alternate between pressing Ctrl-C on a foreground goal and running `alter pause <goal>`
+  on a background goal. Check `alter goals show <goal>` for the paused status before resuming.
+  Background workers have their own session and continue after the terminal closes.
 - Resume each within the day.
 - Mark them `deliberate_interrupt = yes`. Their wall times are reported apart.
 

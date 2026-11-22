@@ -14,6 +14,10 @@ experiments/eval_v7/assignment.json
 experiments/eval_v7/*.jsonl
 experiments/eval_v7/*_stdout.txt
 experiments/eval_v7/transcripts/
+experiments/eval_v8/assignment.json
+experiments/eval_v8/*.jsonl
+experiments/eval_v8/*_stdout.txt
+experiments/eval_v8/transcripts/
 !src/pcim/data/
 
 # packaging output (pip wheel / setuptools)
