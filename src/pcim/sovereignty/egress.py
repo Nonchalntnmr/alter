@@ -25,6 +25,7 @@ from ..store import Store
 from ..types import MemoryItem, Sensitivity, utcnow
 from .audit import AuditLog
 from .consent import ConsentLedger
+from .content import labels
 
 INSTRUCTION_FLAG = "contains_instructions"
 CONFIRMED_FLAG = "user_confirmed_safe"
@@ -60,7 +61,7 @@ class EgressGuard:
                     continue
                 seen.add(pid)
                 parent = self.store.get_item(pid)
-                if parent is None:
+                if parent is None or parent.user_id != item.user_id:
                     intact = False
                     continue
                 sources.add(parent.source)
@@ -68,6 +69,8 @@ class EgressGuard:
                     sens = parent.sensitivity
                 nxt.extend(parent.parents)
             frontier, depth = nxt, depth + 1
+        if any(pid not in seen for pid in frontier):
+            intact = False  # an unexamined ancestor cannot be presumed consented
         return sources, sens, intact
 
     def check(self, user_id: str, item: MemoryItem, provider: str, grants=None,
@@ -75,8 +78,12 @@ class EgressGuard:
         """`require_current=False` skips only the temporal check: for content a model derived
         from the item while it was current, which still needs every other check now."""
         now = utcnow()
+        if item.user_id != user_id:
+            return False, "wrong-owner"
         if item.sensitivity is Sensitivity.SECRET:
             return False, "secret"
+        if labels(item.content):
+            return False, "secret-content"
         if require_current and not item.is_current(now):
             return False, "not-current"
         if INSTRUCTION_FLAG in item.flags and CONFIRMED_FLAG not in item.flags:

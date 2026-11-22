@@ -3,6 +3,7 @@
 import contextlib
 import json
 import os
+import resource
 import selectors
 import signal
 import socket
@@ -26,6 +27,22 @@ def main() -> int:
         if events.select(timeout=0):
             return 1
         try:
+            # Applied in this single-threaded supervisor before spawning project code.
+            # Limits supplement OS confinement; they do not constitute a sandbox.
+            for kind, value in ((resource.RLIMIT_CORE, 0), (resource.RLIMIT_FSIZE, 64 * 1024 * 1024),
+                                (resource.RLIMIT_NOFILE, 256),
+                                (resource.RLIMIT_CPU, 3600)):
+                _, hard = resource.getrlimit(kind)
+                value = min(value, hard) if hard != resource.RLIM_INFINITY else value
+                resource.setrlimit(kind, (value, value))
+            if sys.platform == "linux":
+                _, hard = resource.getrlimit(resource.RLIMIT_NPROC)
+                processes = min(64, hard) if hard != resource.RLIM_INFINITY else 64
+                resource.setrlimit(resource.RLIMIT_NPROC, (processes, processes))
+                _, hard = resource.getrlimit(resource.RLIMIT_AS)
+                memory = 2 * 1024 * 1024 * 1024
+                memory = min(memory, hard) if hard != resource.RLIM_INFINITY else memory
+                resource.setrlimit(resource.RLIMIT_AS, (memory, memory))
             tests = subprocess.Popen(sys.argv[2:], start_new_session=True)
         except OSError as error:
             caller.sendall(json.dumps({"error": str(error)[:500]}).encode())

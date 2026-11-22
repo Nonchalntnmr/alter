@@ -65,3 +65,33 @@ def scan(root: str | Path, files: list[str], marks: dict[str, str] | None = None
         if labels:
             hits.append({"file": rel, "labels": labels})
     return hits
+
+
+def verify_export(root: str | Path, files: list[str], marks: dict[str, str] | None = None) -> dict:
+    """Fail-closed acceptance gate for explicit export manifests. Never includes values.
+
+    Unlike the historical advisory scan, unreadable/absent/unsafe files fail verification.
+    Exporters must call this on the exact bytes they package, and bind the returned hashes.
+    """
+    import hashlib
+
+    from .governor import PathError, jail
+    from .sovereignty.content import labels
+    marks = markers() if marks is None else marks
+    checked, findings = [], []
+    if not files:
+        return {"accepted": False, "files": [], "findings": [{"reason": "empty-manifest"}]}
+    for rel in dict.fromkeys(files):
+        try:
+            p = jail(root, rel)
+            if p.is_symlink() or not p.is_file():
+                raise OSError()
+            data = p.read_bytes()
+            text = data.decode("utf-8", errors="strict")
+            hits = labels(text, marks)
+            if hits:
+                findings.append({"file": rel, "reason": "private-content", "labels": hits})
+            checked.append({"file": rel, "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)})
+        except (PathError, OSError, UnicodeDecodeError):
+            findings.append({"file": rel, "reason": "unverifiable-file"})
+    return {"accepted": not findings, "files": checked, "findings": findings}

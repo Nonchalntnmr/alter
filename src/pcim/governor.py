@@ -94,6 +94,12 @@ class Governor:
                 jail(spec["root"], args.get("path", ""), for_write=(tool == "write_file"))
             except PathError as e:
                 return Decision("deny", str(e)), ws
+        if tool == "write_file":
+            from .sovereignty.content import ContentBlocked, assert_safe_payload
+            try:
+                assert_safe_payload({k: args[k] for k in ("content", "old", "new") if k in args})
+            except ContentBlocked as e:
+                return Decision("deny", str(e)), ws
         if tool == "run_tests" and not spec.get("run_argv"):
             return Decision("deny", "no test command is configured for this workspace"), ws
         if tool == "write_file" and not spec.get("allow_write"):

@@ -51,6 +51,15 @@ def live_goals(home: Path) -> list[str]:
                 out.append(lock.stem)
                 continue
             fcntl.flock(f, fcntl.LOCK_UN)
+    # Specialist workers use kernel-released project locks next to pcim.db.
+    for lock in sorted(home.glob(".specialist-*.lock")):
+        with open(lock, "a") as f:
+            try:
+                fcntl.flock(f, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            except BlockingIOError:
+                out.append(lock.stem)
+                continue
+            fcntl.flock(f, fcntl.LOCK_UN)
     return out
 
 

@@ -58,7 +58,10 @@ def parse_plan(raw: str) -> list[str] | None:
 def plan_queries(adapter, task: str) -> tuple[list[str] | None, object | None]:
     """(queries, the planner's ModelResponse). queries is None when no usable plan came back."""
     try:
-        resp = adapter.generate(RenderedPrompt(PLANNER_SYSTEM, f"Request:\n{task}"))
+        from .sovereignty.content import assert_safe_payload
+        prompt = RenderedPrompt(PLANNER_SYSTEM, f"Request:\n{task}")
+        assert_safe_payload(prompt)
+        resp = adapter.generate(prompt)
     except ProviderError:
         return None, None
     return parse_plan(resp.text), resp

@@ -188,7 +188,8 @@ class Agent:
 
     def open_session(self, user_id: str, project_id: str) -> str | None:
         rows = self.store.query("SELECT id, updated_at FROM sessions WHERE project_id=? AND user_id=? AND status='open' "
-                                "ORDER BY updated_at DESC LIMIT 1", (project_id, user_id))
+                                "ORDER BY updated_at DESC", (project_id, user_id))
+        rows = [r for r in rows if not self._load(user_id, project_id, r["id"]).get("isolated")]
         if not rows:
             return None
         if (utcnow() - dt.datetime.fromisoformat(rows[0]["updated_at"])).total_seconds() > IDLE_SECONDS:
@@ -226,8 +227,8 @@ class Agent:
         return self.store.query(q, (user_id, *self._CONTEXT_EVENTS))[0]["s"] or 0
 
     def _new_session(self, user_id: str, project_id: str, provider: str, model: str | None,
-                     directives: str | None = None) -> tuple[str, dict]:
-        prev = self.open_session(user_id, project_id)
+                     directives: str | None = None, *, isolated: bool = False) -> tuple[str, dict]:
+        prev = None if isolated else self.open_session(user_id, project_id)
         if prev:
             self.close_session(user_id, project_id, prev)
         sid, now = new_id("ses"), utcnow().isoformat()
@@ -237,7 +238,7 @@ class Agent:
                             "\n".join(f"- {_clean(p.content)}" for p in prefs)) if prefs else "")
         if directives:
             system += "\n\n" + directives
-        st = {"provider": provider, "model": model, "system": system, "messages": [], "pending": None,
+        st = {"isolated": isolated, "provider": provider, "model": model, "system": system, "messages": [], "pending": None,
               "display": [], "cost_usd": 0.0, "cost_unknown": False, "reflection": None, "briefing_sent": False,
               "system_memory_items": [p.id for p in prefs], "context_epoch": self._context_epoch(user_id)}
         self.store.execute("INSERT INTO sessions VALUES (?,?,?,?,?,?,?,?,?)",
@@ -247,9 +248,18 @@ class Agent:
                           collab_prefs=len(prefs))
         return sid, st
 
+    def create_session(self, user_id: str, project_id: str, provider: str, model: str | None = None,
+                       *, isolated: bool = False, directives: str | None = None) -> str:
+        """Persist an attributable session identity before its first consequential action."""
+        self.ws.require_provider(user_id, project_id, provider)
+        if self.ws.is_halted(user_id):
+            raise RuntimeError("execution is halted")
+        return self._new_session(user_id, project_id, provider, model, directives, isolated=isolated)[0]
+
     # ------------------------------------------------------------------ the loop
     def send(self, user_id: str, project_id: str, text: str, provider: str = "mock", model: str | None = None,
-             new_session: bool = False, directives: str | None = None) -> AgentTurn:
+             new_session: bool = False, directives: str | None = None, *,
+             session_id: str | None = None, isolated: bool = False) -> AgentTurn:
         """`directives` are appended to the system prompt of a session this call creates; an
         existing session keeps the instructions it began with."""
         if not text.strip():
@@ -257,15 +267,23 @@ class Agent:
         vendor = self.ws.require_provider(user_id, project_id, provider)  # before anything is read or sent
         if self.ws.is_halted(user_id):  # the emergency stop covers model calls, not only tools
             raise RuntimeError("execution is halted; resume it before sending")
-        sid = None if new_session else self.open_session(user_id, project_id)
+        if session_id and new_session:
+            raise ValueError("session_id and new_session are mutually exclusive")
+        sid = session_id or (None if new_session or isolated else self.open_session(user_id, project_id))
         if sid:
             st = self._load(user_id, project_id, sid)
+            if st["_row"]["status"] != "open":
+                raise ValueError("session is closed")
+            if session_id and (st["provider"] != provider or st["model"] != model):
+                raise ValueError("target session model differs")
             if st["provider"] != provider or st["model"] != model:
                 sid = None  # a different model starts a new session; thinking blocks are model-bound
             elif st.get("context_epoch", 0) != self._context_epoch(user_id) and not st["pending"]:
+                if session_id:
+                    raise ValueError("target session context changed; explicit reconciliation required")
                 sid = None  # consent or memory changed since this session began
         if not sid:
-            sid, st = self._new_session(user_id, project_id, provider, model, directives)
+            sid, st = self._new_session(user_id, project_id, provider, model, directives, isolated=isolated)
             st = self._load(user_id, project_id, sid)
         with self._lock(sid):
             st = self._load(user_id, project_id, sid)  # again under the lock: a concurrent turn may have advanced it
@@ -391,7 +409,10 @@ class Agent:
             if why:
                 return self._stop(user_id, project_id, sid, st, touched, turn, "stopped", why, _STOP_NOTES[why])
             try:
-                step = ad.agent_step(st["system"], st["messages"], self._tools(user_id, project_id))
+                from .sovereignty.content import assert_safe_payload
+                tools = self._tools(user_id, project_id)
+                assert_safe_payload({"system": st["system"], "messages": st["messages"], "tools": tools})
+                step = ad.agent_step(st["system"], st["messages"], tools)
             except Exception as e:  # recorded and re-raised, never swallowed; the transcript so far is saved
                 self.audit.append(user_id, "model.error", project=project_id, session=sid, provider=st["provider"],
                                   error=type(e).__name__)

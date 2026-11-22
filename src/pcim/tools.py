@@ -20,11 +20,13 @@ import socket
 import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
 
 from .governor import is_secret, jail
+from .sovereignty.content import assert_safe_payload, labels, public_payload
 
 MAX_READ = 200_000
 MAX_READ_FILE = 5_000_000  # a file read in parts may be this large; each part is at most READ_CHARS
@@ -175,6 +177,8 @@ def _search(root: Path, pattern: str, glob: str, exclude=()) -> dict:
             text = p.read_text(errors="strict")
         except (UnicodeDecodeError, OSError):
             continue
+        if labels(text):
+            continue  # scan before matching/truncating, so fragments cannot leak a secret
         for n, line in enumerate(text.splitlines(), 1):
             if rx.search(line[:2000]):
                 matches.append(f"{rel}:{n}: {line.strip()[:300]}")
@@ -256,6 +260,7 @@ class Executor:
             if not p.is_file():
                 raise ToolError(f"{args['path']} does not exist")
             data = p.read_bytes()
+            assert_safe_payload(data.decode("utf-8", errors="replace"))
             if b"\x00" in data[:8192]:
                 raise ToolError(f"{args['path']} is binary")
             return read_part(args["path"], data, int(args.get("offset") or 1), int(args["limit"]) if args.get("limit") else None)
@@ -288,7 +293,7 @@ class Executor:
             r = _git(root, "status", "--porcelain=v1", "-b", "--ignore-submodules=dirty")
             if r.returncode != 0:
                 raise ToolError(r.stderr.strip()[:500] or "not a git repository")
-            return {"status": r.stdout[:20_000]}
+            return public_payload({"status": r.stdout[:20_000]})
         if tool == "write_file":
             p = jail(root, args["path"], for_write=True)
             before = p.read_bytes() if p.exists() else None
@@ -308,6 +313,8 @@ class Executor:
                 content = text.replace(args["old"], args["new"], 1)
             if len(content.encode()) > MAX_WRITE:
                 raise ToolError("content too large")
+            assert_safe_payload(content)
+            assert_safe_payload(text)  # undo backups also become tool results
             p.parent.mkdir(parents=True, exist_ok=True)
             # A new temp file, never an existing name: a fixed name could already be in the
             # workspace as a symlink (a cloned repo can carry one) and take the write outside it.
@@ -331,17 +338,27 @@ class Executor:
         raise ToolError(f"{tool} is not executed by the executor")
 
     def _run_tests(self, task_id: str, root: Path, spec: dict, test_lock_fd: int | None) -> dict:
-        argv, timeout = spec["run_argv"], int(spec.get("run_timeout_s", 300))
+        from .sandbox import SandboxUnavailable, confined_command
+        try:
+            with confined_command(root, spec["run_argv"]) as (argv, confinement):
+                result = self._run_confined_tests(task_id, root, spec, test_lock_fd, argv)
+                result["confinement"] = confinement
+                return result
+        except SandboxUnavailable as error:
+            raise ToolError(str(error)) from None
+
+    def _run_confined_tests(self, task_id: str, root: Path, spec: dict, test_lock_fd: int | None, argv: list[str]) -> dict:
+        timeout = min(max(int(spec.get("run_timeout_s", 300)), 1), 3600)
         t0 = time.monotonic()
         worker_script = Path(__file__).with_name("_test_worker.py").resolve()
         caller, worker = socket.socketpair()
-        with caller, worker:
+        with caller, worker, tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as errors:
             # The supervisor inherits the project lock, which stays held until the test group exits.
             # Only the supervisor sees these descriptors. The approved command gets the usual environment.
             fds = (worker.fileno(),) if test_lock_fd is None else (worker.fileno(), test_lock_fd)
             command = [sys.executable, "-I", str(worker_script), str(worker.fileno()), *argv]
             proc = subprocess.Popen(command, cwd=root, env={**scrubbed_env(), "PYTHONDONTWRITEBYTECODE": "1"},
-                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                    stdout=output, stderr=errors,
                                     pass_fds=fds, start_new_session=True)
             worker.close()
             with self._lock:
@@ -350,11 +367,11 @@ class Executor:
             if cancelled_early:  # cancel arrived between "running" and Popen; outside the lock
                 self.cancel(task_id)
             try:
-                out, err = proc.communicate(timeout=timeout)
+                proc.communicate(timeout=timeout)
                 timed_out = False
             except subprocess.TimeoutExpired:
                 self.cancel(task_id)
-                out, err = proc.communicate()
+                proc.communicate()
                 timed_out = True
             finally:
                 with self._lock:
@@ -363,12 +380,20 @@ class Executor:
                 raise Cancelled("cancelled while running")
             with caller.makefile("rb") as response:
                 result = json.loads(response.read() or "{}")
+            output.seek(0)
+            errors.seek(0)
+            # The supervisor caps each output file at 64 MiB via RLIMIT_FSIZE.
+            out = output.read(64 * 1024 * 1024).decode("utf-8", errors="replace")
+            err = errors.read(64 * 1024 * 1024).decode("utf-8", errors="replace")
         if "error" in result:
             raise ToolError(result["error"])
         if not timed_out and "exit_code" not in result:
             raise ToolError("the test supervisor exited without a result")
-        return {"argv": argv, "exit_code": result.get("exit_code", proc.returncode), "timed_out": timed_out,
-                "duration_s": round(time.monotonic() - t0, 2), "stdout_tail": out[-6000:], "stderr_tail": err[-3000:]}
+        # Inspect complete bounded output before taking tails; never expose a secret fragment.
+        safe = public_payload({"stdout": out, "stderr": err})
+        return {"argv": public_payload(spec["run_argv"]), "exit_code": result.get("exit_code", proc.returncode),
+                "timed_out": timed_out, "duration_s": round(time.monotonic() - t0, 2),
+                "stdout_tail": safe["stdout"][-6000:], "stderr_tail": safe["stderr"][-3000:]}
 
 
 if __name__ == "__main__":  # the search child (see _search_in_child)
