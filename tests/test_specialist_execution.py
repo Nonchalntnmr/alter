@@ -4,7 +4,6 @@ import copy
 import json
 import os
 from pathlib import Path
-import sys
 import threading
 
 import pytest
@@ -74,7 +73,7 @@ def env(tmp_path, monkeypatch, request):
     root = tmp_path / 'project'
     root.mkdir()
     check = "from pathlib import Path; exec(Path('calc.py').read_text()); assert add(2,3)==5; assert Path('README.txt').read_text()=='Use add'; import runpy; runpy.run_path('checks.py')"
-    ws.authorize_workspace('u', p.id, str(root), run_argv=[sys.executable, '-c', check], allow_write=True)
+    ws.authorize_workspace('u', p.id, str(root), run_argv=['python3', '-c', check], allow_write=True)
     ws.set_mode('u', 'autonomous')
     ws.grant_autonomy('u', p.id, ['write_file', 'run_tests'], max_actions=30)
     q = TaskQueue(ws, Governor(ws))
