@@ -10,6 +10,10 @@ data/
 *.db-shm
 *.key
 experiments/*/runs/
+experiments/eval_v7/assignment.json
+experiments/eval_v7/*.jsonl
+experiments/eval_v7/*_stdout.txt
+experiments/eval_v7/transcripts/
 !src/pcim/data/
 
 # packaging output (pip wheel / setuptools)

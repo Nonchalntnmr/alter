@@ -95,6 +95,10 @@ class GoalBusy(GoalError):
     pass
 
 
+class GoalUnreadable(GoalError):
+    """The goal's sealed record cannot be opened (damaged ciphertext or wrapped key, or not JSON)."""
+
+
 @dataclasses.dataclass
 class Goal:
     id: str
@@ -118,13 +122,22 @@ class GoalStore:
         for stmt in SCHEMA:
             self.store.execute(stmt)
         self.dir = Path(self.store.path).parent / "goals" if self.store.path != ":memory:" else None
+        self.unreadable: list[str] = []  # ids the last list() could not open: damaged records, never shown as goals
 
     def _key(self, uid: str, pid: str) -> str:
         from .workspace import Workspace
         return Workspace(self.ci).project_key(uid, pid)
 
     def _goal(self, row) -> Goal:
-        payload = self.store.open_json(self._key(row["user_id"], row["project_id"]), row["payload_ct"], row["id"])
+        from cryptography.exceptions import InvalidTag
+        key = self._key(row["user_id"], row["project_id"])  # KeyError: its project, and key, were deleted
+        try:
+            payload = self.store.open_json(key, row["payload_ct"], row["id"])
+        except (InvalidTag, ValueError, TypeError) as e:
+            # One damaged row must not take every goal command down with it: it is named, and can be
+            # forgotten, while the others keep working.
+            raise GoalUnreadable(f"goal {row['id']} cannot be read: its record is damaged ({type(e).__name__}). "
+                                 f"`alter goals forget {row['id']}` removes it; a backup of pcim.db restores it") from None
         return Goal(row["id"], row["user_id"], row["project_id"], row["created_at"], row["updated_at"], row["status"],
                     row["worker_pid"], payload)
 
@@ -152,7 +165,13 @@ class GoalStore:
     def resolve(self, uid: str, ref: str, project_id: str | None = None) -> str:
         """An exact id, a unique prefix ("goal_ebfa"), or a unique suffix of at least 4 characters."""
         from .intent_compiler import resolve_id
-        ids = [g.id for g in self.list(uid, project_id, limit=500)]
+        # ids straight from the table: a goal whose record is damaged can still be named (to forget it)
+        if project_id:
+            rows = self.store.query("SELECT id FROM goals WHERE user_id=? AND project_id=? ORDER BY created_at DESC "
+                                    "LIMIT 500", (uid, project_id))
+        else:
+            rows = self.store.query("SELECT id FROM goals WHERE user_id=? ORDER BY created_at DESC LIMIT 500", (uid,))
+        ids = [r["id"] for r in rows]
         pre = [i for i in ids if len(ref) >= 6 and i.startswith(ref)]
         if ref not in ids and len(pre) > 1:
             raise ValueError(f"{ref} matches {len(pre)} goals; give more of the id")
@@ -166,12 +185,14 @@ class GoalStore:
                                     (uid, project_id, limit))
         else:
             rows = self.store.query("SELECT * FROM goals WHERE user_id=? ORDER BY created_at DESC LIMIT ?", (uid, limit))
-        out = []
+        out, self.unreadable = [], []
         for r in rows:
             try:
                 out.append(self._goal(r))
             except KeyError:  # its project was deleted, and its key with it: nothing left to show
                 continue
+            except GoalUnreadable:
+                self.unreadable.append(r["id"])
         return out
 
     def save(self, g: Goal) -> None:
@@ -184,14 +205,16 @@ class GoalStore:
             raise GoalError(f"goal {g.id} no longer exists (it was forgotten)")
 
     def delete(self, uid: str, gid: str) -> None:
-        if self.is_live(gid):
-            raise GoalError(f"goal {gid} is running; pause or cancel it first (alter pause {gid})")
+        try:
+            with self.worker_lock(gid):  # held while deleting: no worker can start in between
+                self.store.execute("DELETE FROM goal_events WHERE goal_id=? AND user_id=?", (gid, uid))
+                self.store.execute("DELETE FROM goals WHERE id=? AND user_id=?", (gid, uid))
+                self.store.flush_deleted()
+        except GoalBusy:
+            raise GoalError(f"goal {gid} is running; pause or cancel it first (alter pause {gid})") from None
         for suffix in (".lock", ".log"):
             if self.dir is not None:
                 (self.dir / f"{gid}{suffix}").unlink(missing_ok=True)
-        self.store.execute("DELETE FROM goal_events WHERE goal_id=? AND user_id=?", (gid, uid))
-        self.store.execute("DELETE FROM goals WHERE id=? AND user_id=?", (gid, uid))
-        self.store.flush_deleted()
         self.ci.audit.append(uid, "goal.forget", goal=gid)
 
     # ---- events: how a person talks to a goal while it runs
@@ -215,8 +238,15 @@ class GoalStore:
         return [{"id": r["id"], "kind": r["kind"], "at": r["at"],
                  "text": (self.store.open_json(key, r["payload_ct"], f"{gid}:event") or {}).get("text", "")} for r in rows]
 
-    def has_pending_event(self, gid: str) -> bool:
-        return bool(self.store.query("SELECT 1 FROM goal_events WHERE goal_id=? AND consumed_at IS NULL LIMIT 1", (gid,)))
+    def last_event_id(self, gid: str) -> int:
+        """The newest event of a goal, consumed or not: a resume carries it, so a pause given after the
+        resume was asked for still wins over a worker that starts late."""
+        r = self.store.query("SELECT max(id) FROM goal_events WHERE goal_id=?", (gid,))
+        return int(r[0][0] or 0)
+
+    def has_pending_event(self, gid: str, kind: str | None = None) -> bool:
+        return bool(self.store.query("SELECT 1 FROM goal_events WHERE goal_id=? AND consumed_at IS NULL "
+                                     "AND (? IS NULL OR kind=?) LIMIT 1", (gid, kind, kind)))
 
     def consume(self, ids: list[int]) -> None:
         now = utcnow().isoformat()
@@ -348,26 +378,45 @@ class GoalRunner:
             if not self.here.vendors - {"mock"}:  # never run a goal on the test double without being asked to
                 raise GoalError("no model may see this project yet: alter permissions provider claude-cli on")
             provider, model = px._model(self.here.vendors - {"mock"}, None, None)
-        # One goal at a time per project folder: the agent keeps one open session per project, and a
-        # second goal would close the first one's (with any approval it waits on).
-        for other in self.gs.list(self.uid, self.here.project_id, limit=50):
-            if other.status == "running" and self.gs.is_live(other.id):
-                raise GoalError(f"goal {other.id} is running in this project; pause or cancel it first")
-        open_sid = self.agent.open_session(self.uid, self.here.project_id)
-        if open_sid and self.agent._load(self.uid, self.here.project_id, open_sid).get("pending"):
-            raise GoalError("a conversation in this project waits on your approval (alter tasks); resolve it first")
-        g = self.gs.create(self.uid, self.here.project_id, objective, **limits)
-        g.payload.update(provider=provider, model=model, use_github=use_github, use_vault=use_vault)
-        self._brief(g, exclude=g.id)
-        return g
-
-    def _brief(self, g: Goal, exclude: str | None = None) -> str:
-        """A fresh brief, under the person's current settings and the goal's vendor; recorded and disclosed."""
+        blocker = self._project_blocker(None)
+        if blocker:
+            raise GoalError(blocker)
         from . import thirdeye
         from .registry import vendor_of
-        brief = thirdeye.gather(self.ci, self.uid, self.here, g.objective, use_github=g.payload.get("use_github"),
-                                use_vault=g.payload.get("use_vault"), vendor=vendor_of(g.payload["provider"]),
-                                exclude_goal=exclude or g.id)
+        requested_at = utcnow().isoformat()  # the person's wait starts here, before the brief is gathered
+        # gathered before the goal exists: it cannot list itself, and a failure leaves no half-made goal
+        brief = thirdeye.gather(self.ci, self.uid, self.here, objective, use_github=use_github, use_vault=use_vault,
+                                vendor=vendor_of(provider))
+        g = self.gs.create(self.uid, self.here.project_id, objective, **limits)
+        g.payload.update(provider=provider, model=model, use_github=use_github, use_vault=use_vault,
+                         requested_at=requested_at)
+        self._set_context(g, brief)
+        return g
+
+    def _project_blocker(self, g: Goal | None) -> str | None:
+        """One goal at a time per project folder: the agent keeps one open session per project, and a new
+        session for one goal would close another's, with any approval it waits on."""
+        import datetime as dt
+        recent = (utcnow() - dt.timedelta(minutes=5)).isoformat()
+        for other in self.gs.list(self.uid, self.here.project_id, limit=50):
+            if g is not None and other.id == g.id:
+                continue
+            if (other.status == "running" and self.gs.is_live(other.id)) or (other.status == "queued" and
+                                                                             other.created_at >= recent):
+                return f"goal {other.id} is {other.status} in this project; pause or cancel it first"
+            if other.status == "waiting_approval" and pending_tasks(self.ci, self.uid, other):
+                return f"goal {other.id} waits on your approval in this project (alter approve / alter deny)"
+        for gid in self.gs.unreadable:  # a damaged record whose worker is still alive: wait for it
+            if self.gs.is_live(gid):
+                return f"goal {gid} is running in this project, but its record cannot be read; cancel it first"
+        open_sid = self.agent.open_session(self.uid, self.here.project_id)
+        mine = set(g.payload["sessions"]) if g is not None else set()
+        if open_sid and open_sid not in mine and self.agent._load(self.uid, self.here.project_id, open_sid).get("pending"):
+            return "a conversation in this project waits on your approval (alter tasks); resolve it first"
+        return None
+
+    def _set_context(self, g: Goal, brief) -> str:
+        from . import thirdeye
         g.payload["context"] = {"text": brief.for_model(), "cites": brief.cites(), "withheld": brief.withheld,
                                 "remembered": sum(e.kind == "remembered" for e in brief.evidence),
                                 "sourced": sum(e.kind == "sourced" for e in brief.evidence)}
@@ -375,9 +424,19 @@ class GoalRunner:
         thirdeye.disclose(self.ci, self.uid, self.here.project_id, brief, g.id)
         return g.payload["context"]["text"]
 
+    def _brief(self, g: Goal) -> str:
+        """A fresh brief, under the person's current settings and the goal's vendor; recorded and disclosed."""
+        from . import thirdeye
+        from .registry import vendor_of
+        brief = thirdeye.gather(self.ci, self.uid, self.here, g.objective, use_github=g.payload.get("use_github"),
+                                use_vault=g.payload.get("use_vault"), vendor=vendor_of(g.payload["provider"]),
+                                exclude_goal=g.id)
+        return self._set_context(g, brief)
+
     # ---- messages
     def _first_message(self, g: Goal) -> str:
-        return f"{g.payload['context']['text']}\n\nGoal: {g.objective}\n\n{HOW}"
+        text = g.payload["context"]["text"] if g.payload.get("context") else self._brief(g)
+        return f"{text}\n\nGoal: {g.objective}\n\n{HOW}"
 
     def _resume_message(self, g: Goal) -> str:
         v = verify(self.ci, self.uid, g.project_id, g.payload["sessions"])
@@ -387,11 +446,13 @@ class GoalRunner:
                 f"Goal: {g.objective}\n\n{HOW}")
 
     # ---- the loop
-    def run(self, gid: str, window_s: int | None = None, first_turn=None, resume: bool = False) -> Goal:
-        """Work on a goal. A paused goal runs only when `resume` is True: a pause the person gave must
-        never be undone by a worker that happened to start late."""
+    def run(self, gid: str, window_s: int | None = None, first_turn=None, resume: bool = False,
+            resume_after: int | None = None) -> Goal:
+        """Work on a goal. A paused goal runs only when `resume` is True, and not when a pause newer than
+        the resume request (`resume_after`, an event id) parked it: a pause the person gave must never
+        be undone by a worker that happened to start late."""
         with self.gs.worker_lock(gid, wait_s=2.0):
-            return self._run_locked(gid, window_s, first_turn, resume)
+            return self._run_locked(gid, window_s, first_turn, resume, resume_after)
 
     def _limits_exhausted(self, g: Goal) -> str | None:
         if g.payload["turns"] >= g.payload["max_turns"]:
@@ -401,21 +462,26 @@ class GoalRunner:
             return f"cost limit (${g.payload['max_cost_usd']:.2f}) reached"
         return None
 
-    def _run_locked(self, gid: str, window_s: int | None, first_turn, resume: bool) -> Goal:
+    def _run_locked(self, gid: str, window_s: int | None, first_turn, resume: bool,
+                    resume_after: int | None = None) -> Goal:
         import dataclasses as dc
         import time
         g = self.gs.get(self.uid, gid)
         incoming = g.status
         if incoming in FINAL:
             return g
-        if first_turn is None and incoming == "paused" and not resume:
+        if first_turn is None and incoming == "paused" and (
+                not resume or (resume_after is not None and g.payload.get("pause_event", 0) > resume_after)):
             return g
         if first_turn is None and incoming == "waiting_approval" and pending_tasks(self.ci, self.uid, g):
             return g  # nothing to do until the person approves or refuses
         awaiting_answer = incoming == "waiting_answer" and first_turn is None
+        if incoming == "running" and first_turn is None:  # this process holds the lock: the last worker died mid-run
+            g.payload.setdefault("interruptions", []).append(utcnow().isoformat())
         g.status, g.worker_pid, g.payload["reason"] = "running", os.getpid(), None
         self.gs.save(g)
         self.agent.pause_check = lambda: self.gs.has_pending_event(gid)
+        self.agent.cancel_check = lambda: self.gs.has_pending_event(gid, "cancel")
         base_limits = self.agent.limits
         deadline = time.monotonic() + (window_s or g.payload["window_s"])
         message = None
@@ -428,7 +494,11 @@ class GoalRunner:
                         self.gs.consume([e["id"] for e in ev])
                         return self._cancel(g)
                     if any(e["kind"] == "pause" for e in ev):
-                        self.gs.consume([e["id"] for e in ev if e["kind"] == "pause"])
+                        pauses = [e["id"] for e in ev if e["kind"] == "pause"]
+                        self.gs.consume(pauses)
+                        g.payload["pause_event"] = max(pauses)
+                        if awaiting_answer:  # it was not running: it still waits for the answer
+                            return self._park(g, "waiting_answer", "waiting for your answer")
                         return self._park(g, "paused", "paused by you")
                     steers = [e for e in ev if e["kind"] == "steer"]
                     if awaiting_answer and not steers:
@@ -452,7 +522,10 @@ class GoalRunner:
                     same = (sid is not None and not g.payload.pop("force_new", False)
                             and self.agent.would_continue(self.uid, g.project_id, sid, g.payload["provider"],
                                                           g.payload["model"]))
-                    if not same:
+                    if not same:  # a new session would close any other open one: only if none is in use
+                        blocker = self._project_blocker(g)
+                        if blocker:
+                            return self._park(g, "paused", blocker)
                         text = self._first_message(g) if not sid else self._resume_message(g)
                         if message:
                             text += "\n\n" + message
@@ -469,7 +542,8 @@ class GoalRunner:
                         return g
                 else:
                     turn, pending_turn = pending_turn, None
-                g.payload["turns"] += 1
+                if (turn.usage or {}).get("steps", 0):  # only a turn with a model step counts against the limit
+                    g.payload["turns"] += 1
                 self._checkpoint(g, turn)
                 nxt = self._after(g, turn)
                 if nxt == "stop":
@@ -480,6 +554,7 @@ class GoalRunner:
             return self._park(g, "paused", "interrupted by you (Ctrl-C); resume to continue")
         finally:
             self.agent.pause_check = None
+            self.agent.cancel_check = None
             self.agent.limits = base_limits
             with contextlib.suppress(KeyError, GoalError):
                 cur = self.gs.get(self.uid, gid)
@@ -561,8 +636,9 @@ class GoalRunner:
                 self._park(g, "waiting_answer", "ALTER asked you a question")
                 return "stop"
             refused = [r for r in v["refused"] if r["tool"] == "write_file"]
-            if refused:  # the change was refused: that is not "done"
-                self._finish(g, "stopped", f"you refused {len(refused)} change(s); no file was changed")
+            if refused:  # the change did not happen: that is not "done"
+                self._finish(g, "stopped", f"{len(refused)} change(s) were refused, not allowed or expired; "
+                                           "no file was changed")
                 return "stop"
             self._finish(g, "done", "answered; no file was changed")
             return "stop"
@@ -583,18 +659,31 @@ class GoalRunner:
 
     def _cancel(self, g: Goal) -> Goal:
         """Cancel the goal, every action it still waits on, and its conversation."""
-        for t in pending_tasks(self.ci, self.uid, g):
-            with contextlib.suppress(Exception):
-                self.agent.cancel(self.uid, t["id"])
-        if g.payload["sessions"]:
+        pend = pending_tasks(self.ci, self.uid, g)
+        if g.payload["sessions"]:  # first: a closed session is never resumed by a resolution
             with contextlib.suppress(Exception):
                 self.agent.close_session(self.uid, g.project_id, g.payload["sessions"][-1])
+        for t in pend:  # the queue directly: Agent.cancel would resume the model loop
+            with contextlib.suppress(Exception):
+                self.agent.queue.cancel(self.uid, t["id"])
         return self._finish(g, "cancelled", "cancelled by you")
 
     def _finish(self, g: Goal, status: str, reason: str) -> Goal:
         g.status, g.payload["reason"] = status, reason
         if g.payload["sessions"] and g.payload["verification"] is None:
             g.payload["verification"] = verify(self.ci, self.uid, g.project_id, g.payload["sessions"])
+        files = (g.payload.get("verification") or {}).get("files") or []
+        if files:  # personal identifiers the model may have copied from its context into a file
+            from .identity_guard import scan
+            try:
+                hits = scan(self.here.root, files)
+            except Exception as e:  # noqa: BLE001 - the check must never lose the goal's outcome
+                hits = [{"file": "(check failed)", "labels": [type(e).__name__]}]
+            g.payload["identifiers"] = hits
+            if hits:
+                g.payload["reason"] = (f"{reason}; WARNING: {len(hits)} file(s) hold your personal identifiers "
+                                       f"({', '.join(sorted({lb for h in hits for lb in h['labels']}))}): review "
+                                       "them before you commit or push")
         g.payload["memory_item"] = record_outcome(self.ci, self.uid, g, self.here.name)
         self.gs.save(g)
         self.ci.audit.append(self.uid, "goal.finish", goal=g.id, status=status,
@@ -607,7 +696,7 @@ class GoalRunner:
         """Apply pause and cancel now, when no worker holds the goal. Never calls a model; steers wait for
         the next run. Returns None when a worker holds the goal (it reads the events itself)."""
         try:
-            with self.gs.worker_lock(gid):
+            with self.gs.worker_lock(gid, wait_s=2.0):
                 g = self.gs.get(self.uid, gid)
                 if g.status in FINAL:
                     return g
@@ -615,8 +704,13 @@ class GoalRunner:
                 if any(e["kind"] == "cancel" for e in ev):
                     self.gs.consume([e["id"] for e in ev if e["kind"] in ("cancel", "pause")])
                     return self._cancel(g)
-                if any(e["kind"] == "pause" for e in ev):
-                    self.gs.consume([e["id"] for e in ev if e["kind"] == "pause"])
+                pauses = [e["id"] for e in ev if e["kind"] == "pause"]
+                if pauses:
+                    self.gs.consume(pauses)
+                    g.payload["pause_event"] = max(pauses)
+                    if g.status in ("waiting_answer", "waiting_approval"):  # not running: it keeps waiting
+                        self.gs.save(g)
+                        return g
                     return self._park(g, "paused", "paused by you")
                 return g
         except GoalBusy:
@@ -627,7 +721,8 @@ class GoalRunner:
                         task_ids: list[str] | None = None) -> Goal:
         """Approve or refuse what a goal waits on: the named tasks only, or all of them. The turn this
         resumes runs under the goal's lock and pause check, like any other turn."""
-        with self.gs.worker_lock(gid):
+        import dataclasses as dc
+        with self.gs.worker_lock(gid, wait_s=2.0):
             g = self.gs.get(self.uid, gid)
             if g.status != "waiting_approval":
                 raise GoalError(f"goal {gid} is {self.gs.shown_status(g)}, not waiting on an approval")
@@ -641,9 +736,14 @@ class GoalRunner:
                 return self._run_locked(gid, window_s, None, True)
             if approve:
                 why = self._limits_exhausted(g)
-                if why:
-                    raise GoalError(f"goal {gid}: {why}; start a new goal to go further")
+                if why:  # approving would start another model turn past the limit: stop cleanly instead
+                    return self._stop_at_limit(g, why)
+            g.status, g.worker_pid = "running", os.getpid()  # what the person sees while the turn runs
+            self.gs.save(g)
+            base = self.agent.limits
+            self.agent.limits = dc.replace(base, max_seconds=max(30.0, min(base.max_seconds, g.payload["window_s"])))
             self.agent.pause_check = lambda: self.gs.has_pending_event(gid)
+            self.agent.cancel_check = lambda: self.gs.has_pending_event(gid, "cancel")
             turn = None
             try:
                 for t in pend:
@@ -652,9 +752,25 @@ class GoalRunner:
                         turn = out
             finally:
                 self.agent.pause_check = None
-            if turn is None:  # other actions of that step still wait on the person
-                return self.gs.get(self.uid, gid)
+                self.agent.cancel_check = None
+                self.agent.limits = base
+            if turn is None or (turn.status == "awaiting_approval" and not (turn.usage or {}).get("steps")):
+                # part of the step is resolved and the rest still waits: no model step ran, so no turn
+                g = self.gs.get(self.uid, gid)
+                left = pending_tasks(self.ci, self.uid, g)
+                g.worker_pid = None
+                return self._park(g, "waiting_approval", f"{len(left)} action(s) wait for your approval")
             return self._run_locked(gid, window_s, turn, True)
+
+    def _stop_at_limit(self, g: Goal, why: str) -> Goal:
+        pend = pending_tasks(self.ci, self.uid, g)
+        if g.payload["sessions"]:
+            with contextlib.suppress(Exception):
+                self.agent.close_session(self.uid, g.project_id, g.payload["sessions"][-1])
+        for t in pend:
+            with contextlib.suppress(Exception):
+                self.agent.queue.cancel(self.uid, t["id"])
+        return self._finish(g, "stopped", f"{why}; the {len(pend)} action(s) it waited on were cancelled, not run")
 
 
 def pending_tasks(ci, uid: str, g: Goal) -> list[dict]:
@@ -736,6 +852,8 @@ def report(ci, uid: str, g: Goal, gs: GoalStore | None = None) -> str:
         if last:
             out.append("  last message from ALTER (model-written):")
             out += ["    " + x for x in last.splitlines()[-12:]]
+    for h in g.payload.get("identifiers") or []:
+        out.append(f"  WARNING: {h['file']} holds your {', '.join(h['labels'])}: review before you commit or push")
     if g.payload.get("memory_item"):
         out.append(f"  outcome recorded in memory: {g.payload['memory_item']}")
     return terminal_safe("\n".join(out))
@@ -743,6 +861,7 @@ def report(ci, uid: str, g: Goal, gs: GoalStore | None = None) -> str:
 
 # --------------------------------------------------------------------------- background worker
 def spawn_worker(ci, gid: str, root: str, window_s: int, resume: bool = False) -> int:
+    token = GoalStore(ci).last_event_id(gid) if resume else None
     """A detached worker. `-P` and a working directory outside the project: `python -m` would
     otherwise import a project file named like a module it uses (argparse.py, json.py) before
     anything was approved. Its log holds ids and statuses only, never model text."""
@@ -750,7 +869,7 @@ def spawn_worker(ci, gid: str, root: str, window_s: int, resume: bool = False) -
     with open(lock.with_suffix(".log"), "a") as f:
         os.chmod(f.name, 0o600)
         p = subprocess.Popen([sys.executable, "-P", "-m", "pcim.goals", "run", gid, "--window", str(int(window_s)),
-                              *(["--resume"] if resume else [])],
+                              *(["--resume-after", str(token)] if resume else [])],
                              cwd=str(lock.parent), stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                              start_new_session=True, env=dict(os.environ))
     return p.pid
@@ -763,13 +882,13 @@ def _worker_main(argv: list[str]) -> int:
     ap.add_argument("cmd", choices=["run"])
     ap.add_argument("goal")
     ap.add_argument("--window", type=int, default=None)
-    ap.add_argument("--resume", action="store_true")
+    ap.add_argument("--resume-after", type=int, default=None, help="resume, unless a newer pause parked it")
     a = ap.parse_args(argv)
     ci, uid = _open()
     try:
         g = GoalStore(ci).get(uid, a.goal)
         r = GoalRunner(ci, uid, here_for(ci, uid, g.project_id), out=lambda s: None)
-        g = r.run(a.goal, a.window, resume=a.resume)
+        g = r.run(a.goal, a.window, resume=a.resume_after is not None, resume_after=a.resume_after)
     except (GoalError, KeyError) as e:
         print(json.dumps({"goal": a.goal, "error": type(e).__name__}), flush=True)
         return 3

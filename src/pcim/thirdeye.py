@@ -61,6 +61,17 @@ class Brief:
     evidence: list[Evidence]
     withheld: list[str]
 
+    def __post_init__(self) -> None:
+        """The credential tripwire `ci ask` runs before routing (sovereignty/credentials.py), run on every
+        piece: a key in a vault note, a README, a commit subject or a PR title is replaced by
+        [REDACTED:<kind>] before the brief is shown, stored or sent to a model, and the redaction is listed."""
+        from .sovereignty.credentials import redact
+        for e in self.evidence:
+            clean, kinds = redact(e.text)
+            if kinds:
+                e.text = clean
+                self.withheld.append(f"{e.cite}: credential-shaped text redacted ({', '.join(kinds)})")
+
     def cites(self) -> list[str]:
         return [e.cite for e in self.evidence]
 
@@ -175,20 +186,32 @@ def _github(root: Path) -> tuple[list[Evidence], list[str]]:
     gh = shutil.which("gh")
     if not gh:
         return [], ["github: the gh command is not installed"]
+    from .tools import git_env
     try:
+        env = {**git_env(root), **{k: v for k, v in os.environ.items() if k in ("GH_TOKEN", "GITHUB_TOKEN", "GH_HOST")}}
         r = subprocess.run([gh, "pr", "list", "--state", "all", "--limit", "8", "--json",
-                            "number,title,state,mergedAt,updatedAt,headRefName"],
-                           cwd=root, capture_output=True, text=True, timeout=20)
+                            "number,title,state,mergedAt,updatedAt,headRefName,author"],
+                           cwd=root, capture_output=True, text=True, timeout=20, env=env)
+        o = subprocess.run([gh, "repo", "view", "--json", "owner"], cwd=root, capture_output=True, text=True,
+                           timeout=20, env=env)
     except (OSError, subprocess.SubprocessError) as e:
         return [], [f"github: not read ({type(e).__name__})"]
-    if r.returncode != 0:
-        return [], [f"github: not read ({(r.stderr or 'gh failed').strip().splitlines()[-1][:120]})"]
-    ev = []
+    if r.returncode != 0 or o.returncode != 0:
+        err = (r.stderr if r.returncode else o.stderr) or "gh failed"
+        return [], [f"github: not read ({err.strip().splitlines()[-1][:120]})"]
+    owner = ((json.loads(o.stdout or "{}").get("owner") or {}).get("login") or "").lower()
+    ev, others = [], 0
     for pr in json.loads(r.stdout or "[]"):
+        author = ((pr.get("author") or {}).get("login") or "").lower()
+        if not owner or author != owner:  # on a public repository anyone can open a PR and write its title (E10)
+            others += 1
+            continue
         when = (pr.get("mergedAt") or pr.get("updatedAt") or "")[:10] or None
         ev.append(Evidence("sourced", "github", f"pr#{pr['number']}",
-                           f"{pr['state'].lower()}: {pr['title'][:160]} (branch {pr['headRefName']})", when))
-    return ev, []
+                           f"{pr['state'].lower()}: {pr['title'][:160]} (branch {pr['headRefName']}; "
+                           f"opened by the repository owner)", when))
+    return ev, ([f"github: {others} pull request(s) opened by other people were left out (their titles are "
+                 "not the person's words)"] if others else [])
 
 
 def _vault(path: str, query: str, k: int = 6) -> tuple[list[Evidence], list[str]]:
@@ -243,21 +266,24 @@ def gather(ci, uid: str, here, query: str, *, use_github: bool | None = None, us
     ws = Workspace(ci)
     s = settings(ws, uid)
     root = Path(here.root)
-    evidence: list[Evidence] = _remembered(ci, uid, here.project_id, vendor, exclude_goal)
+    evidence: list[Evidence] = []
     withheld: list[str] = []
-    e, w = _repo(root, history)
-    evidence += e
-    withheld += w
+
+    def take(name, fn):  # a source that fails is listed as not included, and never stops the goal
+        try:
+            e, w = fn()
+        except Exception as ex:  # noqa: BLE001
+            e, w = [], [f"{name}: not read ({type(ex).__name__})"]
+        evidence.extend(e)
+        withheld.extend(w)
+    take("alter", lambda: (_remembered(ci, uid, here.project_id, vendor, exclude_goal), []))
+    take("git", lambda: _repo(root, history))
     if s["github"] if use_github is None else use_github:
-        e, w = _github(root)
-        evidence += e
-        withheld += w
+        take("github", lambda: _github(root))
     else:
         withheld.append("github: off (alter permissions github on)")
     if s["vault"] if use_vault is None else use_vault:
-        e, w = _vault(s["vault_path"], " ".join([here.name, *s["topics"].get(here.project_id, []), query]))
-        evidence += e
-        withheld += w
+        take("vault", lambda: _vault(s["vault_path"], " ".join([here.name, *s["topics"].get(here.project_id, []), query])))
     else:
         withheld.append("vault: off (alter permissions vault on)")
     return Brief(here.name, str(root), query, evidence, withheld)

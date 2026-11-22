@@ -1,4 +1,4 @@
-# What leaves the machine when CI uses the `claude` CLI
+# What leaves the machine
 
 **Measured 2026-11-16 on CLI 2.1.316** with `scripts/audit_egress.py`. The report is in
 `experiments/egress/audit_2026-11-16.json` and carries shapes and equalities, never values. It was
@@ -11,8 +11,11 @@ observers watch every call:
 - a logging CONNECT proxy for every other HTTPS destination;
 - socket sampling of the CLI process tree.
 
-The rest of this file covers only the `claude` CLI path. Other providers (the Anthropic API key
-adapter, Gemini, OpenAI-compatible, local models) are not covered by this measurement.
+Sections 1 to 4 cover only the `claude` CLI path, as measured. Sections 5 to 8 cover every other
+path that sends data off the machine in 0.3.0a1, including ALTER's: the Anthropic API key adapter,
+OpenAI-compatible and Gemini adapters, local models, `gh`, the vault and the ALTER brief. They come
+from reading the code on 2026-11-21 (`docs/release/SAFETY_AUDIT_0.3.0a1.md`), not from a network
+measurement.
 
 ## 1. The model request (`POST /v1/messages`, to api.anthropic.com)
 
@@ -63,7 +66,8 @@ The switches are:
 - `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`
 
 **Decision for rc2:** the adapter sets these four for every call (§4), so that by default nothing
-goes to a third party.
+goes to a third party. A value already set in the person's own environment is kept (`QUIET_ENV` is
+applied with `setdefault`), so `DISABLE_TELEMETRY=0` in the shell wins.
 
 ## 3. What does not leave
 
@@ -89,3 +93,73 @@ These were never seen in any request, header or destination:
    --record`) gates on the model input. Re-run the egress audit too after a CLI update.
 5. **Older records.** Interactions stored before isolation existed may still contain identifiers
    the CLI injected then. They are not scrubbed (READINESS §4).
+
+## 5. Every path off the machine in 0.3.0a1 (from the code, 2026-11-21)
+
+Nothing below reaches a model unless that vendor was granted. Two grants apply: the person's egress
+grants from `pcim init`, and, inside a project, the project's provider list (`alter permissions
+provider … on`). `Workspace.require_provider` checks the project's list when a message is sent, and
+the agent checks it again before every model step.
+
+| path | destination | what is sent | opt-in | audited as |
+|---|---|---|---|---|
+| `claude` CLI adapter (`claude-cli`) | `api.anthropic.com` (via the CLI) | §1 to §4 | provider granted | §1 to §4, plus the rows below |
+| Anthropic API adapter (`anthropic`) | `https://api.anthropic.com`, pinned. `ANTHROPIC_BASE_URL` is ignored; `PCIM_ANTHROPIC_BASE_URL` is the explicit override | `model`, `system`, `messages`, `max_tokens`, `output_config`; `tools` for agent steps. Headers: the API key or auth token, plus the SDK's `user-agent` and `x-stainless-*` (OS, CPU architecture, Python and SDK versions). CI sets no `metadata.user_id` | `ANTHROPIC_API_KEY` set, provider granted | `route.plan`, `model.call`, `session.disclosure` |
+| OpenAI-compatible adapter (`openai`) | `https://api.openai.com/v1`, or `PCIM_OPENAI_BASE_URL` | `model`, `messages`, the token limit; `tools` for agent steps. `Authorization: Bearer` with the key; httpx's `user-agent`. No `user` field | `OPENAI_API_KEY` set, provider granted | as above |
+| Gemini adapter (`google`) | `https://generativelanguage.googleapis.com/v1beta` | `systemInstruction`, `contents`, `generationConfig`; `x-goog-api-key`. `ask` only: it has no agent step, so it never runs a goal | `GEMINI_API_KEY` or `GOOGLE_API_KEY`, provider granted | `route.plan`, `model.call` |
+| local adapter (`local`) | loopback only. Any other host is refused, and proxy variables are ignored | as OpenAI-compatible | `PCIM_LOCAL_MODEL` and `PCIM_LOCAL_BASE_URL` set | `model.call` |
+| `gh` (Third Eye, GitHub source) | `api.github.com` (or `GH_HOST`), via the person's own `gh` login | one read-only `gh pr list --state all --limit 8 --json number,title,state,mergedAt,updatedAt,headRefName` for the repository the project's git remote names | `alter permissions github on` (off by default) | `alter.source` when switched; `alter.context` lists `github` among a goal's sources. The `gh` request itself is not logged |
+| vault (Third Eye) | none: the notes are read on this Mac. Reading an iCloud placeholder makes macOS download that note from iCloud (bounded to 20 s, or 120 s with `alter vault download`) | nothing by itself. Matching sections go to the model inside the brief (§6) | `alter permissions vault on` (off by default) | `alter.source`; `alter.context` with `vault_notes`, the count of vault pieces |
+| ALTER brief (`alter`, `alter goals`, `alter ask`) | the goal's provider, or for `alter ask` the routed model | §6 | a goal starts only with a non-test provider granted to the project | `alter.context` (sources, piece count, vault notes); `alter.ask`; the goal's sealed record keeps the brief text and its citations |
+| GitHub, the repository itself | `github.com` | only what the owner pushes. The repository is **public** (§8) | `git push` | GitHub |
+
+Proxies: the Anthropic, OpenAI and Gemini clients honour `HTTPS_PROXY`/`ALL_PROXY`, as httpx does.
+A proxy sees the destination host, not the TLS content. `local` ignores them, so a loopback request
+never leaves the machine.
+
+## 6. What the ALTER brief carries
+
+The brief is built locally (`thirdeye.gather`) and never calls a model. It opens the first message of
+every goal session (start and each resume), and of every `alter ask`. It is fenced as data, with a
+per-brief nonce:
+
+- `Project: <name> (workspace <folder name>)`. The folder's name only, never its path.
+- **Remembered** (ALTER's own records). Up to 8 earlier goals in the project (status, verdict,
+  objective ≤200 characters). Up to 5 each of the project's decisions, open questions and next
+  steps (≤300 characters), filtered for the vendor that will see them, as the agent's own briefing
+  is. Without a vendor (`alter ask`), notes derived from memory are left out.
+- **Sourced** (read just now):
+  - git: the branch and up to 8 changed file names;
+  - up to 20 commit subjects (60 for `alter ask`), with short hash and date. No author names or
+    emails: the format is `%h %ad %s`;
+  - the first 1,200 characters of `README.md`, `README.rst` or `README`, unless it is a symlink or
+    resolves outside the workspace;
+  - GitHub (when on): up to 8 PRs, with number, state, title (≤160 characters), head branch and date;
+  - vault (when on): up to 6 matching sections (≤1,200 characters each), with `note#heading` and
+    the note's `updated`/`date`.
+- **Not included**: every source that was off, missing or failed, with the reason.
+
+**Credentials are redacted** (since 0.3.0a1, safety audit S5). Each piece passes through
+`sovereignty.credentials.redact` when the brief is built. A credential-shaped string becomes
+`[REDACTED:<kind>]`, and the redaction is listed under "Not included". `alter context` shows
+exactly what the model will receive. Like the tripwire in `ci ask`, this matches the published
+shapes of keys: a secret with no recognisable shape passes.
+
+After the brief, the goal's agent session sends what any `ci do` session sends: the project
+briefing, the memory selected for that vendor, the person's words, and tool results (file
+contents, search matches, `git status`, the tail of test output). Files whose names look like
+secrets (`.env`, keys, `.ssh/`, …) are never read. The absolute workspace path and write backups are
+kept from the model (`MODEL_HIDDEN`).
+
+## 7. What stays on the machine
+
+- The store (`pcim.db`), its key (`master.key`) and `token` are in `$PCIM_HOME`.
+- Goal worker logs (`$PCIM_HOME/goals/<goal>.log`, 0600, in a 0700 folder) hold ids and statuses.
+  They also hold the worker's stderr, so a crash leaves a Python traceback there.
+- The vault is only read. ALTER writes nothing to it.
+
+## 8. The repository is public
+
+The GitHub repository (`origin`) has been public since it was created (2026-10-17). Every pushed
+commit carries the author's name and email, and three files on `main` carry this machine's home path.
+`docs/release/SAFETY_AUDIT_0.3.0a1.md` §1 lists what is there and what removing it would take.

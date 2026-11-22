@@ -260,6 +260,8 @@ def test_a_new_goal_is_not_its_own_memory_and_goals_resolve_by_prefix_or_suffix(
     g = start(r)
     assert g.payload["context"]["remembered"] == 0
     assert r.gs.resolve("u", g.id[:9]) == g.id and r.gs.resolve("u", g.id[-5:]) == g.id
+    g.status = "done"  # one goal at a time per folder: finish the first before starting another
+    r.gs.save(g)
     start(r, "another")
     with pytest.raises((ValueError, KeyError)):
         r.gs.resolve("u", "goal_")

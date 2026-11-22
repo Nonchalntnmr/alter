@@ -5,6 +5,10 @@
     alter ask "what changed this month?"   a question answered from cited context (one model call, no tools)
     alter init [--name N] [--tests "CMD"] [--no-write] [--no-memory]
                                            make this folder a project ALTER may work in
+    alter setup [--user ID] [--providers P …] [--no-memory] [--init [--tests "CMD"] [--no-write]]
+                                           first run on a computer: an identity (id `me` unless you say
+                                           otherwise), a check of the claude CLI, goal outcomes to memory,
+                                           next steps. An existing identity is never changed.
     alter status                           who, where, what is running, what waits for you
     alter context ["topic"]                what ALTER can see here, and where each piece came from (no model call)
     alter goals [list | show ID | start "…" [--background] | resume ID [--background]
@@ -12,12 +16,22 @@
     alter approve [TASK] · alter deny [TASK] ["why"]
                                            resolve what a goal waits on (no TASK: everything it waits on)
     alter tasks                            actions waiting for you, and the last actions in this project
+    alter undo TASK                        undo one of ALTER's writes (refused if the file changed since)
+    alter backup [DIR] [--with-key] · alter restore DIR --to NEW_FOLDER [--key KEY]
+                                           a consistent copy of ALTER's data; restore never writes over data
     alter memory [forget ID | remember "…"]
+    alter config [list | get KEY | set KEY VALUE]
+                                           your settings: vault, vault.path, github, memory, autonomy.mode
     alter permissions [vault on [--path P] | vault off | vault topic "name in the vault" … | github on|off | memory on|off
                        | provider claude-cli|anthropic|openai|… on|off
                        | autonomy grant [--actions N] [--minutes M] | autonomy revoke]
     alter vault search "…" | eval [FILE] | download
-    alter resume GOAL                      resume a paused goal (`alter resume` alone clears Stop-all, as `ci resume`)
+    alter report [--days N] [--json] [--project here|all]
+                                           the pilot's metrics from ALTER's own records (no model call)
+    alter report --log "task" --estimate-minutes N
+                                           log a task and your own estimate, before ALTER works on it
+    alter report --forget-log              delete every pilot log entry
+    alter resume GOAL                     resume a paused goal (`alter resume` alone clears Stop-all, as `ci resume`)
     alter weekly · models · twin · mesh · audit · doctor · halt · resume · plan · do · …
                                            every `ci` command works here too (`ci` itself still works)
 
@@ -37,6 +51,7 @@ import shlex
 import shutil
 import sys
 import threading
+import time
 from pathlib import Path
 
 from . import __version__
@@ -46,7 +61,11 @@ from .textsafe import terminal_safe
 
 # `ci` commands that `alter` passes through unchanged (`alter ask` is ALTER's own: cited context)
 CI_COMMANDS = frozenset({"route", "mode", "prefer", "models", "outcome", "practice", "skills", "scorecard", "challenge",
-                         "plan", "mesh", "twin", "audit", "learn", "execute", "halt", "resume", "do"})
+                         "plan", "mesh", "twin", "audit", "learn", "execute", "halt", "resume", "do", "undo"})
+# A short phrase starting with one of these reads as a command typed wrong, not as work to pay for
+COMMAND_LIKE = frozenset({"stop", "list", "show", "quit", "exit", "help", "start", "kill", "pause", "cancel", "resume",
+                          "run", "ls", "rm", "delete", "undo", "halt", "abort", "version", "config", "log", "logs",
+                          "approve", "deny", "status", "goals", "goal", "tasks", "memory", "context", "init"})
 CONTROL = {
     "pause": re.compile(r"^(pause|stop|hold on|wait)( (it|now|please))?[.!]*$", re.I),
     "status": re.compile(r"^(status|progress|what have you (finished|done)( so far)?|where are we|"
@@ -142,7 +161,7 @@ def cmd_init(argv: list[str]) -> int:
         print(f"alter init: {e}", file=sys.stderr)
         return 2
     if not a.no_memory:
-        G.grant_outcome_memory(ci, uid)
+        _set_outcome_memory(ci, uid, True)
     print(f"Project {p.name} ({p.id}) at {root}")
     print(f"  ALTER may read files here; {'write files and ' if not a.no_write else ''}run "
           f"{' '.join(run_argv) if run_argv else 'no test command (pass --tests)'}; each write and test run asks you "
@@ -152,6 +171,221 @@ def cmd_init(argv: list[str]) -> int:
     if not set(ws.provider_vendors(uid, p.id)) - {"mock"}:
         print("  no model may see this project yet, so goals cannot start: alter permissions provider claude-cli on")
     print("Next: alter context   ·   alter \"what should we do next?\"   ·   alter permissions")
+    return 0
+
+
+# --------------------------------------------------------------------------- setup, config
+SETUP_USER = "me"  # an identity id is a label: setup never takes one from the account or the person's name
+
+
+def _set_outcome_memory(ci, uid: str, on: bool) -> bool:
+    """Goal outcomes to memory, on or off. Returns whether anything changed (granting twice adds nothing)."""
+    if on:
+        if G.has_outcome_grant(ci, uid):
+            return False
+        G.grant_outcome_memory(ci, uid)
+        return True
+    live = [gr.id for gr in ci.ledger.grants(uid) if gr.source == G.MEMORY_SOURCE and gr.revoked_at is None]
+    for gid in live:
+        ci.ledger.revoke(uid, gid)
+    return bool(live)
+
+
+def _claude_check() -> tuple[bool, str, str, str]:
+    """Is the claude CLI installed and logged in? (ready, what was found, how to fix it, isolation). No model call."""
+    from .adapters.claude_cli import ClaudeCLIAdapter, cli_version, sanitized_profile
+    ad = ClaudeCLIAdapter()
+    path = shutil.which(ad.binary)
+    if not path:
+        return (False, f"not found ({ad.binary!r} is not on PATH)",
+                "install Claude Code (npm install -g @anthropic-ai/claude-code), run `claude` once and log in; "
+                "or set PCIM_CLAUDE_BIN to the claude command's path", "")
+    ver = cli_version(ad.binary)
+    if sanitized_profile() is None:
+        return (False, f"v{ver or '?'} at {path}, not logged in to a Claude account",
+                "run `claude`, log in (/login) and quit; then `alter doctor`", "")
+    return True, f"v{ver or '?'} at {path}, logged in", "", ad.identity_isolation()["status"]
+
+
+def cmd_setup(argv: list[str]) -> int:
+    from . import cli
+    from .engine import PersonalCI
+    from .sovereignty.crypto import MasterKeyMissing
+    ap = argparse.ArgumentParser(
+        prog="alter setup", description="Set ALTER up on this computer: an identity, a check of the claude CLI, goal "
+        "outcomes to memory, and optionally this folder as a project. Asks nothing; never changes an existing identity.")
+    ap.add_argument("--user", default=SETUP_USER, help=f"the new identity's id, a label (default: {SETUP_USER})")
+    ap.add_argument("--providers", nargs="+", default=["claude-cli"],
+                    help="model providers your own statements may go to (default: claude-cli)")
+    ap.add_argument("--no-memory", action="store_true", help="do not store goal outcomes in memory")
+    ap.add_argument("--init", action="store_true", help="also make the current folder a project (alter init)")
+    ap.add_argument("--tests", help='with --init: the test command, e.g. "python -m pytest -q" (default: detected)')
+    ap.add_argument("--no-write", action="store_true", help="with --init: ALTER may read and run tests, never write")
+    a = ap.parse_args(argv)
+    if (a.tests or a.no_write) and not a.init:
+        ap.error("--tests and --no-write go with --init")
+    if not a.user.strip() or a.user != a.user.strip():
+        ap.error("--user needs an id without surrounding spaces")
+
+    home = T._home()
+    tok = home / "token"
+    print(f"ALTER {__version__} setup · data in {home}")
+    try:
+        ci = PersonalCI(home)
+    except MasterKeyMissing as e:
+        print(f"alter setup: {e}", file=sys.stderr)
+        return 2
+    if tok.is_file():
+        uid = ci.user_for_token(tok.read_text().strip())
+        if uid is None:
+            print(f"alter setup: the token in {home} matches no user in its store. Nothing was changed; restore the "
+                  "token, or point PCIM_HOME at an empty folder.", file=sys.stderr)
+            return 2
+        print(f"  identity: {uid} (already there; left unchanged)")
+        if a.user != SETUP_USER and a.user != uid:
+            print(f"  --user {a.user} ignored: setup never replaces an identity")
+    else:
+        if ci.store.list_user_ids():
+            print(f"alter setup: the store in {home} holds an identity, but its token file is missing. Nothing was "
+                  "changed: setup does not create a second identity next to it.", file=sys.stderr)
+            return 2
+        try:
+            out = ci.onboard(a.user, "", tuple(a.providers))
+        except ValueError as e:  # an unknown provider, before anything is written
+            print(f"alter setup: {e}", file=sys.stderr)
+            return 2
+        cli.write_token(home, out["api_token"], exclusive=True)
+        uid = a.user
+        print(f"  identity: {uid} created (token in {tok}, readable by you only)")
+        print(f"    granted: your own statements may go to {', '.join(a.providers)}. Nothing else.")
+
+    providers = (ci.store.get_user(uid) or {}).get("settings", {}).get("providers") or []
+    ready, found, fix, iso = _claude_check()
+    if "claude-cli" in providers:
+        print(f"  claude CLI: {found}")
+        if fix:
+            print(f"    fix: {fix}")
+        elif iso != "verified":
+            print(f"    identity isolation: {iso} (alter doctor says why)")
+    else:
+        print(f"  claude CLI: not needed by this identity (providers: {', '.join(providers) or 'none'})")
+
+    if a.no_memory:
+        on = G.has_outcome_grant(ci, uid)
+        print("  goal outcomes to memory: " + ("on, as before (alter config set memory off)" if on else "off"))
+    elif G.has_outcome_grant(ci, uid):
+        print("  goal outcomes to memory: on")
+    elif any(gr.source == G.MEMORY_SOURCE for gr in ci.ledger.grants(uid)):  # turned off before: the person's choice
+        print("  goal outcomes to memory: off, as you set it (alter config set memory on)")
+    else:
+        _set_outcome_memory(ci, uid, True)
+        print("  goal outcomes to memory: on (each goal's outcome becomes a memory; alter memory forget <id>)")
+    memory_on = G.has_outcome_grant(ci, uid)
+
+    here_ok = False
+    if a.init:
+        print()
+        rc = cmd_init([*(["--tests", a.tests] if a.tests else []), *(["--no-write"] if a.no_write else []),
+                       *([] if memory_on else ["--no-memory"])])
+        if rc:
+            return rc
+        here_ok = True
+
+    steps = []
+    if fix and "claude-cli" in providers:
+        steps.append("fix the claude CLI (above); goals need it")
+    steps.append("alter doctor                         check everything")
+    if not here_ok:
+        steps.append('cd <a project folder> && alter init --tests "<its test command>"')
+    steps.append('alter "what should we do next?"     in a project folder: a goal; elsewhere: a question')
+    steps.append("alter config list                    vault, github, memory, autonomy mode")
+    if ready and iso != "verified" and "claude-cli" in providers:
+        steps.append(f"{shlex.quote(sys.executable)} -m pcim.adapters.cli_probe --trials 4 --record   "
+                     "optional: verify identity isolation (4 Haiku calls, under a cent)")
+    print("\nNext:")
+    for s in steps:
+        print(f"  {s}")
+    return 0
+
+
+CONFIG_KEYS = {
+    "vault": "on|off: search your Obsidian vault for each goal and question; matching sections go to the model",
+    "vault.path": "the vault folder (default: the Obsidian vault found under ~/Documents)",
+    "github": "on|off: read the project's pull requests with gh; they go to the model with each goal",
+    "memory": "on|off: store each goal's outcome in your memory",
+    "autonomy.mode": "copilot|collaborative|autonomous: autonomous acts without asking only within an autonomy grant",
+}
+_ON, _OFF = ("on", "true", "yes", "1"), ("off", "false", "no", "0")
+
+
+def _onoff(value: str) -> bool:
+    v = value.strip().lower()
+    if v in _ON or v in _OFF:
+        return v in _ON
+    raise ValueError(f"expected on or off, not {value!r}")
+
+
+def _config(ci, uid: str, ws) -> dict[str, str]:
+    from . import thirdeye
+    s = thirdeye.settings(ws, uid)
+    return {"vault": "on" if s["vault"] else "off", "vault.path": s["vault_path"],
+            "github": "on" if s["github"] else "off", "memory": "on" if G.has_outcome_grant(ci, uid) else "off",
+            "autonomy.mode": ws.get_mode(uid)}
+
+
+def cmd_config(argv: list[str]) -> int:
+    from . import thirdeye
+    from .workspace import Workspace, WorkspaceError
+    usage = "usage: alter config [list [--json] | get KEY | set KEY VALUE]"
+    if argv[:1] in (["-h"], ["--help"], ["help"]):
+        print(usage + "\n\nKeys (per person; `alter permissions` shows the per-project ones):")
+        for k, d in CONFIG_KEYS.items():
+            print(f"  {k:14} {d}")
+        return 0
+    action, rest = (argv[0], argv[1:]) if argv else ("list", [])
+    if not {"list": rest in ([], ["--json"]), "get": len(rest) == 1, "set": len(rest) == 2}.get(action, False):
+        print(usage, file=sys.stderr)
+        return 2
+    if action in ("get", "set") and rest[0] not in CONFIG_KEYS:
+        print(f"alter config: no key {rest[0]!r}; keys: {', '.join(CONFIG_KEYS)}", file=sys.stderr)
+        return 2
+    ci, uid = T._open()
+    ws = Workspace(ci)
+    if action == "list":
+        cur = _config(ci, uid, ws)
+        if rest:
+            print(json.dumps(cur, indent=1))
+        else:
+            for k, v in cur.items():
+                print(f"{k:14} {v or '(none)':14} {CONFIG_KEYS[k]}")
+        return 0
+    if action == "get":
+        print(_config(ci, uid, ws)[rest[0]])
+        return 0
+    key, value = rest
+    try:
+        if key == "vault" and _onoff(value) and not thirdeye.settings(ws, uid)["vault_path"]:
+            raise ValueError("no Obsidian vault found under ~/Documents; first: alter config set vault.path <folder>")
+        if key in ("vault", "github"):
+            thirdeye.set_source(ws, uid, key, _onoff(value))
+        elif key == "vault.path":
+            if not value.strip():
+                raise ValueError("vault.path needs a folder")
+            thirdeye.set_source(ws, uid, "vault", thirdeye.settings(ws, uid)["vault"], value)
+        elif key == "memory":
+            _set_outcome_memory(ci, uid, _onoff(value))
+        else:
+            ws.set_mode(uid, value.strip().lower())
+    except (ValueError, WorkspaceError) as e:
+        print(f"alter config: {e}", file=sys.stderr)
+        return 2
+    now = _config(ci, uid, ws)[key]
+    print(f"{key} = {now}")
+    if key in ("vault", "github") and now == "on":
+        print("  what it finds goes to the model with each goal and question; `alter context` shows it")
+    if key == "autonomy.mode" and now == "autonomous":
+        print("  writes and test runs still ask unless an autonomy grant covers them: in a project, "
+              "alter permissions autonomy grant")
     return 0
 
 
@@ -178,7 +412,8 @@ def cmd_status(argv: list[str]) -> int:
               f" · providers {', '.join(sorted(here.vendors)) or 'none'}")
         goals = gs.list(uid, here.project_id, limit=10)
     active = [g for g in goals if g.status in G.ACTIVE]
-    print(f"  goals: {len(active)} active, {len(goals) - len(active)} recent finished")
+    print(f"  goals: {len(active)} active, {len(goals) - len(active)} recent finished"
+          + (f", {len(gs.unreadable)} unreadable (alter goals)" if gs.unreadable else ""))
     for g in active:
         print(terminal_safe(f"    {g.id}  {gs.shown_status(g):17} {g.objective[:70]}"))
         for t in G.pending_tasks(ci, uid, g):
@@ -233,10 +468,11 @@ def _exit_for(g: G.Goal) -> int:
 
 
 def start_goal(ci, uid, here, objective: str, *, background: bool = False, limits: dict | None = None,
-               quiet: bool = False) -> tuple[G.Goal, int]:
+               quiet: bool = False, model: str | None = None) -> tuple[G.Goal, int]:
     r = G.GoalRunner(ci, uid, here, out=(lambda s: None) if quiet else None)
+    provider, _, name = (model or "").partition(":")
     try:
-        g = r.start(objective, **(limits or {}))
+        g = r.start(objective, provider=provider or None, model=name or None, **(limits or {}))
     except G.GoalError as e:
         print(f"alter: {e}", file=sys.stderr)
         raise SystemExit(2) from None
@@ -263,37 +499,48 @@ def cmd_goals(argv: list[str]) -> int:
     ap.add_argument("--turns", type=int)
     ap.add_argument("--budget", type=float, help="cost limit in USD")
     ap.add_argument("--minutes", type=int, help="time window")
+    ap.add_argument("--model", help="pin provider:model for the goal's agent (e.g. claude-cli:sonnet)")
     a = ap.parse_args(argv)
     ci, uid, here = _ctx()
     gs = G.GoalStore(ci)
     pid = here.project_id if here and not a.all else None
     if a.action == "list":
         gl = gs.list(uid, pid, limit=30)
-        if not gl:
+        if not gl and not gs.unreadable:
             print("No goals yet." + ("" if here else " (Not in a project folder: showing every project.)"))
         for g in gl:
             v = (g.payload.get("verification") or {}).get("verdict") or ""
             print(terminal_safe(f"{g.id}  {gs.shown_status(g):17} {v:12} {g.created_at[:10]}  {g.objective[:60]}"))
+        for gid in gs.unreadable:
+            print(f"{gid}  {'unreadable':17} its record is damaged; alter goals forget {gid} removes it")
         return 0
     if a.action == "start":
         if not _need_here(here):
             return 2
-        return start_goal(ci, uid, here, " ".join(a.rest), background=a.background, limits=_limits(a))[1]
+        from .registry import VENDOR
+        if a.model and a.model.partition(":")[0] not in VENDOR:
+            print(f"alter: --model takes provider:model, e.g. claude-cli:sonnet (got {a.model!r})", file=sys.stderr)
+            return 2
+        return start_goal(ci, uid, here, " ".join(a.rest), background=a.background, limits=_limits(a),
+                          model=a.model)[1]
     if not a.rest:
         print(f"usage: alter goals {a.action} <goal>" + (' "…"' if a.action == "say" else ""), file=sys.stderr)
         return 2
+    if a.action == "forget":  # by id alone: a goal whose record is damaged can be forgotten too
+        try:
+            gid = gs.resolve(uid, a.rest[0], pid)
+            gs.delete(uid, gid)
+        except KeyError:
+            raise SystemExit(f"alter: no goal {a.rest[0]}") from None
+        except (ValueError, G.GoalError) as e:
+            print(f"alter: {e}", file=sys.stderr)
+            return 2
+        print(f"Forgot goal {gid} and its events. Kept: the record of each action (alter tasks, ci audit), and its "
+              "outcome in memory if one was stored (alter memory forget <id>).")
+        return 0
     g = _goal(ci, uid, a.rest[0], pid)
     if a.action == "show":
         print(G.report(ci, uid, g, gs))
-        return 0
-    if a.action == "forget":
-        try:
-            gs.delete(uid, g.id)
-        except G.GoalError as e:
-            print(f"alter: {e}", file=sys.stderr)
-            return 2
-        print(f"Forgot goal {g.id} and its events. Kept: the record of each action (alter tasks, ci audit), and its "
-              "outcome in memory if one was stored (alter memory forget <id>).")
         return 0
     if a.action in ("say", "pause", "cancel"):
         return _event(ci, uid, g, {"say": "steer"}.get(a.action, a.action), " ".join(a.rest[1:]))
@@ -469,12 +716,7 @@ def cmd_permissions(argv: list[str]) -> int:
             print("  matching vault sections go to the model with each goal and question; `alter context` shows them")
         return 0
     if argv[:1] == ["memory"] and len(argv) == 2 and argv[1] in ("on", "off"):
-        if argv[1] == "on":
-            G.grant_outcome_memory(ci, uid)
-        else:
-            for gr in ci.ledger.grants(uid):
-                if gr.source == G.MEMORY_SOURCE:
-                    ci.ledger.revoke(uid, gr.id)
+        _set_outcome_memory(ci, uid, argv[1] == "on")
         print(f"goal outcomes to memory: {argv[1]}")
         return 0
     if argv[:1] == ["provider"] and len(argv) == 3 and argv[2] in ("on", "off"):
@@ -581,6 +823,46 @@ def cmd_vault(argv: list[str]) -> int:
     return 2
 
 
+# --------------------------------------------------------------------------- backup, restore (safety audit R7)
+def cmd_backup(argv: list[str]) -> int:
+    from . import backup as B
+    ap = argparse.ArgumentParser(prog="alter backup", description="A consistent copy of ALTER's data folder.")
+    ap.add_argument("dest", nargs="?", help="a new folder (default: ~/alter-backup-<date>)")
+    ap.add_argument("--with-key", action="store_true", help="include master.key (it opens every record: keep the "
+                                                            "backup as safe as the key)")
+    ap.add_argument("--force", action="store_true", help="back up even while a goal runs")
+    a = ap.parse_args(argv)
+    dest = Path(a.dest).expanduser() if a.dest else Path.home() / f"alter-backup-{time.strftime('%Y%m%d-%H%M%S')}"
+    try:
+        m = B.backup(T._home(), dest, with_key=a.with_key, force=a.force)
+    except B.BackupError as e:
+        print(f"alter backup: {e}", file=sys.stderr)
+        return 2
+    print(f"Backed up {len(m['files'])} file(s) to {dest} (owner-only; MANIFEST.json lists their sha256).")
+    if not a.with_key:
+        print(f"master.key was NOT included. Keep {T._home() / 'master.key'} apart (a password manager); restoring "
+              "needs it: alter restore <backup> --to <new folder> --key <master.key>")
+    return 0
+
+
+def cmd_restore(argv: list[str]) -> int:
+    from . import backup as B
+    ap = argparse.ArgumentParser(prog="alter restore", description="Restore a backup into an empty or new folder.")
+    ap.add_argument("backup")
+    ap.add_argument("--to", required=True, help="an empty or new folder; nothing is ever written over")
+    ap.add_argument("--key", help="the master.key you kept apart (if the backup has none)")
+    a = ap.parse_args(argv)
+    try:
+        r = B.restore(Path(a.backup).expanduser(), Path(a.to).expanduser(),
+                      key=Path(a.key).expanduser() if a.key else None)
+    except B.BackupError as e:
+        print(f"alter restore: {e}", file=sys.stderr)
+        return 2
+    print(f"Restored into {r['home']}: audit chain {r['audit_chain']}, {r['memory_rows']} memory row(s). "
+          f"Use it with: export PCIM_HOME={r['home']}")
+    return 0
+
+
 # --------------------------------------------------------------------------- weekly, doctor
 def cmd_weekly(argv: list[str]) -> int:
     rc = T.cmd_weekly(argv)
@@ -605,6 +887,49 @@ def cmd_weekly(argv: list[str]) -> int:
     return rc
 
 
+def cmd_report(argv: list[str]) -> int:
+    from . import pilot
+    ap = argparse.ArgumentParser(prog="alter report",
+                                 description="The pilot's metrics, from ALTER's own records. No model call.")
+    ap.add_argument("--days", type=int, default=30, help="goals created in the last N days (default 30)")
+    ap.add_argument("--json", action="store_true", help="the export: ids, counts, rates, costs and times; no text")
+    ap.add_argument("--project", choices=["here", "all"], help="default: here in a project folder, else all")
+    ap.add_argument("--log", metavar="TASK", help="log a task before ALTER works on it")
+    ap.add_argument("--estimate-minutes", type=float, help="with --log: how long it would take you alone")
+    ap.add_argument("--forget-log", action="store_true", help="delete every pilot log entry (withdrawal)")
+    a = ap.parse_args(argv)
+    ci, uid, here = _ctx()
+    if a.forget_log:
+        n = pilot.forget_log(ci, uid)
+        print(f"Deleted the pilot log ({n} entr{'y' if n == 1 else 'ies'}). Goals are kept: alter goals forget <id>.")
+        return 0
+    if a.log is not None or a.estimate_minutes is not None:
+        if not (a.log or "").strip() or a.estimate_minutes is None:
+            print('usage: alter report --log "task" --estimate-minutes N', file=sys.stderr)
+            return 2
+        try:
+            rec = pilot.log_task(ci, uid, a.log, a.estimate_minutes, here.project_id if here else None)
+        except ValueError as e:
+            print(f"alter: {e}", file=sys.stderr)
+            return 2
+        print(f"Logged {rec['id']}: your estimate {rec['estimate_minutes']:g} min. It goes with the next goal you "
+              f"start {'in ' + here.name if here else 'in any project'}; start it now.")
+        return 0
+    if not 1 <= a.days <= 3650:
+        print("alter: --days must be between 1 and 3650", file=sys.stderr)
+        return 2
+    scope = a.project or ("here" if here else "all")
+    if scope == "here" and here is None:
+        print("alter: not in a project folder; use --project all, or cd into a project", file=sys.stderr)
+        return 2
+    rep = pilot.compute(ci, uid, days=a.days, project_id=here.project_id if scope == "here" else None)
+    if a.json:
+        print(json.dumps(pilot.export(rep), indent=1))
+    else:
+        print(pilot.render(rep, f"project {here.name}" if scope == "here" else "every project"))
+    return 0
+
+
 def cmd_doctor(argv: list[str]) -> int:
     from . import thirdeye
     from .vault import dataless
@@ -620,12 +945,15 @@ def cmd_doctor(argv: list[str]) -> int:
 
     def add(name, status, detail):
         checks.append({"name": name, "status": status, "detail": detail})
+    for c in checks:  # from `alter`, the way to an identity is `alter setup`
+        if c["name"] == "pcim_home" and c["status"] == "fail":
+            c["detail"] = c["detail"].replace("(run `pcim init`)", "(run `alter setup`)")
     on_path = shutil.which("alter")
     add("alter_command", "ok" if on_path else "warn", on_path or "`alter` is not on PATH in this shell")
     add("git", "ok" if shutil.which("git") else "fail", shutil.which("git") or "git not found")
     gh = shutil.which("gh")
     add("github_cli", "ok" if gh else "warn", gh or "gh not found: GitHub context is unavailable")
-    home_ok = (T._home() / "token").is_file()
+    home_ok = (T._home() / "token").is_file() and not any(c["name"] == "master_key" for c in checks)
     if home_ok:
         ci, uid = T._open()
         s = thirdeye.settings(Workspace(ci), uid)
@@ -637,12 +965,16 @@ def cmd_doctor(argv: list[str]) -> int:
         else:
             notes = [p for p in vp.rglob("*.md") if ".obsidian" not in p.parts]
             dl = sum(dataless(p) for p in notes)
-            add("vault", "warn" if dl else "ok", f"{len(notes)} notes at {vp}" + (f"; {dl} in iCloud only (alter vault "
-                                                                                   "download)" if dl else ""))
+            # placeholders are not a problem: Vault() asks iCloud for them when it reads the vault
+            fetched = f"; iCloud placeholders: {dl}, fetched when needed (now: alter vault download)" if dl else ""
+            add("vault", "ok", f"{len(notes)} notes at {vp}{fetched}")
         gs = G.GoalStore(ci)
         stale = [g.id for g in gs.list(uid, None, limit=200) if gs.shown_status(g) == "interrupted"]
         add("goals", "warn" if stale else "ok",
             f"interrupted: {', '.join(stale)} (alter goals resume <id>)" if stale else "no interrupted goal")
+        if gs.unreadable:
+            add("goal_records", "warn", f"damaged, cannot be read: {', '.join(gs.unreadable)} "
+                                        "(alter goals forget <id>, or restore pcim.db from a backup)")
         add("outcome_memory", "ok", "on" if G.has_outcome_grant(ci, uid) else "off (alter permissions memory on)")
     blocking = any(c["status"] == "fail" for c in checks)
     if "--json" in argv:
@@ -837,9 +1169,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     cmd, rest = argv[0], argv[1:]
     from .embed import EmbedderUnavailable
-    table = {"init": cmd_init, "status": cmd_status, "context": cmd_context, "goals": cmd_goals, "goal": cmd_goals,
+    table = {"init": cmd_init, "setup": cmd_setup, "config": cmd_config, "status": cmd_status, "context": cmd_context, "goals": cmd_goals, "goal": cmd_goals,
              "tasks": cmd_tasks, "memory": cmd_memory, "permissions": cmd_permissions, "vault": cmd_vault,
-             "weekly": cmd_weekly, "doctor": cmd_doctor, "ask": cmd_ask,
+             "weekly": cmd_weekly, "doctor": cmd_doctor, "ask": cmd_ask, "report": cmd_report,
+             "backup": cmd_backup, "restore": cmd_restore,
              "approve": lambda a: cmd_resolve(a, True), "deny": lambda a: cmd_resolve(a, False),
              "say": lambda a: cmd_event("steer", a), "pause": lambda a: cmd_event("pause", a),
              "cancel": lambda a: cmd_event("cancel", a), "ci": T.main}
@@ -850,9 +1183,9 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_goals(["resume", *rest])
         if cmd in CI_COMMANDS:
             return T.main(argv)
-        words = " ".join(argv).split()
-        if len(words) == 1 and re.fullmatch(r"[a-z][a-z-]*", words[0]):  # `alter stop`, `alter list`: a typo, not work
-            print(f"alter: unknown command {words[0]!r}. To give ALTER a goal, say it in a few words; "
+        words = [w.strip(".,!?;:'\"").lower() for w in " ".join(argv).split()]
+        if len(words) == 1 or (len(words) <= 3 and words[0] in COMMAND_LIKE):  # `alter Stop.`, `alter stop now`
+            print(f"alter: unknown command {argv[0]!r}. To give ALTER a goal, say it in a few words; "
                   "alter --help lists the commands.", file=sys.stderr)
             return 2
         ci, uid, here = _ctx()

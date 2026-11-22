@@ -24,6 +24,7 @@ import dataclasses
 import hashlib
 import hmac
 import json
+import os
 import secrets
 from pathlib import Path
 
@@ -191,8 +192,11 @@ class PersonalCI:
                 store = Store(":memory:", KeyRing.ephemeral())
             else:
                 d = Path(data_dir)
-                d.mkdir(parents=True, exist_ok=True)
-                store = Store(d / "pcim.db", KeyRing.load_or_create(d / "master.key"))
+                new = not d.exists()
+                d.mkdir(mode=0o700, parents=True, exist_ok=True)
+                if new or (d.stat().st_mode & 0o077 and d.stat().st_uid == os.getuid()):
+                    os.chmod(d, 0o700)  # the store's folder: its files are 0600, and so is what the folder lists
+                store = Store(d / "pcim.db", KeyRing.load_or_create(d / "master.key", store=d / "pcim.db"))
         self.store = store
         self.audit = AuditLog(store)
         self.embedder = bind_embedder(store, embedder, self.audit)

@@ -1,8 +1,26 @@
 # Release readiness
 
+## ALTER V1 integration candidate, 2026-11-21
+
+**Gate decision: CONDITIONAL.** The candidate retains the `0.3.0a1` alpha version.
+
+| Check | Result |
+|---|---|
+| Local gate | Ruff passed. Pytest passed 708 tests with 5 skipped. |
+| Clean install | The wheel installed in a fresh venv with the core dependencies. The installed `alter setup --init`, `alter doctor --json` and `alter report --json` passed with a fresh store. |
+| Installed terminal checks | 37 of 37 passed with a simulated provider. |
+| Installed goal lifecycle | Verified a code change, cancelled a goal while its provider call was in flight, and recovered a goal after terminating its worker while it was waiting for a provider reply. The cancelled run made one provider call and left its file unchanged. The recovered run finished verified and appeared in `alter report`. |
+| Audit and pilot | The safety audit fixes are integrated. `alter report` includes identifier hits and scan coverage for goals with recorded writes. |
+| Live checks and evaluation | An independent writer validated and sealed all 24 eval_v7 tasks. The inputs and code are pinned in `experiments/eval_v7/FROZEN.txt`. The live evaluation, live goal lifecycle check, and human pilot are pending. |
+
+The safety audit tracks a separate recovery issue when the worker dies while a **test process** is
+already running (R6). The installed recovery check above covered a worker waiting on its provider.
+
 ## ALTER `0.3.0a1` (alpha), 2026-11-21
 
 **Gate decision: CONDITIONAL, unchanged.** This is an **alpha** for the owner's machine.
+**V1** has its own gate: `V1_GATE.md` (a narrower claim, criteria and a decision rule) and
+`PILOT.md` (the real-user pilot that measures it). It is CONDITIONAL until the pilot runs.
 - It makes no claim of research validation or performance over direct model execution.
 - It has had no human evaluation.
 - The evidence below is engineering evidence: it shows the product works, not that it helps
@@ -13,7 +31,7 @@
 | full suite (`scripts/check.sh`, CI's rule set) | **642 passed, 4 skipped**, plus ALTER's own twin tests |
 | clean install from the wheel, fresh venv, fresh shell | `alter --version` → `alter 0.3.0a1 (alpha)`; `alter doctor` exits 0 against the real data (`claude` CLI 2.1.316, isolation verified) |
 | `scripts/e2e_terminal.py` against the installed wheel | **37 / 37** |
-| independent code review (a separate agent, read-only) | **18 findings**, 4 of them security; **all fixed**. Of the 18 regression tests, 17 failed on the reviewed code. Second pass: see the PR. |
+| independent code review (a separate agent, read-only), two passes | **Pass 1: 18 findings**, 4 of them security; all fixed. Of the 18 regression tests, 17 failed on the reviewed code. **Pass 2:** confirmed 13 fixes closed and found 8 more items, including one new bug that fix 18 introduced (cancelling a goal could resume the model). All 8 are fixed, and all 8 tests failed before the fix. Total: **654 passed, 4 skipped.** |
 | identity scan of the branch history | **clean**, after one redaction: ALTER had written the owner's name into a test (§ live runs) |
 
 **Live runs** through the installed `alter` with the real `claude` CLI (Opus), in a worktree of
@@ -24,6 +42,10 @@ this repository, autonomy granted for that folder only:
 | "examine everything we've built … finish the next working version of my cognitive twin" (steered while it ran) | 3 | $4.56 | **done, verified** (the project's tests passed after the last change): `twin_do.py` + test |
 | "Continue what we were building." | 1 | $1.11 | changed nothing; refused to edit two large files it had received cut off, and asked two questions. **It exposed two bugs**, both fixed: silent truncation of tool results, and a goal ending "done" after asking questions. |
 | "Continue …" with the answers (paused after its first checkpoint, then resumed) | 3 | $4.33 | **done, verified**: one failing test run fixed. It used passage edits to `twin.py` and `terminal.py`, wiring `ci twin include/exclude do` and the weekly section. |
+| "In alter doctor, the vault check …" (foreground `alter "…"`, on the build with every review fix) | 1 | $1.67 | **done, verified**: `alter doctor` reports iCloud placeholders as fetched when needed. It left one question open as a note. |
+
+**In all:** 4 goals, 26 turns' worth of model steps, $11.67 as the CLI reports it. The goals were
+mostly input tokens: each step resends the conversation.
 
 **Still open for this alpha:**
 1. **No human evaluation.**

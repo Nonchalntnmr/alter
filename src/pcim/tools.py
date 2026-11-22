@@ -191,6 +191,11 @@ def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
     the clean filter of every file whose stat data changed. Filter drivers have names of the
     repository's choosing, so each one configured is disabled by name; reading config runs
     nothing."""
+    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=15, env=git_env(root))
+
+
+def git_env(root: Path) -> dict:
+    """The environment `_git` runs git in; also for tools that run git themselves (gh)."""
     env = scrubbed_env()
     keys = subprocess.run(["git", "-C", str(root), "config", "--null", "--name-only", "--get-regexp", r"^filter\."],
                           capture_output=True, text=True, timeout=15, env=env).stdout.split("\0")
@@ -205,7 +210,7 @@ def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
     env["GIT_CONFIG_COUNT"] = str(len(over))  # unlike -c, a key here cannot be split by an "=" in a driver name
     for n, (k, v) in enumerate(over):
         env[f"GIT_CONFIG_KEY_{n}"], env[f"GIT_CONFIG_VALUE_{n}"] = k, v
-    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=15, env=env)
+    return env
 
 
 def _search_in_child(root: Path, pattern: str, glob: str, timeout_s: float, exclude=()) -> dict:
@@ -289,12 +294,16 @@ class Executor:
         if tool == "write_file":
             p = jail(root, args["path"], for_write=True)
             before = p.read_bytes() if p.exists() else None
+            try:  # the previous version is kept for undo as text: it must be text, or undo could not restore it
+                text = before.decode("utf-8") if before is not None else None
+            except UnicodeDecodeError:
+                raise ToolError(f"{args['path']} is not UTF-8 text, so its current version could not be kept for "
+                                "undo; it was not changed") from None
             if "content" in args:
                 content = args["content"]
             else:  # a passage of an existing file: the rest of the file is kept exactly as it is
-                if before is None:
+                if text is None:
                     raise ToolError(f"{args['path']} does not exist; give content to create it")
-                text = before.decode("utf-8")
                 n = text.count(args["old"])
                 if n != 1:
                     raise ToolError(f"the passage to replace appears {n} times in {args['path']}; it must appear exactly once")
@@ -318,7 +327,7 @@ class Executor:
             return {"path": args["path"], "abs_path": str(p), "created": before is None, "bytes": len(content.encode()),
                     "sha256_before": _sha(before) if before is not None else None,
                     "sha256_after": _sha(content.encode()),
-                    "backup": before.decode("utf-8", errors="replace") if before is not None else None}
+                    "backup": text}
         if tool == "run_tests":
             argv, timeout = spec["run_argv"], int(spec.get("run_timeout_s", 300))
             t0 = time.time()

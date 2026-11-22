@@ -30,6 +30,7 @@
     ci do forget <id> | --all                                 remove routed requests and their conversations
     ci approve <task> · ci deny <task> ["why"]                resolve an action the agent is waiting on
     ci halt · ci resume                                       Stop-all: cancel every pending or running action
+    ci undo <task>                                            undo a write (refused if the file changed since)
     ci learn "…"                                              same as ci -l
     ci twin                                                   the Cognitive Twin's picture, labelled by evidence
     ci mesh [bench [--live] | place embed|generate|verify --sensitivity S]
@@ -67,7 +68,7 @@ from .workspace import Workspace
 
 SUBCOMMANDS = ("ask", "route", "mode", "prefer", "models", "outcome", "practice", "skills", "scorecard",
                "weekly", "status", "challenge", "plan", "mesh", "twin", "audit", "learn", "execute", "approve", "deny", "halt",
-               "resume", "help", "do", "doctor")
+               "resume", "help", "do", "doctor", "undo")
 # Explicit words only: "…should I say yes" is a question, not a recorded correct attempt.
 RIGHT = {"right", "correct"}
 WRONG = {"wrong", "incorrect"}
@@ -89,10 +90,16 @@ def _open() -> tuple[PersonalCI, str]:
     home = _home()
     tok = home / "token"
     if not tok.exists():
-        print(f"No CI identity in {home}. Create one first:\n  pcim init --user <name> --providers claude-cli",
+        print(f"No CI identity in {home}. Create one first:\n  alter setup     "
+              "(or: pcim init --user <id> --providers claude-cli)",
               file=sys.stderr)
         raise SystemExit(2)
-    ci = PersonalCI(home)
+    from .sovereignty.crypto import MasterKeyMissing
+    try:
+        ci = PersonalCI(home)
+    except MasterKeyMissing as e:
+        print(f"ci: {e}", file=sys.stderr)
+        raise SystemExit(2) from None
     uid = ci.user_for_token(tok.read_text().strip())
     if uid is None:
         print(f"The token in {home} does not match any user.", file=sys.stderr)
@@ -1160,6 +1167,28 @@ def cmd_deny(argv: list[str]) -> int:
     return cmd_approve(argv, approve=False)
 
 
+def cmd_undo(argv: list[str]) -> int:
+    """Undo a write the agent made: restore the file it replaced, or remove the file it created. Refused
+    when the file changed after that write (yours or a later write), so nothing is ever overwritten."""
+    from .governor import Governor
+    from .tasks import TaskQueue, TaskStateError
+    if len(argv) != 1:
+        print("usage: ci undo <task>   (the write's task id: ci audit, alter tasks or alter goals show)", file=sys.stderr)
+        return 2
+    ci, uid = _open()
+    ws = Workspace(ci)
+    try:
+        r = TaskQueue(ws, Governor(ws)).undo(uid, argv[0])
+    except KeyError:
+        print(f"no task {argv[0]}", file=sys.stderr)
+        return 2
+    except (TaskStateError, ValueError, PermissionError) as e:
+        print(f"Not undone: {e}", file=sys.stderr)
+        return 2
+    print(terminal_safe(f"Undone: {r.get('path', 'the file')} is back to how it was before task {argv[0]}."))
+    return 0
+
+
 def cmd_doctor(argv: list[str]) -> int:
     """Read-only diagnostic check for environment, identity, CLI isolation, cache, store, and Stop-all."""
     import importlib
@@ -1195,6 +1224,9 @@ def cmd_doctor(argv: list[str]) -> int:
         add("pcim_home", "ok", f"{home} initialized")
     else:
         add("pcim_home", "fail", f"{home} not initialized (run `pcim init`)")
+    if (home / "pcim.db").is_file() and not (home / "master.key").is_file() and not os.environ.get("PCIM_MASTER_KEY"):
+        add("master_key", "fail", f"{home / 'master.key'} is missing and the store cannot be read without it: "
+                                  "restore it from your backup (no new key is made)")
 
     # 3. claude CLI binary, version, login, and isolation
     ad = ClaudeCLIAdapter()
@@ -1224,8 +1256,8 @@ def cmd_doctor(argv: list[str]) -> int:
     else:
         add("hf_cache", "warn", f"not cached ({DEFAULT_SEMANTIC_MODEL}); HF_HUB_OFFLINE={offline_env or 'unset'}")
 
-    # 5-8. Embedder, audit chain, authorized workspaces, Stop-all (only if initialized)
-    if state_ok:
+    # 5-8. Embedder, audit chain, authorized workspaces, Stop-all (only if initialized and readable)
+    if state_ok and not any(c["name"] == "master_key" for c in checks):
         ci, uid = _open()
         try:
             from .embed import semantic_available
@@ -1283,7 +1315,7 @@ def main(argv: list[str] | None = None) -> int:
              "weekly": cmd_weekly, "status": cmd_status, "challenge": cmd_challenge, "plan": cmd_plan,
              "mesh": cmd_mesh, "twin": cmd_twin, "audit": cmd_audit, "learn": cmd_learn,
              "execute": cmd_execute, "approve": cmd_approve, "deny": cmd_deny, "halt": cmd_halt,
-             "resume": cmd_resume, "doctor": cmd_doctor, "do": cmd_do}
+             "resume": cmd_resume, "doctor": cmd_doctor, "do": cmd_do, "undo": cmd_undo}
     from .embed import EmbedderUnavailable
     try:
         if cmd in table:

@@ -28,12 +28,29 @@ def _home() -> Path:
     return Path(os.environ.get("PCIM_HOME", Path.home() / ".pcim"))
 
 
+def write_token(home: Path, token: str, *, exclusive: bool = False) -> Path:
+    """The identity's API token, readable by its owner only. `exclusive`: fail if a token is there."""
+    path = home / "token"
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | (os.O_EXCL if exclusive else os.O_TRUNC), 0o600)
+    with os.fdopen(fd, "w") as fh:
+        fh.write(token)
+    return path
+
+
+def _open_store(home: Path) -> PersonalCI:
+    from .sovereignty.crypto import MasterKeyMissing
+    try:
+        return PersonalCI(home)
+    except MasterKeyMissing as e:
+        sys.exit(f"pcim: {e}")
+
+
 def _ci() -> tuple[PersonalCI, str]:
     home = _home()
     tok = home / "token"
     if not tok.exists():
         sys.exit(f"no user yet — run `pcim init` (PCIM_HOME={home})")
-    ci = PersonalCI(home)
+    ci = _open_store(home)
     uid = ci.user_for_token(tok.read_text().strip())
     if uid is None:
         sys.exit("token in PCIM_HOME does not match any user")
@@ -75,20 +92,19 @@ def main(argv=None) -> int:
 
     if a.cmd == "init":
         home = _home()
-        ci = PersonalCI(home)
+        ci = _open_store(home)
         out = ci.onboard(a.user, a.name, tuple(a.providers))
-        fd = os.open(home / "token", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as fh:
-            fh.write(out["api_token"])
-        print(f"created {a.user} in {home}\nAPI token (also saved to {home/'token'}): {out['api_token']}\n"
-              f"Granted: egress of your own statements to {', '.join(a.providers)}. Nothing else.")
+        write_token(home, out["api_token"])
+        print(f"created {a.user} in {home}\nAPI token saved to {home/'token'} (owner-only; it is not printed, so it "
+              f"never lands in a terminal log)\nGranted: egress of your own statements to {', '.join(a.providers)}. "
+              "Nothing else.")
         return 0
     if a.cmd == "serve":
         import uvicorn
         from .api import create_app
         home = _home()
         print(f"Personal CI on http://{a.host}:{a.port}  (data: {home})")
-        uvicorn.run(create_app(PersonalCI(home)), host=a.host, port=a.port, log_level="warning")
+        uvicorn.run(create_app(_open_store(home)), host=a.host, port=a.port, log_level="warning")
         return 0
 
     ci, uid = _ci()

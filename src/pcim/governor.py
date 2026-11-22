@@ -35,6 +35,11 @@ SECRET_NAMES = (".env", ".env.*", "*.key", "*.pem", "*.p12", "*.pfx", "id_rsa*",
 SECRET_DIRS = {".ssh", ".aws", ".gnupg", ".gcloud", ".azure", ".kube", ".docker", ".pcim"}
 
 
+# Files a test runner executes or obeys before any test: writing one is running code (safety audit E10)
+TEST_CONFIG = frozenset({"conftest.py", "pytest.ini", "pyproject.toml", "setup.cfg", "tox.ini", "setup.py",
+                         "package.json", "noxfile.py"})
+
+
 class PathError(ValueError):
     pass
 
@@ -117,6 +122,10 @@ class Governor:
         if risk in ("read", "note"):
             return Decision("execute", f"{risk} tools run without approval in every mode")
         mode = self.ws.get_mode(user_id)
+        if mode == "autonomous" and tool == "write_file" and Path(args.get("path", "")).name.lower() in TEST_CONFIG:
+            # these run code as soon as the tests run, so a write to them is never unattended (safety audit E10)
+            return Decision("approve", f"{Path(args['path']).name} configures how tests run, and runs code when they "
+                                       "do; it needs your approval even under autonomy")
         if mode == "autonomous":
             aid, why = self._autonomous_cover(user_id, project_id, tool)
             if aid:

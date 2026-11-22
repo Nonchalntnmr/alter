@@ -64,13 +64,18 @@ understand ─▶ remember ─▶ act ─▶ verify ─▶ learn
 alter                         conversation (in a project folder: goals; elsewhere: questions)
 alter "…"                     one goal, worked on now; Ctrl-C pauses it
 alter ask "…"                 one question, answered from cited context (one model call, no tools)
+alter setup                   first run: identity, claude check, outcome memory (--init: this folder too)
 alter init                    make this folder a project (--tests, --provider, --no-write, --no-memory)
+alter config [list | get K | set K V]   vault, vault.path, github, memory, autonomy.mode
 alter status · context · tasks · memory · weekly · doctor
 alter goals [list | show | start [--background] | resume | say | pause | cancel | forget]
 alter approve · alter deny    what a goal waits on
 alter permissions [provider claude-cli on | vault on | vault topic "…" | github on | memory on|off
                    | autonomy grant --actions N --minutes M | autonomy revoke]
 alter vault search · eval · download
+alter report [--days N] [--json] [--project here|all]
+                              the V1 pilot's metrics from ALTER's own records (no model call)
+alter report --log "…" --estimate-minutes N    log a task and your own estimate before the run
 alter <any ci command>        `ci` itself is unchanged
 ```
 

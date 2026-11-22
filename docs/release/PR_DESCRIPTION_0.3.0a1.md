@@ -20,26 +20,29 @@
 
 ### Evidence
 - **Gates:**
-  - `scripts/check.sh` passes: 642+ tests plus ALTER's twin tests;
+  - `scripts/check.sh` passes: 654 passed, 4 skipped;
   - `e2e_terminal.py` passes 37 / 37 on the installed wheel;
   - a clean install from a fresh shell works, and `alter doctor` exits 0.
 - **Live runs** through the installed `alter` with the real `claude` CLI, on a worktree of this
   repository:
-  - two goals ended **verified**;
+  - four goals ran in all, and three ended **verified** ($11.67 as the CLI reports it);
   - one was steered while it ran;
   - one was paused and resumed;
   - one continued from ALTER's own records;
   - one exposed two bugs, both fixed.
   - The table is in `docs/release/READINESS.md`.
-- **An independent review** found 18 issues, 4 of them security. All are fixed, each with a
-  regression test (`tests/test_alter_review.py`), and 17 of those 18 tests failed on the reviewed
-  code.
+- **An independent review** in two passes:
+  - **Pass 1:** 18 issues, 4 of them security. All are fixed, and 17 of their 18 regression tests
+    failed on the reviewed code.
+  - **Pass 2:** confirmed 13 fixes and found 8 more items, including one new bug that a pass-1 fix
+    introduced: cancel could resume the model. All 8 are fixed, and all 8 tests failed before the
+    fix (`tests/test_alter_review.py`).
 - **Identity scan of the branch history:** clean. One identifier ALTER wrote into a test was
   redacted before this push.
 
 ### Before merging
 - CI green on this PR.
-- The second review pass is resolved (noted below when it lands).
+- Both review passes are resolved; the gate is 654 passed, 4 skipped.
 
 ### Not in this PR
 - **No package is published** and **no GitHub release** is made. The repository is public, so a
