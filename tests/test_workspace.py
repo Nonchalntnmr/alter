@@ -1,5 +1,6 @@
 """The workspace slice: governor, executor, durable queue, autonomy, agent loop, resume."""
 
+import json
 import os
 import subprocess
 import sys
@@ -144,9 +145,30 @@ def test_timeout_and_cancel_kill_the_process(env):
         if q.get("u", pending.id).status == "running":
             break
         time.sleep(0.05)
+    assert q.recover()["interrupted"] == 0 and q.get("u", pending.id).status == "running"
     q.cancel("u", pending.id)
     th.join(timeout=10)
     assert not th.is_alive() and q.get("u", pending.id).status == "cancelled"
+
+
+def test_legacy_test_record_waits_for_the_old_process_to_exit(env, tmp_path):
+    _, _, q, _, p, _ = env
+    old = q.propose("u", p.id, "run_tests", {"reason": "from an earlier install"})
+    q.store.execute("UPDATE tasks SET status='running' WHERE id=?", (old.id,))
+    run_dir = tmp_path / "data" / "run"
+    run_dir.mkdir()
+    with subprocess.Popen([PY, "-c", "import time; time.sleep(20)"], start_new_session=True) as old_process:
+        try:
+            (run_dir / f"{old.id}.json").write_text(json.dumps({"pgid": old_process.pid}))
+            assert q.recover_project_tests("u", p.id) is None
+            other = q.propose("u", p.id, "run_tests", {"reason": "verify work"})
+            blocked = q.approve("u", other.id)
+            assert blocked.status == "failed" and "older test command" in blocked.reason
+            assert old_process.poll() is None and q.get("u", old.id).status == "running"
+        finally:
+            old_process.terminate()
+    assert q.recover_project_tests("u", p.id) == 1
+    assert q.get("u", old.id).status == "interrupted"
 
 
 def test_git_status_refuses_the_home_directory_repository(tmp_path, monkeypatch):

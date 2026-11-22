@@ -13,8 +13,10 @@
 | Audit and pilot | The safety audit fixes are integrated. `alter report` includes identifier hits and scan coverage for goals with recorded writes. |
 | Live checks and evaluation | An independent writer validated and sealed all 24 eval_v7 tasks. The inputs and code are pinned in `experiments/eval_v7/FROZEN.txt`. The live evaluation, live goal lifecycle check, and human pilot are pending. |
 
-The safety audit tracks a separate recovery issue when the worker dies while a **test process** is
-already running (R6). The installed recovery check above covered a worker waiting on its provider.
+The installed recovery check above covered a worker waiting on its provider. A separate offline
+regression for R6 covers a worker killed during an active test. It verifies that the test
+command stops, its attempt records `interrupted`, and `alter goals resume` verifies the work.
+The R6 fix follows the revision pinned for eval_v7.
 
 ## ALTER `0.3.0a1` (alpha), 2026-11-21
 
