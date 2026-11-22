@@ -46,6 +46,7 @@ import argparse
 import contextlib
 import io
 import json
+import os
 import re
 import shlex
 import shutil
@@ -968,6 +969,17 @@ def cmd_doctor(argv: list[str]) -> int:
             # placeholders are not a problem: Vault() asks iCloud for them when it reads the vault
             fetched = f"; iCloud placeholders: {dl}, fetched when needed (now: alter vault download)" if dl else ""
             add("vault", "ok", f"{len(notes)} notes at {vp}{fetched}")
+        orphans = 0  # test runs whose worker died (audit R6): read-only here; a resume stops them
+        for f in (T._home() / "run").glob("task_*.json") if (T._home() / "run").is_dir() else []:
+            try:
+                os.kill(int(json.loads(f.read_text())["owner"]), 0)
+            except ProcessLookupError:
+                orphans += 1
+            except (OSError, ValueError, KeyError):
+                pass
+        add("test_runs", "warn" if orphans else "ok",
+            f"{orphans} test run(s) left by a stopped worker (alter goals resume <goal> stops them)" if orphans
+            else "no orphaned test run")
         gs = G.GoalStore(ci)
         stale = [g.id for g in gs.list(uid, None, limit=200) if gs.shown_status(g) == "interrupted"]
         add("goals", "warn" if stale else "ok",

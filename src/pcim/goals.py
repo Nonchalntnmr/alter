@@ -478,6 +478,8 @@ class GoalRunner:
         awaiting_answer = incoming == "waiting_answer" and first_turn is None
         if incoming == "running" and first_turn is None:  # this process holds the lock: the last worker died mid-run
             g.payload.setdefault("interruptions", []).append(utcnow().isoformat())
+            with contextlib.suppress(Exception):  # its test run may still be going: stop it first (audit R6)
+                self.agent.queue.reap_orphans()
         g.status, g.worker_pid, g.payload["reason"] = "running", os.getpid(), None
         self.gs.save(g)
         self.agent.pause_check = lambda: self.gs.has_pending_event(gid)

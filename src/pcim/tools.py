@@ -234,6 +234,10 @@ class Executor:
         self._cancelled: set[str] = set()
         self._lock = threading.Lock()
         self.search_timeout_s = search_timeout_s
+        # set by TaskQueue: where a running test's process group is recorded, so a run whose worker
+        # died can be found and stopped later (safety audit R6)
+        self.on_spawn = None  # (task_id, pgid) -> None
+        self.on_exit = None   # (task_id) -> None
 
     def cancel(self, task_id: str) -> bool:
         with self._lock:
@@ -340,6 +344,11 @@ class Executor:
             with self._lock:
                 self._procs[task_id] = proc
                 cancelled_early = task_id in self._cancelled
+            if self.on_spawn is not None:
+                try:
+                    self.on_spawn(task_id, proc.pid)  # start_new_session: the pid is the group id
+                except OSError:
+                    pass
             if cancelled_early:  # cancel arrived between "running" and Popen; outside the lock
                 self.cancel(task_id)
             try:
@@ -352,6 +361,11 @@ class Executor:
             finally:
                 with self._lock:
                     self._procs.pop(task_id, None)
+                if self.on_exit is not None:
+                    try:
+                        self.on_exit(task_id)
+                    except OSError:
+                        pass
             if task_id in self._cancelled and not timed_out:
                 raise Cancelled("cancelled while running")
             return {"argv": argv, "exit_code": proc.returncode, "timed_out": timed_out,
