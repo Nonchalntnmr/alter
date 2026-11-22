@@ -24,6 +24,24 @@ def remaining(run):
             'seconds': limits['max_seconds'] - age}
 
 
+def verified_test(task):
+    """Only current confined execution receipts qualify; legacy host receipts do not."""
+    result = task.get('result') or {}
+    if not isinstance(result, dict):
+        return False
+    confinement = result.get('confinement') or {}
+    if not isinstance(confinement, dict):
+        return False
+    return (task.get('tool') == 'run_tests' and task.get('status') == 'succeeded'
+            and not task.get('reason') and type(result.get('exit_code')) is int
+            and result['exit_code'] == 0 and result.get('timed_out') is False
+            and confinement.get('backend') == 'bubblewrap'
+            and confinement.get('verified') is True
+            and confinement.get('network') == 'isolated'
+            and confinement.get('filesystem') == 'disposable-copy'
+            and confinement.get('host_writes') is False)
+
+
 class Coordinator:
     def __init__(self, ci, ws, queue, agent):
         self.ci, self.ws, self.queue, self.agent = ci, ws, queue, agent
@@ -36,9 +54,7 @@ class Coordinator:
         tasks = self.tasks(uid, pid, attempt['session_id'])
         bad = [t['id'] for t in tasks if t['status'] != 'succeeded' or t.get('reason')]
         writes = [t for t in tasks if t['tool'] == 'write_file' and t['status'] == 'succeeded']
-        tests = [t for t in tasks if t['tool'] == 'run_tests' and t['status'] == 'succeeded'
-                 and not t.get('reason') and (t.get('result') or {}).get('exit_code') == 0
-                 and not (t.get('result') or {}).get('timed_out')]
+        tests = [t for t in tasks if verified_test(t)]
         artifacts = []
         auth = self.ws.workspace_auth(uid, pid)
         for t in writes:
@@ -116,8 +132,7 @@ class Coordinator:
             a = next(a for a in reversed(run['attempts']) if a['work_id'] == w['id'] and a['status'] == 'succeeded')
             all_tasks.extend(self.tasks(uid, pid, a['session_id']))
         writes = [t for t in all_tasks if t['tool'] == 'write_file' and t['status'] == 'succeeded']
-        tests = [t for t in all_tasks if t['tool'] == 'run_tests' and t['status'] == 'succeeded'
-                 and not t.get('reason') and (t.get('result') or {}).get('exit_code') == 0]
+        tests = [t for t in all_tasks if verified_test(t)]
         latest = {}
         for t in sorted(writes, key=lambda t: t['created_at']):
             latest[t['args']['path']] = t

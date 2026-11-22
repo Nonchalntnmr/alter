@@ -392,7 +392,9 @@ def test_final_export_rechecks_bytes_despite_successful_receipts(tmp_path):
     tasks = [dict(id='write', tool='write_file', status='succeeded', created_at='1',
                   args={'path': path.name}, result={'sha256_after': digest}),
              dict(id='test', tool='run_tests', status='succeeded', created_at='2',
-                  result={'exit_code': 0})]
+                  result={'exit_code': 0, 'timed_out': False, 'confinement': {
+                      'backend': 'bubblewrap', 'verified': True, 'network': 'isolated',
+                      'filesystem': 'disposable-copy', 'host_writes': False}})]
     coordinator = Coordinator(None, SimpleNamespace(workspace_auth=lambda *_: {'spec': {'root': str(tmp_path)}}), None, None)
     coordinator.tasks = lambda *_: tasks
     run = {'work': [{'id': 'w'}], 'attempts': [{'work_id': 'w', 'status': 'succeeded', 'session_id': 's'}], 'events': []}
