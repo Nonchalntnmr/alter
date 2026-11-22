@@ -4,6 +4,10 @@
 the numbers come from `alter report`. **Today's decision: CONDITIONAL.** Most criteria below are
 not measured yet.
 
+**Update, 2026-11-22.** The decision is still CONDITIONAL.
+- The V1 eval gate passed on eval_v8, after eval_v7 failed it (§1).
+- The pilot criteria in §3 are still not measured.
+
 This file does five things:
 1. It states what the evaluations showed, and what that rules out claiming (§1).
 2. It defines the narrower claim V1 makes (§2).
@@ -52,6 +56,25 @@ passes with no correction.
 - **S was cheaper (−25%, sign p = 0.007) and faster** (median 34 s against 53 s). These were
   secondary endpoints, read after the fact, and they are **not a claim**.
 
+**eval_v7 and eval_v8: the V1 eval gate.** An ALTER goal (G) against direct (A), with the same
+model, tested for non-inferiority and safety. No superiority is claimed.
+
+| eval | code | success | false done | person-time | cost | first pass | asked when needed | verdict |
+|---|---|---|---|---|---|---|---|---|
+| eval_v7 (2026-11-21) | `d19bce6` | A 23/24, G 22/24 | A 0, **G 1** | 1525 s, 1615 s | $4.27, $4.30 | A 20, **G 13** (p = 0.039) | A 9/14, G 2/14 | **FAILS on 3a** |
+| eval_v8 (2026-11-22, a fresh pool) | `0db915c` | A 23/24, G 23/24 | A 1, G 1 | 1705 s, 1770 s | $5.07, $4.84 | A 18, G 15 (p = 0.25) | A 4/12, G 2/12 | **passes** |
+
+- **eval_v7's false done:** a goal added a helper that nothing calls. Its own tests passed, and it
+  ended "done" while its report said the preview was unchanged.
+- **The fix (`0db915c`):**
+  - the goal ends its report with an outcome line, and "not reached" keeps the goal waiting for
+    the person;
+  - the goal instructions take `ci do`'s asking rule.
+- **eval_v8 is a second attempt, on a pool written after the fix was chosen.** Its 3a passes on
+  equality: one false done in each arm, on the same pair, which both arms failed.
+- **The asking rule did not make G ask as often as direct.** That is not part of the V1 claim
+  (§2, §4).
+
 **Earlier evidence still stands** (`READINESS.md`): in paired v1 and v2, direct verified 32/32,
 against planning's 9/16 (V2.1) and 14/16 (V3). In eval_v4, direct and routed both verified 16/16.
 
@@ -84,7 +107,7 @@ benefit:
 > - **Governed.** It acts only within what you allowed: each write and test run is approved by you,
 >   or covered by a bounded autonomy grant for that folder. Anything else is denied.
 > - **Verifiable.** It says "done" only when its own task records show the project's tests passing
->   after the last change.
+>   after the last change, and its own report does not call the request unfinished.
 > - **Resumable.** A paused or interrupted goal continues from its records, and no action is lost
 >   or silently re-run.
 > - **Accountable.** Its cost, your approvals and answers, and its time are counted from records,
