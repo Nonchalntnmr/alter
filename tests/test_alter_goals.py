@@ -76,7 +76,7 @@ def test_a_goal_is_done_only_when_the_records_show_tests_passing_after_the_last_
     assert g.status == "done" and g.payload["verification"]["verdict"] == "verified"
     assert g.payload["verification"]["files"] == ["calc.py"] and repo.joinpath("calc.py").read_text() == GOOD
     first = _texts(mock)[0]
-    assert "<alter_context" in first and "Goal: fix add() so it returns the sum" in first and "smallest scope" in first
+    assert "<alter_context" in first and "Goal: fix add() so it returns the sum" in first and "Outcome: reached" in first
     # learning: an episode computed from the records, with provenance, under the person's grant
     item = next(i for i in ci.memory.current("u") if i.id == g.payload["memory_item"])
     assert item.kind == "episode" and item.source == G.MEMORY_SOURCE and "Ended done" in item.content

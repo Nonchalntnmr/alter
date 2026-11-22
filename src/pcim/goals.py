@@ -24,11 +24,16 @@ goal pauses: work never continues silently past the time it was given. Each agen
 its own limits (`agent.TurnLimits`). Writes and test runs need your approval, unless an autonomy
 grant covers them (`alter permissions autonomy grant`).
 
-**Done means verified.**
+**Done means verified, and not disowned.**
 - The verdict is computed from task records across the goal's sessions, never from the model's
   words: `verified` means the project's tests passed after the last change.
 - When the agent stops with unverified changes, it is asked at most twice to verify them.
 - After that, the goal ends `unverified`, and it is reported as such.
+- Passing tests are necessary, not sufficient. The agent ends each report with an outcome line.
+  If it says the request is **not reached**, the goal waits for the person; it is never `done`.
+  - The words can only withhold "done", never grant it.
+  - eval_v7 found the case this closes: a goal added a helper that nothing calls, its own tests
+    passed, and it ended `done` while its report said the preview was unchanged.
 
 **Learning.**
 - When a goal ends, its outcome is written to memory as an episode with full provenance (goal,
@@ -44,6 +49,7 @@ import dataclasses
 import fcntl
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -80,11 +86,29 @@ MEMORY_SOURCE = "alter-goals"
 DEFAULTS = {"max_turns": 6, "max_cost_usd": 5.0, "window_s": 30 * 60}
 MAX_NUDGES = 2
 
+# eval_v7 (G against direct): the goal asked 2 of the 14 questions its tasks needed, against
+# direct's 9, and needed more corrections. The old text told it to state the outcome it assumed and
+# to "choose the smallest scope you can finish", so it guessed and shipped a part. The asking rule
+# below is the one `ci do` uses (router.SELECTIVE_DIRECTIVES).
 HOW = """How to work on this goal:
-- Start by saying, in two to four lines, what you take the intended outcome to be, citing the labels in the context above that you rely on. Say plainly if the context does not settle it.
-- Choose the smallest scope you can finish and verify now, and say what you leave for later.
-- Read before you change anything. After your last change, run the tests; if they fail, fix the cause and run them again.
-- End with three short lists: what changed (files), the test result, and what remains. Label any recommendation as a recommendation."""
+- Start by saying, in two to four lines, what you take the intended outcome to be, citing the labels in the context above that you rely on.
+- Read what you need in the project first; most details are settled by the files.
+- Ask the person one short question, and stop, only if the request leaves open a choice that changes the result and neither the files nor the context settle it: which of two behaviours they want, exactly what to remove and what to keep, or a value only they know. Ask before changing anything. Never ask about what you can find out by reading. Otherwise go ahead, and state any small assumption.
+- Do what the person asked, and no more. If part of it cannot be done here, say which part and why; never offer a partial change as the whole.
+- After your last change, run the tests; if they fail, fix the cause and run them again.
+- End with three short lists: what changed (files), the test result, and what remains. Label any recommendation as a recommendation.
+- Last, one line on its own: `Outcome: reached` if what the person asked for now works, or `Outcome: not reached: <what is missing>` if it does not. Passing tests alone do not make it reached."""
+
+_OUTCOME = re.compile(r"^[\W_]*outcome\b[\s:*_`—–-]*(not reached|reached)\b[\s:*_`.,;—–-]*(.*)$", re.I | re.M)
+
+
+def outcome(text: str | None) -> tuple[str | None, str]:
+    """The agent's own last outcome line: ("reached" | "not reached" | None, what it says is missing).
+    It can only withhold "done", never grant it: the verdict still comes from the task records."""
+    ms = list(_OUTCOME.finditer(text or ""))
+    if not ms:
+        return None, ""
+    return ms[-1].group(1).lower(), ms[-1].group(2).strip().strip("`*_ ")
 
 
 class GoalError(RuntimeError):
@@ -628,6 +652,14 @@ class GoalRunner:
             return None  # a per-turn limit: continue in the same session
         v = verify(self.ci, self.uid, g.project_id, g.payload["sessions"], turn.text or "")
         g.payload["verification"] = v
+        said, missing = outcome(turn.text)
+        g.payload["outcome_said"] = said
+        if said == "not reached" and v["verdict"] in ("verified", "unchanged"):
+            # tests pass (or nothing changed), but ALTER itself says the request does not work yet:
+            # never "done"; the person answers, steers or cancels
+            self._park(g, "waiting_answer", "ALTER says the request is not finished"
+                       + (f": {missing[:200]}" if missing else ""))
+            return "stop"
         if v["verdict"] == "verified":
             self._finish(g, "done", v["line"])
             return "stop"
