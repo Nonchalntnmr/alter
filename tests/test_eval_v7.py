@@ -28,7 +28,7 @@ def reply(obj):
     sys.exit(0)
 if "<ci_tools>" in prompt:
     body = prompt.split("</ci_tools>", 1)[1]
-    knows = "sum" in body
+    knows = "the sum" in body  # the fact itself; a bare "sum" also matched "assumption" in ALTER's goal text
     k = prompt.count('role="you"')
     fixed = "return a + b" in body and '"write_file"' in body
     if fixed and '"run_tests"' in body:
