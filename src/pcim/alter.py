@@ -37,7 +37,8 @@
 
 ALTER works through the same governed agent as `ci do`, which is the direct-execution baseline the
 evaluations measured. Writes and test runs need your approval unless you grant autonomy. A goal is
-done only when the records show the project's tests passing after the last change.
+done only when the records show the project's tests passing after the last change, and ALTER's own
+report does not say the request is unfinished (then it waits for you instead).
 """
 
 from __future__ import annotations
