@@ -157,8 +157,43 @@ build_wheel() {  # $1: an empty directory to build in
     ls "$work"/dist/contextual_intelligence-*.whl
 }
 
+cache_wheel() (
+    local whl="$1" name="$2" cached staged digest
+    mkdir -p "$wheels"
+    cached="$wheels/$name"
+    if cmp -s "$whl" "$cached"; then
+        printf '%s\n' "$cached"
+        return
+    fi
+
+    staged="$(mktemp "$wheels/.wheel.XXXXXX")"
+    trap 'rm -f "$staged"' EXIT
+    cp "$whl" "$staged"
+    # Publish a complete copy without replacing one already cached under this filename.
+    if [[ ! -e "$cached" ]]; then
+        ln "$staged" "$cached" 2>/dev/null || true
+    fi
+    if ! cmp -s "$staged" "$cached"; then
+        digest="$("$venv/bin/python" - "$staged" <<'EOF'
+import hashlib
+import sys
+
+with open(sys.argv[1], "rb") as wheel:
+    print(hashlib.file_digest(wheel, "sha256").hexdigest())
+EOF
+)"
+        cached="$wheels/rebuilds/$digest/$name"
+        mkdir -p "$(dirname "$cached")"
+        if [[ ! -e "$cached" ]]; then
+            ln "$staged" "$cached" 2>/dev/null || true
+        fi
+        cmp -s "$staged" "$cached" || die "could not cache the wheel at $cached"
+    fi
+    printf '%s\n' "$cached"
+)
+
 install_wheel() {
-    local whl="$1" name ver old extras="" kind
+    local whl="$1" name ver old extras="" kind cached
     name="$(basename "$whl")"
     ver="${name#contextual_intelligence-}"
     ver="${ver%%-*}"
@@ -172,13 +207,15 @@ install_wheel() {
             say "note: $ver is not older than the installed $old; installing it anyway"
         fi
     fi
-    mkdir -p "$wheels"
-    [[ "$whl" -ef "$wheels/$name" ]] || cp -f "$whl" "$wheels/$name"
+    cached="$(cache_wheel "$whl" "$name")"
+    if [[ "$cached" != "$wheels/$name" ]]; then
+        say "saved this rebuild at $cached"
+    fi
     [[ $semantic == 1 ]] && extras="[semantic]"
-    "$venv/bin/python" -m pip install --quiet -c "$constraints" "$wheels/$name$extras"
+    "$venv/bin/python" -m pip install --quiet -c "$constraints" "$cached$extras"
     # The line above skips a wheel whose version is already installed (a rebuild of the same version):
     # this puts this wheel's files in place either way, without touching the dependencies.
-    "$venv/bin/python" -m pip install --quiet --no-deps --force-reinstall "$wheels/$name"
+    "$venv/bin/python" -m pip install --quiet --no-deps --force-reinstall "$cached"
     say "installed $(installed_version) in $venv$([[ $semantic == 1 ]] || echo ' (without the semantic extra)')"
 }
 

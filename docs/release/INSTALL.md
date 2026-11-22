@@ -112,6 +112,9 @@ alter doctor
   the same version, or `downgrade`.
 - **It keeps the venv and the links.** It updates the dependencies to the lock file, and keeps a
   copy of the new wheel next to the old ones in `~/.alter/wheels/`.
+- **A rebuild at the same version keeps both wheels.** The first wheel keeps its original path.
+  The installer prints the path of the new wheel under `~/.alter/wheels/rebuilds/`. Either path
+  works with `scripts/install_alter.sh --rollback <wheel>`.
 - **It refuses while a goal runs** from this install: replacing the package under a running goal
   would break it. Pause the goal (`alter goals pause <goal>`) or let it finish. `--force` goes
   ahead anyway.

@@ -49,17 +49,17 @@ def _run(argv, env, cwd=None, check=True):
     return r
 
 
-def _newer_checkout(dest: Path) -> Path:
-    """A copy of this checkout whose version is NEWER: what the next release looks like to the script."""
+def _checkout_for_version(dest: Path, version: str) -> Path:
+    """A copy of this checkout for the installer to build."""
     dest.mkdir()
     for name in ("pyproject.toml", "README.md", "requirements-lock.txt"):
         shutil.copy2(REPO / name, dest / name)
     shutil.copytree(REPO / "src", dest / "src", ignore=shutil.ignore_patterns("__pycache__", "*.egg-info"))
     (dest / "scripts").mkdir()
     shutil.copy2(SCRIPT, dest / "scripts" / SCRIPT.name)
-    for f, old, new in ((dest / "pyproject.toml", f'version = "{__version__}"', f'version = "{NEWER}"'),
+    for f, old, new in ((dest / "pyproject.toml", f'version = "{__version__}"', f'version = "{version}"'),
                         (dest / "src" / "pcim" / "__init__.py", f'__version__ = "{__version__}"',
-                         f'__version__ = "{NEWER}"')):
+                         f'__version__ = "{version}"')):
         text = f.read_text()
         assert old in text
         f.write_text(text.replace(old, new))
@@ -116,8 +116,25 @@ def test_install_setup_doctor_upgrade_rollback_uninstall(tmp_path):
     assert f"reinstall: {__version__} -> {__version__}" in r.stdout and "linked" not in r.stdout
     assert sorted(p.name for p in alter_bin.iterdir()) == ["alter", "ci", "pcim", "pcim.pre-alter"]
 
+    original = alter_home / "wheels" / kept[0]
+    original_bytes = original.read_bytes()
+    rebuild = tmp_path / "rebuild"
+    rebuild_script = _checkout_for_version(rebuild, __version__)
+    with (rebuild / "src" / "pcim" / "__init__.py").open("a") as package:
+        package.write("\nREBUILD_TEST_MARKER = True\n")
+    r = _run(["bash", rebuild_script, "--no-semantic", "--no-doctor"], cmd_env)
+    assert "saved this rebuild" in r.stdout and original.read_bytes() == original_bytes
+    [cached_rebuild] = (alter_home / "wheels" / "rebuilds").glob("*/*.whl")
+    marker = "import pcim; print(hasattr(pcim, 'REBUILD_TEST_MARKER'))"
+    assert _run([venv_bin / "python", "-c", marker], cmd_env).stdout.strip() == "True"
+    _run(["bash", SCRIPT, "--no-semantic", "--no-doctor", "--rollback", original], cmd_env)
+    assert _run([venv_bin / "python", "-c", marker], cmd_env).stdout.strip() == "False"
+    _run(["bash", SCRIPT, "--no-semantic", "--no-doctor", cached_rebuild], cmd_env)
+    assert _run([venv_bin / "python", "-c", marker], cmd_env).stdout.strip() == "True"
+    assert list((alter_home / "wheels" / "rebuilds").glob("*/*.whl")) == [cached_rebuild]
+
     # 4. upgrade: a newer release over this one; the data is kept
-    newer_script = _newer_checkout(tmp_path / "newer")
+    newer_script = _checkout_for_version(tmp_path / "newer", NEWER)
     r = _run(["bash", newer_script, "--no-semantic"], env | {"PCIM_CLAUDE_BIN": str(tmp_path / "no-claude-here"),
                                                               "HOME": str(home)})
     assert f"upgrade: {__version__} -> {NEWER}" in r.stdout and "doctor: nothing blocking" in r.stdout
