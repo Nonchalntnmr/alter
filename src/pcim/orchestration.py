@@ -39,7 +39,16 @@ def verified_test(task):
             and confinement.get('verified') is True
             and confinement.get('network') == 'isolated'
             and confinement.get('filesystem') == 'disposable-copy'
-            and confinement.get('host_writes') is False)
+            and confinement.get('host_writes') is False
+            and isinstance(confinement.get('snapshot_sha256'), str)
+            and len(confinement['snapshot_sha256']) == 64)
+
+
+def tested_current_files(test, root):
+    """The confined run tested exactly the project files as they are now (same exclusions)."""
+    from .sandbox import snapshot_digest
+    current = snapshot_digest(root)
+    return current is not None and current == test['result']['confinement']['snapshot_sha256']
 
 
 class Coordinator:
@@ -77,6 +86,8 @@ class Coordinator:
             problems.append('required artifacts missing from successful writes')
         if work['require_tests'] and (not tests or (writes and tests[-1]['created_at'] < writes[-1]['created_at'])):
             problems.append('no successful tests after last write')
+        elif work['require_tests'] and not tested_current_files(tests[-1], auth['spec']['root']):
+            problems.append('the files that passed the tests are not the current files')
         if not artifacts and not tests:
             problems.append('no executed artifact or test receipt')
         return {'artifacts': artifacts, 'test_tasks': [t['id'] for t in tests],
@@ -148,6 +159,7 @@ class Coordinator:
         fresh &= export['accepted'] and all(exported.get(path) == t['result']['sha256_after']
                                              for path, t in latest.items())
         after = bool(tests) and (not writes or max(t['created_at'] for t in tests) > max(t['created_at'] for t in writes))
+        after = after and tested_current_files(max(tests, key=lambda t: t['created_at']), auth['spec']['root'])
         run['verification'] = {'export': export, 'artifacts_current': bool(latest) and fresh, 'tests_after_writes': after,
                                'scope': 'executor file hashes and configured test receipts; not independent product acceptance',
                                'test_double': any(a['route']['test_double'] for a in run['attempts'] if a.get('route'))}

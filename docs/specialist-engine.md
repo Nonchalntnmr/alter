@@ -37,6 +37,6 @@ The final Agent request is checked with `assert_safe_payload` after tools and hi
 
 Final specialist completion calls `verify_export` for the final write manifest and binds every returned digest to the successful write receipt. Unsafe, missing, binary or contaminated artifacts cannot qualify as completed. This finite text policy does not establish arbitrary behavioral acceptance or a binary export policy.
 
-ALT-7's sandbox is integrated unchanged. On this macOS environment run_tests refuses with verified confinement unavailable before executing project code. Historical successful host-execution receipts are not current sandbox evidence. Existing success-path tests that assume host execution remain nonpassing pending a supported Linux runner; no fallback or test-only bypass is enabled.
+Specialist test runs need a workspace with `test_confinement="required"`. On macOS that refuses before executing project code, so specialist completion stays BLOCKED there. Ordinary ALTER goals keep running approved tests on the host (owner decision, 2026-11-23); those host receipts never satisfy the specialist gates.
 
 Worker and final completion now both reject legacy host-test receipts. A qualifying test must have integer exit code zero, an explicit false timeout flag, and a bubblewrap receipt recording verified confinement, isolated network, disposable-copy filesystem and no host writes. Missing, malformed or weaker receipts are insufficient even when task status says succeeded. Receipt-gate unit tests are synthetic and do not establish real sandbox execution.

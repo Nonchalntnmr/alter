@@ -273,8 +273,13 @@ class Workspace:
         return aid
 
     def authorize_workspace(self, user_id: str, project_id: str, root: str, run_argv: list[str] | None = None,
-                            allow_write: bool = False, run_timeout_s: int = 300) -> str:
+                            allow_write: bool = False, run_timeout_s: int = 300,
+                            test_confinement: str = "none") -> str:
+        """`test_confinement`: "none" runs approved tests on the host (the V1 default; receipts say
+        so); "required" runs them only in a verified Linux sandbox and refuses otherwise."""
         self._row(user_id, project_id)
+        if test_confinement not in ("none", "required"):
+            raise WorkspaceError('test_confinement must be "none" or "required"')
         p = validate_root(root)
         if run_argv is not None:
             if not run_argv or not all(isinstance(a, str) and a for a in run_argv):
@@ -284,10 +289,11 @@ class Workspace:
         for old in self.active_auths(user_id, project_id, "workspace"):
             self.revoke(user_id, old["id"], audit=False)
         spec = {"root": str(p), "run_argv": run_argv, "allow_write": bool(allow_write),
-                "run_timeout_s": int(run_timeout_s), "home_is_git_repo": _home_is_git_repo()}
+                "run_timeout_s": int(run_timeout_s), "home_is_git_repo": _home_is_git_repo(),
+                "test_confinement": test_confinement}
         aid = self._insert_auth(user_id, project_id, "workspace", spec, None)
         self.audit.append(user_id, "workspace.authorize", project=project_id, auth=aid, write=bool(allow_write),
-                          run=run_argv is not None)
+                          run=run_argv is not None, test_confinement=test_confinement)
         return aid
 
     def grant_autonomy(self, user_id: str, project_id: str, tools: list[str], max_actions: int = 10,

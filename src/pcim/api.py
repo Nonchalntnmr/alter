@@ -133,6 +133,7 @@ class WorkspaceIn(BaseModel):
     run_argv: list[str] | None = None
     allow_write: bool = False
     run_timeout_s: int = Field(default=300, ge=1, le=3600)
+    test_confinement: Literal["none", "required"] = "none"
 
 class ChatIn(BaseModel):
     message: str = Field(min_length=1, max_length=50_000)
@@ -559,7 +560,8 @@ def create_app(ci: PersonalCI, *, run_service=None) -> FastAPI:
 
     @app.post("/v1/projects/{pid}/workspace")
     def authorize(pid: str, body: WorkspaceIn, uid: str = Depends(user)):
-        aid = guard(ws.authorize_workspace, uid, pid, body.root, body.run_argv, body.allow_write, body.run_timeout_s)
+        aid = guard(ws.authorize_workspace, uid, pid, body.root, body.run_argv, body.allow_write, body.run_timeout_s,
+                    body.test_confinement)
         return {"authorization_id": aid}
 
     @app.post("/v1/projects/{pid}/chat")

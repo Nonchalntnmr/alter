@@ -34,6 +34,9 @@ MAX_WRITE = 500_000
 MAX_LIST = 500
 MAX_MATCHES = 200
 SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache", "dist", "build"}
+# The receipt of a host test run: honest about what it is, and never accepted as confined evidence.
+HOST_TEST_RECEIPT = {"backend": "none", "verified": False, "network": "host", "filesystem": "project",
+                     "host_writes": True}
 _SCRUB = re.compile(r"(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH|COOKIE|SESSION)", re.IGNORECASE)
 _SCRUB_PREFIX = ("AWS_", "GITHUB_", "GH_", "ANTHROPIC", "OPENAI", "GEMINI", "GOOGLE_", "AZURE_", "PCIM_", "HF_")
 
@@ -338,16 +341,23 @@ class Executor:
         raise ToolError(f"{tool} is not executed by the executor")
 
     def _run_tests(self, task_id: str, root: Path, spec: dict, test_lock_fd: int | None) -> dict:
+        if spec.get("test_confinement", "none") != "required":
+            # ALTER's default test path, as in V1: the approved command runs on the host. The
+            # receipt says so, and confined-evidence gates (orchestration.verified_test) refuse it.
+            result = self._run_test_command(task_id, root, spec, test_lock_fd, spec["run_argv"], confined=False)
+            result["confinement"] = dict(HOST_TEST_RECEIPT)
+            return result
         from .sandbox import SandboxUnavailable, confined_command
         try:
             with confined_command(root, spec["run_argv"]) as (argv, confinement):
-                result = self._run_confined_tests(task_id, root, spec, test_lock_fd, argv)
+                result = self._run_test_command(task_id, root, spec, test_lock_fd, argv, confined=True)
                 result["confinement"] = confinement
                 return result
         except SandboxUnavailable as error:
             raise ToolError(str(error)) from None
 
-    def _run_confined_tests(self, task_id: str, root: Path, spec: dict, test_lock_fd: int | None, argv: list[str]) -> dict:
+    def _run_test_command(self, task_id: str, root: Path, spec: dict, test_lock_fd: int | None,
+                          argv: list[str], *, confined: bool) -> dict:
         timeout = min(max(int(spec.get("run_timeout_s", 300)), 1), 3600)
         t0 = time.monotonic()
         worker_script = Path(__file__).with_name("_test_worker.py").resolve()
@@ -356,8 +366,11 @@ class Executor:
             # The supervisor inherits the project lock, which stays held until the test group exits.
             # Only the supervisor sees these descriptors. The approved command gets the usual environment.
             fds = (worker.fileno(),) if test_lock_fd is None else (worker.fileno(), test_lock_fd)
-            command = [sys.executable, "-I", str(worker_script), str(worker.fileno()), *argv]
+            command = [sys.executable, "-I", str(worker_script), str(worker.fileno()),
+                       "confined" if confined else "host", *argv]
+            # A confined command gets no stdin: the caller's terminal, files and pipes stay outside.
             proc = subprocess.Popen(command, cwd=root, env={**scrubbed_env(), "PYTHONDONTWRITEBYTECODE": "1"},
+                                    stdin=subprocess.DEVNULL if confined else None,
                                     stdout=output, stderr=errors,
                                     pass_fds=fds, start_new_session=True)
             worker.close()

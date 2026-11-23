@@ -129,10 +129,10 @@ def test_egress_rejects_wrong_owner_and_unexamined_ancestor(setup):
 def test_failure_output_is_withheld_before_tail_truncation(setup):
     _, ws, p, root, _ = setup
     spec = ws.workspace_auth("u", p.id)["spec"]
-    # Exercise the supervisor/output boundary with a benign local command, not confinement.
-    # The public run_tests path remains covered by the fail-closed and real-OS tests.
+    # The public run_tests path in its default (host) mode; confined runs share the same output
+    # handling, and their fail-closed refusal is covered below.
     argv = [sys.executable, "-I", "-c", "import sys; print(" + repr(canary() + "x" * 7000) + "); sys.exit(1)"]
-    result = Executor()._run_confined_tests("output-fixture", root, spec, None, argv)
+    result = Executor().run("output-fixture", "run_tests", {}, dict(spec, run_argv=argv))
     assert result["exit_code"] == 1
     assert result["stdout_tail"].startswith("[withheld:")
     assert canary() not in json.dumps(result)
@@ -152,7 +152,9 @@ def test_s01_unavailable_confinement_fails_before_project_code(setup, tmp_path, 
     outside = tmp_path / "execution-canary"
     outside.write_text("unchanged")
     spec = ws.workspace_auth("u", p.id)["spec"]
-    spec["run_argv"] = [sys.executable, "-c", f"from pathlib import Path; Path({str(outside)!r}).write_text('escaped')"]
+    # A workspace that requires confinement; the default host mode is covered in test_test_confinement_modes.
+    spec["test_confinement"] = "required"
+    spec["run_argv"] = ["python3", "-c", f"from pathlib import Path; Path({str(outside)!r}).write_text('escaped')"]
     def unavailable():
         raise sandbox.SandboxUnavailable("fixture unavailable")
     monkeypatch.setattr(sandbox, "_binary", unavailable)

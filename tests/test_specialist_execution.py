@@ -17,6 +17,15 @@ from pcim.run_service import RunService
 from pcim.tasks import TaskQueue
 from pcim.work_contracts import RunLimits, validate_work
 from pcim.workspace import Workspace
+from pcim.sandbox import unavailable_reason
+
+_NO_SANDBOX = unavailable_reason()
+# These cases need passing tests inside a verified Linux sandbox. Where none exists they are
+# skipped with the reason, never passed; ALTER_REQUIRE_CONFINEMENT=1 (the Linux verification
+# job and scripts/verify_alt4_execution.py) turns the skip back into a real run that must pass.
+requires_confinement = pytest.mark.skipif(
+    _NO_SANDBOX is not None and os.environ.get('ALTER_REQUIRE_CONFINEMENT') != '1',
+    reason=f'needs a verified Linux bubblewrap sandbox ({_NO_SANDBOX})')
 
 
 class MemoryState:
@@ -73,7 +82,8 @@ def env(tmp_path, monkeypatch, request):
     root = tmp_path / 'project'
     root.mkdir()
     check = "from pathlib import Path; exec(Path('calc.py').read_text()); assert add(2,3)==5; assert Path('README.txt').read_text()=='Use add'; import runpy; runpy.run_path('checks.py')"
-    ws.authorize_workspace('u', p.id, str(root), run_argv=['python3', '-c', check], allow_write=True)
+    ws.authorize_workspace('u', p.id, str(root), run_argv=['python3', '-c', check], allow_write=True,
+                          test_confinement='required')
     ws.set_mode('u', 'autonomous')
     ws.grant_autonomy('u', p.id, ['write_file', 'run_tests'], max_actions=30)
     q = TaskQueue(ws, Governor(ws))
@@ -103,6 +113,7 @@ def three_steps():
             write('checks.py', 'from calc import add\nassert add(2,3)==5\n'), tool('run_tests', reason='verify behavior'), {'text': 'verified'}]
 
 
+@requires_confinement
 def test_three_attributable_workers_real_files_and_test_receipts(env):
     ci, ws, pid, root, agent, s = env
     ad = script(agent, three_steps())
@@ -278,6 +289,7 @@ def test_invalid_limits(limits):
         RunLimits(**limits)
 
 
+@requires_confinement
 def test_modified_artifact_cannot_satisfy_final_completion(env):
     _, _, pid, root, agent, s = env
     script(agent, three_steps())
@@ -314,6 +326,7 @@ def test_changed_provider_access_prevents_pending_tool_effect(env):
     assert not list(root.iterdir())
 
 
+@requires_confinement
 def test_sqlite_restart_continues_dependencies_without_repeating_completed_action(env):
     ci, ws, pid, root, agent, s = env
     from pcim.run_state import RunStateStore
@@ -385,6 +398,7 @@ def test_final_export_rechecks_bytes_despite_successful_receipts(tmp_path):
     import hashlib
     from types import SimpleNamespace
     from pcim.orchestration import Coordinator
+    from pcim.sandbox import snapshot_digest
 
     path = tmp_path / 'artifact.txt'
     path.write_text('safe artifact')
@@ -394,7 +408,8 @@ def test_final_export_rechecks_bytes_despite_successful_receipts(tmp_path):
              dict(id='test', tool='run_tests', status='succeeded', created_at='2',
                   result={'exit_code': 0, 'timed_out': False, 'confinement': {
                       'backend': 'bubblewrap', 'verified': True, 'network': 'isolated',
-                      'filesystem': 'disposable-copy', 'host_writes': False}})]
+                      'filesystem': 'disposable-copy', 'host_writes': False,
+                      'snapshot_sha256': snapshot_digest(tmp_path)}})]
     coordinator = Coordinator(None, SimpleNamespace(workspace_auth=lambda *_: {'spec': {'root': str(tmp_path)}}), None, None)
     coordinator.tasks = lambda *_: tasks
     run = {'work': [{'id': 'w'}], 'attempts': [{'work_id': 'w', 'status': 'succeeded', 'session_id': 's'}], 'events': []}

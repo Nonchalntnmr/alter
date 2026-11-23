@@ -146,6 +146,9 @@ def cmd_init(argv: list[str]) -> int:
     ap.add_argument("--name")
     ap.add_argument("--tests", help='the test command, e.g. "python -m pytest -q" (default: detected)')
     ap.add_argument("--no-write", action="store_true", help="ALTER may read and run tests, never write")
+    ap.add_argument("--confine-tests", action="store_true",
+                    help="run tests only in a verified Linux bubblewrap sandbox, never on the host "
+                         "(refused where none is available, e.g. macOS)")
     ap.add_argument("--no-memory", action="store_true", help="do not store goal outcomes in memory")
     ap.add_argument("--provider", action="append", help="a model provider this project's content may go to "
                                                        "(e.g. claude-cli); default: the ones chosen at pcim init")
@@ -160,7 +163,8 @@ def cmd_init(argv: list[str]) -> int:
     run_argv = shlex.split(a.tests) if a.tests else _detect_tests(root)
     try:
         p = ws.create_project(uid, a.name or root.name, providers=a.provider)
-        ws.authorize_workspace(uid, p.id, str(root), run_argv=run_argv, allow_write=not a.no_write)
+        ws.authorize_workspace(uid, p.id, str(root), run_argv=run_argv, allow_write=not a.no_write,
+                               test_confinement="required" if a.confine_tests else "none")
     except WorkspaceError as e:
         print(f"alter init: {e}", file=sys.stderr)
         return 2
@@ -170,6 +174,8 @@ def cmd_init(argv: list[str]) -> int:
     print(f"  ALTER may read files here; {'write files and ' if not a.no_write else ''}run "
           f"{' '.join(run_argv) if run_argv else 'no test command (pass --tests)'}; each write and test run asks you "
           "first unless you grant autonomy.")
+    print("  tests run " + ("only in a verified Linux sandbox (refused where none is available)" if a.confine_tests
+                            else "on this machine, unconfined, after you approve them"))
     print(f"  model providers that may see this project: {', '.join(ws.provider_vendors(uid, p.id)) or 'none'}")
     print("  goal outcomes are " + ("not stored" if a.no_memory else "stored in your memory (alter memory; forget any)"))
     if not set(ws.provider_vendors(uid, p.id)) - {"mock"}:

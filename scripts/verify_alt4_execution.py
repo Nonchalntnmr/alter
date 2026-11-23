@@ -89,7 +89,7 @@ def main(argv=None):
             command = [sys.executable, '-m', 'pytest', '-q', '-p', 'no:cacheprovider',
                        '--junitxml=' + str(junit),
                        *['tests/test_specialist_execution.py::' + name for name in NAMES]]
-            env = dict(os.environ, PCIM_EMBEDDER='hashing-512', HF_HUB_OFFLINE='1',
+            env = dict(os.environ, PCIM_EMBEDDER='hashing-512', HF_HUB_OFFLINE='1', ALTER_REQUIRE_CONFINEMENT='1',
                        PCIM_HOME=str(directory / 'home'), TMPDIR=str(directory))
             try:
                 with log.open('w') as stream:
