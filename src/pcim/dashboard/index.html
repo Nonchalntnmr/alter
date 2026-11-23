@@ -78,7 +78,7 @@ table { width:100%; border-collapse:collapse; font-size:13.5px; } td, th { text-
 <script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const tabs = ["Workspace", "Models", "Autonomy", "Memory", "Consent", "Receipts", "Audit"];
+const tabs = ["Workspace", "Execution", "Models", "Autonomy", "Memory", "Consent", "Receipts", "Audit"];
 const VENDORS = ["anthropic", "openai", "google", "local", "mock"];
 let lastTasks = [];
 let tab = "Workspace", project = null;
@@ -100,6 +100,7 @@ async function render() {
     const a = await api("GET", "/v1/autonomy");
     $("#status").innerHTML = `mode: ${esc(a.mode)}${a.halted ? ' · <span class="halted">HALTED</span>' : ''}`;
     m.innerHTML = await views[tab](a);
+    if (tab === "Execution") await refreshRuns();
     const box = document.querySelector(".msgs"); if (box) box.scrollTop = box.scrollHeight;
   } catch (e) { m.innerHTML = `<div class="card" style="color:var(--bad)">${esc(e.message)}</div>`; }
 }
@@ -127,6 +128,16 @@ function taskLine(t) {
           ${t.reason ? `<div class="muted">${esc(t.reason)}</div>` : ""}${res}${extra}</div>`;
 }
 const views = {
+  async Execution() {
+    const ps = await api("GET", "/v1/projects");
+    if (!ps.some(p => p.id === project)) project = ps[0]?.id || null;
+    return `<div class="card"><h1>ALTER execution</h1><p class="muted">Shared with <code>alter runs</code>. Create a plan, then run each next step. Actions remain subject to project permissions and approvals.</p>
+      <label for="run-project">Project</label><select id="run-project">${ps.map(p => `<option value="${esc(p.id)}" ${p.id === project ? 'selected' : ''}>${esc(p.name)}</option>`).join("")}</select>
+      ${project ? `<label for="run-objective">What should ALTER accomplish?</label><textarea id="run-objective" placeholder="Describe the outcome and acceptance checks"></textarea>
+      <button class="act" data-run-action="start">Create plan</button>` : '<p>Create a project in Workspace first.</p>'}
+      <span id="run-feedback" role="status" aria-live="polite"></span></div>
+      <div id="run-panel" aria-live="polite"><button class="ghost" data-run-action="refresh">Load runs</button></div>`;
+  },
   async Workspace() {
     const ps = await api("GET", "/v1/projects");
     if (!project && ps.length) project = ps[0].id;
@@ -258,6 +269,72 @@ async function addNote() { await act("POST", `/v1/projects/${project}/notes`, { 
 async function setMode(mode) { await act("PUT", "/v1/autonomy", { mode }); }
 async function grant() { await act("POST", "/v1/autonomy/grants", { project_id: $("#gp").value, tools: [$("#gt").value], max_actions: +$("#gn").value, ttl_minutes: +$("#gm").value }); }
 async function pref() { await act("POST", "/v1/preferences", { topic: $("#pt").value, value: $("#pv").value }); }
+let selectedRun = null, runLoading = false, runMutating = false;
+const runPath = id => `/v1/projects/${encodeURIComponent(project)}/runs/${encodeURIComponent(id)}`;
+function runFeedback(message) {
+  const el = $("#run-feedback"); if (el) el.textContent = message;
+}
+function runSection(title, value) {
+  return `<details open><summary>${esc(title)}</summary><pre>${esc(JSON.stringify(value ?? [], null, 2))}</pre></details>`;
+}
+async function refreshRuns() {
+  if (tab !== "Execution" || !project || runLoading) return;
+  runLoading = true;
+  const pid = project, token = $("#token").value;
+  try {
+    const list = await api("GET", `/v1/projects/${encodeURIComponent(pid)}/runs`);
+    if (!list.some(r => r.id === selectedRun)) selectedRun = list[0]?.id || null;
+    const rid = selectedRun;
+    const [run, history] = rid ? await Promise.all([api("GET", runPath(rid)), api("GET", runPath(rid) + "/events")]) : [null, []];
+    const pending = (run?.attempts?.at(-1)?.pending || []);
+    const approvals = await Promise.all(pending.map(a => typeof a === "string" ? api("GET", "/v1/tasks/" + encodeURIComponent(a)) : a));
+    if (tab !== "Execution" || project !== pid || $("#token").value !== token) return;
+    const panel = $("#run-panel"); if (!panel) return;
+    panel.innerHTML = `<div class="card"><h2>Runs</h2><div class="row">${list.map(r => `<button class="ghost" data-run-select="${esc(r.id)}">${esc(r.goal || r.id)} · ${esc(r.status)}</button>`).join("") || '<p>No executions yet.</p>'}
+      <button class="ghost" data-run-action="refresh">Refresh</button></div></div>` + (run ? `<div class="card"><h2>${esc(run.goal || run.id)}</h2>${chip(run.status)} <code>${esc(run.id)}</code>
+      <div class="row">${["advance", "pause", "resume", "cancel"].map(action => `<button class="ghost" data-run-action="${action}" data-run-id="${esc(rid)}">${action === "advance" ? "Run next step" : action}</button>`).join("")}</div>
+      ${runSection("Plan and tasks", run.work)}${runSection("Progress and attempts", run.attempts)}${runSection("Evidence", (run.attempts || []).flatMap(a => a.evidence || []))}${runSection("Verification", run.verification)}
+      <h2>Approvals</h2>${approvals.map(a => `<div class="approve"><pre>${esc(JSON.stringify(a, null, 2))}</pre>${a.status === "awaiting_approval" ? `<button class="act" data-run-action="approve" data-run-id="${esc(rid)}" data-task-id="${esc(a.id)}">Approve exact action</button> <button class="ghost" data-run-action="deny" data-run-id="${esc(rid)}" data-task-id="${esc(a.id)}">Deny</button>` : ''}</div>`).join("") || '<p class="muted">No pending approvals.</p>'}
+      ${runSection("History", history)}</div>` : '');
+    // Keep steering input outside the polled panel, preserving text and keyboard focus.
+    let steer = $("#run-steer-form");
+    if (run && !steer) {
+      steer = document.createElement("div"); steer.id = "run-steer-form"; steer.className = "card";
+      steer.innerHTML = '<label for="run-message">Steer selected run</label><textarea id="run-message"></textarea><button class="ghost" data-run-action="steer">Send guidance</button>';
+      panel.after(steer);
+    }
+    if (steer) steer.hidden = !run;
+  } catch (e) { runFeedback(e.message + " Retry with Refresh."); }
+  finally { runLoading = false; }
+}
+$("#main").addEventListener("change", e => {
+  if (e.target.id === "run-project") { selectedRun = null; selectProject(e.target.value); }
+});
+$("#main").addEventListener("click", async e => {
+  const button = e.target.closest("[data-run-action], [data-run-select]"); if (!button) return;
+  if (button.dataset.runSelect) { selectedRun = button.dataset.runSelect; await refreshRuns(); return; }
+  const action = button.dataset.runAction, rid = button.dataset.runId || selectedRun;
+  if (action === "refresh") { await refreshRuns(); return; }
+  if (runMutating) return;
+  runMutating = true; button.disabled = true; runFeedback("Working…");
+  try {
+    if (action === "start") {
+      const objective = $("#run-objective").value.trim();
+      if (!objective) throw new Error("Describe the outcome first.");
+      const r = await api("POST", `/v1/projects/${encodeURIComponent(project)}/runs`, {objective});
+      selectedRun = r.id; $("#run-objective").value = "";
+    } else if (action === "steer") {
+      const message = $("#run-message").value.trim();
+      if (!message) throw new Error("Enter guidance first.");
+      await api("POST", runPath(rid) + "/steer", {message}); $("#run-message").value = "";
+    } else if (action === "approve" || action === "deny") {
+      await api("POST", runPath(rid) + "/approvals/" + encodeURIComponent(button.dataset.taskId), {approve: action === "approve"});
+    } else { await api("POST", runPath(rid) + "/" + action); }
+    runFeedback("Saved."); await refreshRuns();
+  } catch (e) { runFeedback(e.message); }
+  finally { runMutating = false; button.disabled = false; }
+});
+setInterval(() => { if (tab === "Execution" && !runMutating && !document.hidden && !$("#run-panel")?.contains(document.activeElement)) refreshRuns(); }, 3000);
 render();
 </script>
 </body>

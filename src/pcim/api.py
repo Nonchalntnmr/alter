@@ -140,6 +140,18 @@ class ChatIn(BaseModel):
     model: str | None = None
     new_session: bool = False
 
+class RunStartIn(BaseModel):
+    objective: str = Field(min_length=1, max_length=50_000)
+
+
+class RunSteerIn(BaseModel):
+    message: str = Field(min_length=1, max_length=50_000)
+
+
+class RunApprovalIn(BaseModel):
+    approve: bool
+
+
 class ReasonIn(BaseModel):
     reason: str = ""
 
@@ -166,7 +178,7 @@ def _item_out(i) -> dict:
     return d
 
 
-def create_app(ci: PersonalCI) -> FastAPI:
+def create_app(ci: PersonalCI, *, run_service=None) -> FastAPI:
     app = FastAPI(title="Personal CI", version="0.1.0",
                   description="Local API for Personal CI. Every call is consent-checked and audited.")
 
@@ -365,6 +377,69 @@ def create_app(ci: PersonalCI) -> FastAPI:
             raise HTTPException(502, f"model provider error: {e}")
         except (TaskStateError, RuntimeError) as e:
             raise HTTPException(409, str(e))
+
+    app.state.run_service = run_service
+
+    def runs():
+        if app.state.run_service is None:
+            try:
+                from .run_service import RunService
+            except ImportError:
+                raise HTTPException(503, "Execution service unavailable; install the integrated ALTER build.") from None
+            app.state.run_service = RunService(ci)
+        return app.state.run_service
+
+    @app.get("/v1/projects/{pid}/runs")
+    def run_list(pid: str, uid: str = Depends(user)):
+        guard(ws.get_project, uid, pid)
+        return guard(runs().list, uid, pid)
+
+    @app.post("/v1/projects/{pid}/runs")
+    def run_start(pid: str, body: RunStartIn, uid: str = Depends(user)):
+        guard(ws.get_project, uid, pid)
+        if not body.objective.strip():
+            raise HTTPException(422, "objective must contain text")
+        return guard(runs().start, uid, pid, body.objective, set(guard(ws.provider_vendors, uid, pid)))
+
+    @app.get("/v1/projects/{pid}/runs/{rid}")
+    def run_get(pid: str, rid: str, uid: str = Depends(user)):
+        return guard(runs().get, uid, pid, rid)
+
+    @app.get("/v1/projects/{pid}/runs/{rid}/events")
+    def run_events(pid: str, rid: str, uid: str = Depends(user)):
+        return guard(runs().get, uid, pid, rid)["events"]
+
+    @app.post("/v1/projects/{pid}/runs/{rid}/advance")
+    def run_advance(pid: str, rid: str, uid: str = Depends(user)):
+        guard(ws.get_project, uid, pid)
+        return guard(runs().advance, uid, pid, rid)
+
+    @app.post("/v1/projects/{pid}/runs/{rid}/pause")
+    def run_pause(pid: str, rid: str, uid: str = Depends(user)):
+        guard(ws.get_project, uid, pid)
+        return guard(runs().pause, uid, pid, rid)
+
+    @app.post("/v1/projects/{pid}/runs/{rid}/resume")
+    def run_resume(pid: str, rid: str, uid: str = Depends(user)):
+        guard(ws.get_project, uid, pid)
+        return guard(runs().resume, uid, pid, rid)
+
+    @app.post("/v1/projects/{pid}/runs/{rid}/cancel")
+    def run_cancel(pid: str, rid: str, uid: str = Depends(user)):
+        guard(ws.get_project, uid, pid)
+        return guard(runs().cancel, uid, pid, rid)
+
+    @app.post("/v1/projects/{pid}/runs/{rid}/steer")
+    def run_steer(pid: str, rid: str, body: RunSteerIn, uid: str = Depends(user)):
+        guard(ws.get_project, uid, pid)
+        if not body.message.strip():
+            raise HTTPException(422, "message must contain text")
+        return guard(runs().steer, uid, pid, rid, body.message)
+
+    @app.post("/v1/projects/{pid}/runs/{rid}/approvals/{tid}")
+    def run_approval(pid: str, rid: str, tid: str, body: RunApprovalIn, uid: str = Depends(user)):
+        guard(ws.get_project, uid, pid)
+        return guard(runs().resolve, uid, pid, rid, tid, approve=body.approve)
 
     def turn_out(t):
         return t.as_dict() if hasattr(t, "as_dict") else t

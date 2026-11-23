@@ -11,6 +11,9 @@
                                            next steps. An existing identity is never changed.
     alter status                           who, where, what is running, what waits for you
     alter context ["topic"]                what ALTER can see here, and where each piece came from (no model call)
+    alter runs [list | start "…" | show RUN | events RUN | pause RUN | resume RUN | cancel RUN
+                | say RUN "…" | advance RUN | approve RUN TASK | deny RUN TASK] [--json]
+                                           shared specialist execution; same state as the web dashboard
     alter goals [list | show ID | start "…" [--background] | resume ID [--background]
                  | say ID "…" | pause ID | cancel ID | forget ID]
     alter approve [TASK] · alter deny [TASK] ["why"]
@@ -1161,6 +1164,71 @@ def repl() -> int:
     return Conversation(ci, uid, here).run()
 
 
+def _run_vendors(ci, uid, pid):
+    from .workspace import Workspace
+    return set(Workspace(ci).provider_vendors(uid, pid))
+
+
+def _run_service(ci):
+    try:
+        from .run_service import RunService
+    except ImportError:
+        raise RuntimeError("Execution service unavailable; install the integrated ALTER build.") from None
+    return RunService(ci)
+
+
+def cmd_runs(argv: list[str]) -> int:
+    """Thin shared execution adapter; the service owns all state transitions."""
+    ap = argparse.ArgumentParser(prog="alter runs", description="Specialist execution shared with the web dashboard.")
+    ap.add_argument("action", nargs="?", default="list",
+                    choices=["list", "start", "show", "events", "advance", "pause", "resume", "cancel", "say", "approve", "deny"])
+    ap.add_argument("rest", nargs="*")
+    ap.add_argument("--json", action="store_true", help="print the service snapshot without display formatting")
+    a = ap.parse_args(argv)
+    if a.action != "list" and not a.rest:
+        ap.error(f"{a.action} requires an objective or run ID")
+    if a.action in {"approve", "deny"} and len(a.rest) < 2:
+        ap.error(f"{a.action} requires RUN TASK")
+    if a.action == "say" and len(a.rest) < 2:
+        ap.error("say requires RUN MESSAGE")
+    counts = {"list": 0, "show": 1, "events": 1, "advance": 1, "pause": 1, "resume": 1,
+              "cancel": 1, "approve": 2, "deny": 2}
+    if a.action in counts and len(a.rest) != counts[a.action]:
+        ap.error(f"{a.action} expects {counts[a.action]} argument(s)")
+    ci, uid, here = _ctx()
+    if not _need_here(here):
+        return 2
+    pid = here.project_id
+    try:
+        service = _run_service(ci)
+        if a.action in {"start", "list"}:
+            if a.action == "start":
+                objective = " ".join(a.rest).strip()
+                if not objective:
+                    ap.error("objective must contain text")
+                result = service.start(uid, pid, objective, _run_vendors(ci, uid, pid))
+            else:
+                result = service.list(uid, here.project_id)
+        elif a.action in {"approve", "deny"}:
+            result = service.resolve(uid, pid, a.rest[0], a.rest[1], approve=a.action == "approve")
+        elif a.action == "say":
+            result = service.steer(uid, pid, a.rest[0], " ".join(a.rest[1:]))
+        else:
+            method = "get" if a.action in {"show", "events"} else a.action
+            result = getattr(service, method)(uid, pid, a.rest[0])
+            if a.action == "events":
+                result = result["events"]
+    except KeyError:
+        print("alter runs: run or task not found for this owner.", file=sys.stderr)
+        return 2
+    except (ValueError, RuntimeError, PermissionError, G.GoalError) as e:
+        print(terminal_safe(f"alter runs: {e}"), file=sys.stderr)
+        return 2
+    output = json.dumps(result, indent=2, ensure_ascii=True)
+    print(output if a.json else terminal_safe(output))
+    return 0
+
+
 # --------------------------------------------------------------------------- main
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
@@ -1180,7 +1248,7 @@ def main(argv: list[str] | None = None) -> int:
     table = {"init": cmd_init, "setup": cmd_setup, "config": cmd_config, "status": cmd_status, "context": cmd_context, "goals": cmd_goals, "goal": cmd_goals,
              "tasks": cmd_tasks, "memory": cmd_memory, "permissions": cmd_permissions, "vault": cmd_vault,
              "weekly": cmd_weekly, "doctor": cmd_doctor, "ask": cmd_ask, "report": cmd_report,
-             "backup": cmd_backup, "restore": cmd_restore,
+             "backup": cmd_backup, "restore": cmd_restore, "runs": cmd_runs,
              "approve": lambda a: cmd_resolve(a, True), "deny": lambda a: cmd_resolve(a, False),
              "say": lambda a: cmd_event("steer", a), "pause": lambda a: cmd_event("pause", a),
              "cancel": lambda a: cmd_event("cancel", a), "ci": T.main}
