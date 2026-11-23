@@ -864,6 +864,11 @@ class Store:
             try:
                 counts = {t: self._db.execute(f"DELETE FROM {t} WHERE project_id=?", (project_id,)).rowcount
                           for t in ("sessions", "tasks", "authorizations", "claims", "exchange_messages")}
+                # Optional specialist schema is installed by RunStateStore. Remove
+                # encrypted ledgers and fencing metadata in the same deletion transaction.
+                for table in ("specialist_events", "specialist_revisions", "specialist_runs", "specialist_leases"):
+                    if self._db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
+                        counts[table] = self._db.execute(f"DELETE FROM {table} WHERE project_id=?", (project_id,)).rowcount
                 counts["projects"] = self._db.execute("DELETE FROM projects WHERE id=?", (project_id,)).rowcount
                 doomed_keys = [key_id]
                 int_deleted = 0

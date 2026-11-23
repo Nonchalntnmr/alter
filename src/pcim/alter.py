@@ -11,6 +11,9 @@
                                            next steps. An existing identity is never changed.
     alter status                           who, where, what is running, what waits for you
     alter context ["topic"]                what ALTER can see here, and where each piece came from (no model call)
+    alter runs [list | start "…" | show RUN | events RUN | pause RUN | resume RUN | cancel RUN
+                | say RUN "…" | advance RUN | approve RUN TASK | deny RUN TASK] [--json]
+                                           shared specialist execution; same state as the web dashboard
     alter goals [list | show ID | start "…" [--background] | resume ID [--background]
                  | say ID "…" | pause ID | cancel ID | forget ID]
     alter approve [TASK] · alter deny [TASK] ["why"]
@@ -143,6 +146,9 @@ def cmd_init(argv: list[str]) -> int:
     ap.add_argument("--name")
     ap.add_argument("--tests", help='the test command, e.g. "python -m pytest -q" (default: detected)')
     ap.add_argument("--no-write", action="store_true", help="ALTER may read and run tests, never write")
+    ap.add_argument("--confine-tests", action="store_true",
+                    help="run tests only in a verified Linux bubblewrap sandbox, never on the host "
+                         "(refused where none is available, e.g. macOS)")
     ap.add_argument("--no-memory", action="store_true", help="do not store goal outcomes in memory")
     ap.add_argument("--provider", action="append", help="a model provider this project's content may go to "
                                                        "(e.g. claude-cli); default: the ones chosen at pcim init")
@@ -157,7 +163,8 @@ def cmd_init(argv: list[str]) -> int:
     run_argv = shlex.split(a.tests) if a.tests else _detect_tests(root)
     try:
         p = ws.create_project(uid, a.name or root.name, providers=a.provider)
-        ws.authorize_workspace(uid, p.id, str(root), run_argv=run_argv, allow_write=not a.no_write)
+        ws.authorize_workspace(uid, p.id, str(root), run_argv=run_argv, allow_write=not a.no_write,
+                               test_confinement="required" if a.confine_tests else "none")
     except WorkspaceError as e:
         print(f"alter init: {e}", file=sys.stderr)
         return 2
@@ -167,6 +174,8 @@ def cmd_init(argv: list[str]) -> int:
     print(f"  ALTER may read files here; {'write files and ' if not a.no_write else ''}run "
           f"{' '.join(run_argv) if run_argv else 'no test command (pass --tests)'}; each write and test run asks you "
           "first unless you grant autonomy.")
+    print("  tests run " + ("only in a verified Linux sandbox (refused where none is available)" if a.confine_tests
+                            else "on this machine, unconfined, after you approve them"))
     print(f"  model providers that may see this project: {', '.join(ws.provider_vendors(uid, p.id)) or 'none'}")
     print("  goal outcomes are " + ("not stored" if a.no_memory else "stored in your memory (alter memory; forget any)"))
     if not set(ws.provider_vendors(uid, p.id)) - {"mock"}:
@@ -1161,6 +1170,71 @@ def repl() -> int:
     return Conversation(ci, uid, here).run()
 
 
+def _run_vendors(ci, uid, pid):
+    from .workspace import Workspace
+    return set(Workspace(ci).provider_vendors(uid, pid))
+
+
+def _run_service(ci):
+    try:
+        from .run_service import RunService
+    except ImportError:
+        raise RuntimeError("Execution service unavailable; install the integrated ALTER build.") from None
+    return RunService(ci)
+
+
+def cmd_runs(argv: list[str]) -> int:
+    """Thin shared execution adapter; the service owns all state transitions."""
+    ap = argparse.ArgumentParser(prog="alter runs", description="Specialist execution shared with the web dashboard.")
+    ap.add_argument("action", nargs="?", default="list",
+                    choices=["list", "start", "show", "events", "advance", "pause", "resume", "cancel", "say", "approve", "deny"])
+    ap.add_argument("rest", nargs="*")
+    ap.add_argument("--json", action="store_true", help="print the service snapshot without display formatting")
+    a = ap.parse_args(argv)
+    if a.action != "list" and not a.rest:
+        ap.error(f"{a.action} requires an objective or run ID")
+    if a.action in {"approve", "deny"} and len(a.rest) < 2:
+        ap.error(f"{a.action} requires RUN TASK")
+    if a.action == "say" and len(a.rest) < 2:
+        ap.error("say requires RUN MESSAGE")
+    counts = {"list": 0, "show": 1, "events": 1, "advance": 1, "pause": 1, "resume": 1,
+              "cancel": 1, "approve": 2, "deny": 2}
+    if a.action in counts and len(a.rest) != counts[a.action]:
+        ap.error(f"{a.action} expects {counts[a.action]} argument(s)")
+    ci, uid, here = _ctx()
+    if not _need_here(here):
+        return 2
+    pid = here.project_id
+    try:
+        service = _run_service(ci)
+        if a.action in {"start", "list"}:
+            if a.action == "start":
+                objective = " ".join(a.rest).strip()
+                if not objective:
+                    ap.error("objective must contain text")
+                result = service.start(uid, pid, objective, _run_vendors(ci, uid, pid))
+            else:
+                result = service.list(uid, here.project_id)
+        elif a.action in {"approve", "deny"}:
+            result = service.resolve(uid, pid, a.rest[0], a.rest[1], approve=a.action == "approve")
+        elif a.action == "say":
+            result = service.steer(uid, pid, a.rest[0], " ".join(a.rest[1:]))
+        else:
+            method = "get" if a.action in {"show", "events"} else a.action
+            result = getattr(service, method)(uid, pid, a.rest[0])
+            if a.action == "events":
+                result = result["events"]
+    except KeyError:
+        print("alter runs: run or task not found for this owner.", file=sys.stderr)
+        return 2
+    except (ValueError, RuntimeError, PermissionError, G.GoalError) as e:
+        print(terminal_safe(f"alter runs: {e}"), file=sys.stderr)
+        return 2
+    output = json.dumps(result, indent=2, ensure_ascii=True)
+    print(output if a.json else terminal_safe(output))
+    return 0
+
+
 # --------------------------------------------------------------------------- main
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
@@ -1180,7 +1254,7 @@ def main(argv: list[str] | None = None) -> int:
     table = {"init": cmd_init, "setup": cmd_setup, "config": cmd_config, "status": cmd_status, "context": cmd_context, "goals": cmd_goals, "goal": cmd_goals,
              "tasks": cmd_tasks, "memory": cmd_memory, "permissions": cmd_permissions, "vault": cmd_vault,
              "weekly": cmd_weekly, "doctor": cmd_doctor, "ask": cmd_ask, "report": cmd_report,
-             "backup": cmd_backup, "restore": cmd_restore,
+             "backup": cmd_backup, "restore": cmd_restore, "runs": cmd_runs,
              "approve": lambda a: cmd_resolve(a, True), "deny": lambda a: cmd_resolve(a, False),
              "say": lambda a: cmd_event("steer", a), "pause": lambda a: cmd_event("pause", a),
              "cancel": lambda a: cmd_event("cancel", a), "ci": T.main}

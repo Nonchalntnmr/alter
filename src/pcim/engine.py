@@ -404,6 +404,8 @@ class PersonalCI:
             meta={"policy": pol.name, "version": pol.version, "budget": budget},
         )
         prompt = render(packet)
+        from .sovereignty.content import assert_safe_payload
+        assert_safe_payload(prompt)
         resp = adapter.generate(prompt)
         plan_cost = plan.cost_usd if plan is not None else 0.0
         cost = None if resp.cost_usd is None or plan_cost is None else resp.cost_usd + plan_cost
