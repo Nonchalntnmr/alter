@@ -1,5 +1,6 @@
 """Disposable S01/S02/P01 checks. Scripted requests are never live-model evidence."""
 import json
+import os
 import sys
 
 import pytest
@@ -180,17 +181,19 @@ def test_s01_actual_confinement_canary_network_namespace_and_test_receipt(tmp_pa
     """Runs real OS confinement where available; skip is explicitly not live success."""
     root = tmp_path / "project"
     root.mkdir()
-    try:
-        sandbox._binary()
-    except sandbox.SandboxUnavailable as error:
-        pytest.skip(str(error))
+    # The real probe decides, not the binary's presence: a hosted Ubuntu 24.04 image ships
+    # bubblewrap but denies unprivileged user namespaces through AppArmor.
+    reason = sandbox.unavailable_reason()
+    if reason is not None and os.environ.get("ALTER_REQUIRE_CONFINEMENT") != "1":
+        pytest.skip(reason)
     outside = tmp_path / "outside"
     outside.write_text("unchanged")
     script = ("from pathlib import Path; import socket; "
               f"assert not Path({str(outside)!r}).exists(); "
               "assert not Path('/home').exists(); "
               "Path('made-in-copy').write_text('ok'); print('confined')")
-    spec = {"root": str(root), "run_argv": ["python3", "-I", "-c", script], "run_timeout_s": 20}
+    spec = {"root": str(root), "run_argv": ["python3", "-I", "-c", script], "run_timeout_s": 20,
+            "test_confinement": "required"}
     result = Executor().run("real-confinement", "run_tests", {"reason": "fixture"}, spec)
     assert result["exit_code"] == 0 and result["confinement"]["verified"]
     assert "confined" in result["stdout_tail"] and outside.read_text() == "unchanged"

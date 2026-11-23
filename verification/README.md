@@ -46,5 +46,10 @@ probe pass. If the probe is denied, the result is BLOCKED.
 The `confined-linux` job in `.github/workflows/tests.yml` runs the same verifier on a hosted
 `ubuntu-24.04` runner and uploads the report. It is not yet a required check.
 
+Observed on 2026-11-23, on GitHub's hosted `ubuntu-24.04` runner (Ubuntu 24.04.5, kernel
+7.0.0-azure, root-owned bubblewrap 0.9.0): `kernel.apparmor_restrict_unprivileged_userns = 1`,
+the probe is denied, and all five cases are BLOCKED. A runner whose existing policy permits
+unprivileged user namespaces is still needed.
+
 Only system interpreters and packages under /usr are visible inside the sandbox, so the fixture
 uses only the standard library.
