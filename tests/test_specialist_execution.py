@@ -423,3 +423,53 @@ def test_generate_preflight_blocks_before_adapter(env, monkeypatch):
     ci, _, _, _, _, _ = env
     with pytest.raises(ContentBlocked):
         ci.ask('u', 'ALTER_SECRET_CANARY_generate123', provider='mock')
+
+
+@pytest.mark.parametrize('condition', ['revoked-provider', 'exhausted-budget', 'normal'])
+def test_human_denial_never_requires_model_access_or_remaining_budget(env, condition):
+    _, ws, pid, root, agent, service = env
+    ws.set_mode('u', 'collaborative')
+    adapter = script(agent, [write('calc.py', 'unsafe pending change'), {'text': 'must not be called'}])
+    run = service.advance('u', pid, start(service, pid)['id'])
+    task_id = run['attempts'][-1]['pending'][0]
+    before = len(adapter.requests)
+    if condition == 'revoked-provider':
+        ws.revoke_provider('u', pid, 'mock')
+    if condition == 'exhausted-budget':
+        run['usage']['steps'] = run['limits']['max_model_steps']
+        service.state.save('u', pid, run['id'], run, run['revision'])
+    result = service.resolve('u', pid, run['id'], task_id, approve=False)
+    assert service.queue.get('u', task_id).status == 'denied'
+    assert result['status'] == 'incomplete'
+    assert len(adapter.requests) == before
+    assert not (root / 'calc.py').exists()
+    assert agent._load('u', pid, result['attempts'][-1]['session_id'])['_row']['status'] == 'closed'
+    assert service.get('u', pid, run['id'])['status'] == 'incomplete'
+
+
+def test_denial_cancels_sibling_pending_actions_without_continuation(env):
+    ci, ws, pid, root, agent, service = env
+    ws.set_mode('u', 'collaborative')
+    first = write('first.txt', 'first')['tool_uses'][0]
+    second = dict(write('second.txt', 'second')['tool_uses'][0], id='second')
+    adapter = script(agent, [{'tool_uses': [first, second]}])
+    run = service.advance('u', pid, start(service, pid)['id'])
+    pending = run['attempts'][-1]['pending']
+    assert len(pending) == 2
+    result = service.resolve('u', pid, run['id'], pending[0], approve=False)
+    assert [service.queue.get('u', tid).status for tid in pending] == ['denied', 'cancelled']
+    assert result['attempts'][-1]['pending'] == []
+    assert result['status'] == 'incomplete' and len(adapter.requests) == 1
+    assert not list(root.iterdir())
+    from pcim.run_state import RunStateStore
+    if isinstance(service.state, RunStateStore):
+        location = Path(ci.store.path).parent
+        ci.store.close()
+        reopened = PersonalCI(location, seed=0)
+        restored = RunService(reopened)
+        assert restored.get('u', pid, run['id'])['status'] == 'incomplete'
+        assert [restored.queue.get('u', tid).status for tid in pending] == ['denied', 'cancelled']
+        with pytest.raises(ValueError):
+            restored.resolve('u', pid, run['id'], pending[0], approve=True)
+        assert not list(root.iterdir())
+        reopened.store.close()

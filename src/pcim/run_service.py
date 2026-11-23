@@ -149,6 +149,31 @@ class RunService:
                 raise ValueError('approval does not belong to this attempt')
             if t.status != 'awaiting_approval':
                 raise ValueError('approval already resolved; reconcile without replay')
+            if not approve:
+                # Human refusal is local control, not permission for another provider call.
+                # Persist before changing queue/session state; ambiguity never auto-replays.
+                a['status'] = run['status'] = 'running'
+                run = self._save(uid, project_id, run)
+                a = run['attempts'][-1]
+                w = next(x for x in run['work'] if x['id'] == a['work_id'])
+                try:
+                    self.agent.close_session(uid, project_id, a['session_id'])
+                    self.queue.deny(uid, task_id)
+                    for sibling in a.get('pending', []):
+                        if sibling != task_id:
+                            task = self.queue.get(uid, sibling)
+                            if task.status in ('awaiting_approval', 'approved'):
+                                self.queue.cancel(uid, sibling)
+                    a['pending'] = []
+                    a['pending_detail'] = []
+                    a['evidence'] = self.coordinator.evidence(uid, project_id, w, a)
+                    a['finished_at'] = utcnow().isoformat()
+                    a['status'] = w['status'] = run['status'] = 'incomplete'
+                    event(run, 'work.denied', work_id=w['id'], attempt_id=a['id'], task_id=task_id)
+                except Exception as error:
+                    a['status'] = w['status'] = run['status'] = 'interrupted'
+                    event(run, 'work.interrupted', attempt_id=a['id'], error_type=type(error).__name__)
+                return self._save(uid, project_id, run)
             self.ws.require_provider(uid, project_id, a['route']['provider'])
             w = next(w for w in run['work'] if w['id'] == a['work_id'])
             base = self.agent.limits
