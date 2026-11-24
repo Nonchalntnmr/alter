@@ -488,7 +488,8 @@ class Workspace:
             "last_session": reflection,
             "pending_approvals": [dict(r) for r in pending],
             "workspace": ({"root": ws["spec"]["root"], "can_run_tests": ws["spec"]["run_argv"] is not None,
-                           "can_write": ws["spec"]["allow_write"]} if ws else None),
+                           "can_write": ws["spec"]["allow_write"],
+                           "test_confinement": ws["spec"].get("test_confinement", "none")} if ws else None),
             "mode": self.get_mode(user_id),
             "withheld": withheld,
         }
@@ -546,6 +547,11 @@ def render_briefing(b: dict) -> str:
         w = b["workspace"]
         parts.append(f"Authorized workspace: {w['root']} (tests: {'allowed with approval' if w['can_run_tests'] else 'not configured'}; "
                      f"writes: {'allowed with approval' if w['can_write'] else 'not allowed'})")
+        if w["can_run_tests"]:
+            parts.append("Test runs: " + (
+                "only in a verified Linux sandbox, refused where none is available."
+                if w.get("test_confinement") == "required" else
+                "on the host after approval, unconfined; a host result is never confined evidence."))
     else:
         parts.append("No workspace directory is authorized for this project; file tools will be refused.")
     parts.append(f"Autonomy mode: {b['mode']}")
