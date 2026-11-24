@@ -420,9 +420,10 @@ def cmd_status(argv: list[str]) -> int:
         print(f"  here: {here.name} · {here.root}")
         print(f"    write {'yes' if a.get('allow_write') else 'no'} · tests {' '.join(a['run_argv']) if a.get('run_argv') else 'none'}"
               f" · providers {', '.join(sorted(here.vendors)) or 'none'}")
-        print("    tests: " + ("verified Linux confinement required; refused when unavailable"
-                                  if a.get("test_confinement") == "required" else
-                                  "host, unconfined · backend: none · verified: false"))
+        if a.get("run_argv"):
+            print("    tests run: " + ("only in a verified Linux sandbox; refused where none is available"
+                                       if a.get("test_confinement") == "required" else
+                                       "on this machine after approval, unconfined (receipt: verified false)"))
         goals = gs.list(uid, here.project_id, limit=10)
     active = [g for g in goals if g.status in G.ACTIVE]
     print(f"  goals: {len(active)} active, {len(goals) - len(active)} recent finished"

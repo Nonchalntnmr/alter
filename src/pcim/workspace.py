@@ -547,10 +547,11 @@ def render_briefing(b: dict) -> str:
         w = b["workspace"]
         parts.append(f"Authorized workspace: {w['root']} (tests: {'allowed with approval' if w['can_run_tests'] else 'not configured'}; "
                      f"writes: {'allowed with approval' if w['can_write'] else 'not allowed'})")
-        parts.append("Test execution: " + (
-            "requires verified Linux bubblewrap; refused when unavailable. Configuration is not a verified receipt."
-            if w.get("test_confinement") == "required" else
-            "host, unconfined (backend: none, verified: false); cannot satisfy specialist or secured gates."))
+        if w["can_run_tests"]:
+            parts.append("Test runs: " + (
+                "only in a verified Linux sandbox, refused where none is available."
+                if w.get("test_confinement") == "required" else
+                "on the host after approval, unconfined; a host result is never confined evidence."))
     else:
         parts.append("No workspace directory is authorized for this project; file tools will be refused.")
     parts.append(f"Autonomy mode: {b['mode']}")

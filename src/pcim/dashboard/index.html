@@ -131,7 +131,7 @@ const views = {
   async Execution() {
     const ps = await api("GET", "/v1/projects");
     if (!ps.some(p => p.id === project)) project = ps[0]?.id || null;
-    return `<div class="card"><h1>ALTER execution</h1><p class="muted">Shared with <code>alter runs</code>. Create a plan, then run each next step. Actions remain subject to project permissions and approvals. Developer preview: host test receipts are unconfined and never satisfy specialist or secured verification. Live secured acceptance remains blocked.</p>
+    return `<div class="card"><h1>ALTER execution</h1><p class="muted">Shared with <code>alter runs</code>. Create a plan, then run each next step. Actions remain subject to project permissions and approvals. Tests that run on this machine are unconfined: their results never count as confined or verified evidence.</p>
       <label for="run-project">Project</label><select id="run-project">${ps.map(p => `<option value="${esc(p.id)}" ${p.id === project ? 'selected' : ''}>${esc(p.name)}</option>`).join("")}</select>
       ${project ? `<label for="run-objective">What should ALTER accomplish?</label><textarea id="run-objective" placeholder="Describe the outcome and acceptance checks"></textarea>
       <button class="act" data-run-action="start">Create plan</button>` : '<p>Create a project in Workspace first.</p>'}
@@ -176,10 +176,10 @@ const views = {
         <div class="col" style="margin-top:6px">${VENDORS.map(v => `<label class="row"><input type="checkbox" style="width:auto" ${provs.includes(v) ? "checked" : ""} onchange="toggleVendor('${v}', this.checked)"> ${v}</label>`).join("")}</div>
         <details style="margin-top:8px"><summary class="muted">What each provider was sent (${disc.length})</summary><div class="col" style="margin-top:6px">${disc.slice(-12).reverse().map(d =>
           `<div class="mono">${esc(d.at.slice(0,19))} ${esc(d.provider)}:${esc(d.model)}<div class="muted">${d.briefing_sha256 ? "briefing " + esc(d.briefing_sha256.slice(0,12)) + "… · " : ""}${d.memory_items.length} memory sent · ${d.memory_withheld.length} withheld</div></div>`).join("") || '<span class="muted">Nothing sent yet.</span>'}</div></details></div>`;
-    const right = access + `<div class="card"><h2>Workspace</h2>${w ? `<div class="mono">${esc(w.root)}</div><div class="muted">tests: ${w.can_run_tests?"configured":"not configured"} · test policy: ${w.test_confinement === "required" ? "verified Linux confinement required; refused when unavailable (configuration is not verification)" : "host, unconfined; backend: none, verified: false"} · writes: ${w.can_write?"allowed with approval":"off"}</div>` : '<div class="muted">No folder authorized. File tools are refused.</div>'}
+    const right = access + `<div class="card"><h2>Workspace</h2>${w ? `<div class="mono">${esc(w.root)}</div><div class="muted">tests: ${w.can_run_tests ? (w.test_confinement === "required" ? "only in a verified Linux sandbox (refused where none is available)" : "on this machine after approval, unconfined") : "not configured"} · writes: ${w.can_write?"allowed with approval":"off"}</div>` : '<div class="muted">No folder authorized. File tools are refused.</div>'}
         <details ${w?"":"open"}><summary class="muted">Authorize a folder</summary><div class="col" style="margin-top:8px">
         <input id="wr" placeholder="/path/to/project"><input id="wa" placeholder='test command, e.g. pytest -q'>
-        <label class="row muted"><input type="checkbox" id="wc" style="width:auto" ${w?.test_confinement === "required" ? "checked" : ""}> require verified Linux confinement for tests (refuse when unavailable)</label>
+        <label class="row muted"><input type="checkbox" id="wc" style="width:auto" ${w?.test_confinement === "required" ? "checked" : ""}> run tests only in a verified Linux sandbox (refuse where none is available)</label>
         <label class="row muted"><input type="checkbox" id="ww" style="width:auto"> allow writes (each still needs approval)</label>
         <div class="muted">Files CI reads here are sent to the model provider you chat with. Secret-looking files are never read.</div>
         <button class="ghost" onclick="authorize()">Authorize</button></div></details></div>
