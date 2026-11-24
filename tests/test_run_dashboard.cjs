@@ -7,7 +7,7 @@ const calls = [], errors = [];
 const run = {id:'r1', goal:'Build <img src=x onerror=alert(1)> app', status:'awaiting_approval',
   plan:{objective:'Plan'}, work:[{role:'builder',id:'w1'}], attempts:[{status:'running',pending:['t1'],evidence:[{sha256:'abc'}]}],
   evidence:[{sha256:'abc'}], approvals:[{id:'t1', status:'awaiting_approval',tool:'write_file'}]};
-let failNext = false;
+let failNext = false, policy = 'required';
 const dom = new JSDOM(html, {url:'http://localhost/', runScripts:'dangerously', beforeParse(w) {
   w.sessionStorage.setItem('pcim_token','fixture');
   w.prompt = () => 'reviewed';
@@ -18,7 +18,9 @@ const dom = new JSDOM(html, {url:'http://localhost/', runScripts:'dangerously', 
     let value;
     if (path === '/v1/autonomy') value = {mode:'ask'};
     else if (path === '/v1/tasks/t1') value = {id:'t1',status:'awaiting_approval',tool:'write_file'};
-    else if (path === '/v1/projects') value = [{id:'p1',name:'Project'}];
+    else if (path === '/v1/projects') value = [{id:'p1',name:'Project',updated_at:'2026-11-24'}];
+    else if (path === '/v1/projects/p1') value = {project:{name:'Project'}, providers:[], briefing:{workspace:{root:'/tmp/fixture',can_run_tests:true,can_write:false,test_confinement:policy},open_questions:[],decisions:[],next_steps:[]}};
+    else if (path === '/v1/projects/p1/session') value = {events:[]};
     else if (path === '/v1/projects/p1/runs') value = options.method === 'GET' ? [run] : run;
     else if (path === '/v1/projects/p1/runs/r1/events') value = [{kind:'created'}];
     else if (path.startsWith('/v1/projects/p1/runs/r1')) value = run;
@@ -50,6 +52,17 @@ const settle=()=>new Promise(r=>setTimeout(r,20));
   assert(calls.some(c=>c[1]==='/v1/projects/p1/runs/r1/steer' && c[2].message==='Preserve draft'));
   failNext=true; d.querySelector('[data-run-action=pause]').click(); await settle();
   assert(d.querySelector('#run-feedback').textContent.includes('Worker busy'));
+  await w.eval("tab='Workspace'; render()"); await settle();
+  assert(d.body.textContent.includes('configuration is not verification'));
+  assert(d.querySelector('#wc').checked);
+  d.querySelector('#wr').value='/tmp/fixture';
+  await w.authorize(); await settle();
+  assert(calls.some(c=>c[1]==='/v1/projects/p1/workspace' && c[2].test_confinement==='required'));
+  policy='none'; await w.render(); await settle();
+  assert(d.body.textContent.includes('backend: none, verified: false'));
+  assert(!d.querySelector('#wc').checked);
+  d.querySelector('#wr').value='/tmp/fixture'; await w.authorize(); await settle();
+  assert(calls.some(c=>c[1]==='/v1/projects/p1/workspace' && c[2].test_confinement==='none'));
   assert.equal(errors.length,0,errors.join('\n'));
   console.log('PASS: execution view, escaped content, start/control/approval/steer actions, retained drafts, recoverable errors.');
   w.close();
