@@ -52,7 +52,7 @@ jobs:
       - name: ruff check
         run: >-
           ruff check --isolated --no-cache --output-format=github
-          --select E9,F63,F7,F82 --target-version py311
+          --select E9,F63,F7,F82 --target-version py312
           src tests scripts
 
   test:
@@ -62,7 +62,8 @@ jobs:
     strategy:
       fail-fast: false
       # macOS minutes cost several times Linux minutes on a private repository: macOS runs the
-      # interpreter used for development only; Linux covers the supported range.
+      # interpreter used for development only; Linux covers the supported range, from the
+      # requires-python floor (3.12) to the newest release.
       matrix:
         include:
           - {os: ubuntu-latest, python-version: "3.12"}

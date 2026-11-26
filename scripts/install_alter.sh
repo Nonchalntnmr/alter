@@ -8,7 +8,7 @@
 #
 # Options:
 #   --no-semantic        leave out the local embedding model (sentence-transformers and torch, about 1 GB)
-#   --python PY          the interpreter for a new venv (default: the newest python3.1x >= 3.11 on PATH)
+#   --python PY          the interpreter for a new venv (default: the newest python3.1x >= 3.12 on PATH)
 #   --constraints FILE   pins for every dependency (default: requirements-lock.txt next to this script)
 #   --no-doctor          do not run `alter doctor` at the end
 #   --force              go ahead even while a goal worker from this install is running
@@ -71,23 +71,23 @@ bin_as_given="$ALTER_BIN"
 venv="$ALTER_HOME/venv"
 wheels="$ALTER_HOME/wheels"
 
-py_ok() { "$1" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' >/dev/null 2>&1; }
+py_ok() { "$1" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)' >/dev/null 2>&1; }
 py_ver() { "$1" -c 'import sys; print("%d.%d" % sys.version_info[:2])'; }
 
 pick_python() {
     if [[ -n "$python" ]]; then
-        py_ok "$python" || die "$python is not a Python >= 3.11"
+        py_ok "$python" || die "$python is not a Python >= 3.12"
         command -v "$python"
         return
     fi
     local c
-    for c in python3.14 python3.13 python3.12 python3.11 python3; do
+    for c in python3.14 python3.13 python3.12 python3; do
         if command -v "$c" >/dev/null 2>&1 && py_ok "$c"; then
             command -v "$c"
             return
         fi
     done
-    die "no Python >= 3.11 on PATH (macOS's own python3 is older). Install one, for example
+    die "no Python >= 3.12 on PATH (macOS's own python3 is older). Install one, for example
     brew install python@3.13      (or the installer from python.org)
 then run this again, or pass --python /path/to/python3.x"
 }
@@ -104,7 +104,11 @@ ensure_venv() {
     py="$(pick_python)"
     if [[ -e "$venv" ]]; then
         [[ -f "$venv/pyvenv.cfg" ]] || die "$venv exists and is not a venv; move it away first"
-        [[ -x "$venv/bin/python" ]] && py_ok "$venv/bin/python" || say "venv: $venv does not run (its Python was removed?): recreating it"
+        if [[ ! -x "$venv/bin/python" ]] || ! "$venv/bin/python" -c '' >/dev/null 2>&1; then
+            say "venv: $venv does not run (its Python was removed?): recreating it"
+        elif ! py_ok "$venv/bin/python"; then
+            say "venv: $venv has Python $(py_ver "$venv/bin/python"), older than 3.12: recreating it"
+        fi
         "$py" -m venv --clear "$venv"
     else
         "$py" -m venv "$venv"

@@ -7,7 +7,7 @@ name = "contextual-intelligence"
 version = "0.3.0a1"
 description = "Personal CI: a research prototype of a user-owned, outcome-learned context layer in front of foundation models"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 authors = [{ name = "Nishanth Revuri" }]
 
 # The core (memory, sovereignty, policies, observatory, mock model) needs only these.
