@@ -6,7 +6,7 @@ it. `alter setup` does the first-run onboarding. Both are safe to run again.
 ## Prerequisites
 
 - **macOS or Linux, with `bash` and `git`.**
-- **Python >= 3.11.** macOS's own `python3` is older: `brew install python@3.13`, or the installer
+- **Python >= 3.12.** macOS's own `python3` is older: `brew install python@3.13`, or the installer
   from python.org.
 - **The Claude Code CLI (`claude`), logged in.** ALTER's goals run through it. Install it
   (`npm install -g @anthropic-ai/claude-code`), run `claude` once and log in. `alter setup` checks
@@ -35,8 +35,8 @@ scripts/install_alter.sh path/to/contextual_intelligence-0.3.0a1-py3-none-any.wh
 ```
 
 **What the script does.**
-1. **Python:** `--python PY`, else the newest of `python3.14` … `python3.11`, `python3` on PATH that
-   is >= 3.11.
+1. **Python:** `--python PY`, else the newest of `python3.14` … `python3.12`, `python3` on PATH that
+   is >= 3.12. An existing venv on an older Python is recreated.
 2. **Venv:** creates `${ALTER_HOME:-~/.alter}/venv`, or keeps the one there. A venv whose Python was
    removed (a Homebrew upgrade) is recreated; so is one whose Python differs from `--python`.
 3. **Package:** installs the wheel with every dependency pinned by `requirements-lock.txt`, and with

@@ -69,6 +69,8 @@ from .workspace import Workspace
 SUBCOMMANDS = ("ask", "route", "mode", "prefer", "models", "outcome", "practice", "skills", "scorecard",
                "weekly", "status", "challenge", "plan", "mesh", "twin", "audit", "learn", "execute", "approve", "deny", "halt",
                "resume", "help", "do", "doctor", "undo")
+# The oldest Python this package runs on; requires-python in pyproject.toml says the same.
+MIN_PYTHON = (3, 12)
 # Explicit words only: "…should I say yes" is a question, not a recorded correct attempt.
 RIGHT = {"right", "correct"}
 WRONG = {"wrong", "incorrect"}
@@ -1208,14 +1210,14 @@ def cmd_doctor(argv: list[str]) -> int:
         checks.append({"name": name, "status": status, "detail": detail})
 
     # 1. Python & core dependencies
-    py_ok = sys.version_info >= (3, 11)
+    py_ok = sys.version_info >= MIN_PYTHON
     missing_deps = [pkg for pkg in ("numpy", "pydantic", "cryptography", "httpx")
                     if importlib.util.find_spec(pkg) is None]
     if py_ok and not missing_deps:
         add("python_deps", "ok", f"Python {sys.version.split()[0]}, core deps importable")
     else:
         add("python_deps", "fail",
-            f"Python {sys.version.split()[0]} (need >=3.11); missing={missing_deps}")
+            f"Python {sys.version.split()[0]} (need >={MIN_PYTHON[0]}.{MIN_PYTHON[1]}); missing={missing_deps}")
 
     # 2. PCIM_HOME identity
     home = _home()

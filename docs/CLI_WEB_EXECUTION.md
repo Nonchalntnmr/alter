@@ -4,7 +4,7 @@ This adapter change consumes ALT-4's `pcim.run_service.RunService` and ALT-5's s
 
 ## Local install
 
-Python 3.14 was used for verification (package metadata supports >=3.11; minimum-version compatibility was not reverified). From integrated source:
+Python 3.14 was used for verification. The package requires Python >= 3.12, the lowest version CI tests. From integrated source:
 
 ```sh
 python3.14 -m venv .venv

@@ -61,7 +61,7 @@ elif command -v ruff >/dev/null 2>&1; then
 fi
 if [[ ${#ruff_cmd[@]} -gt 0 ]]; then
     echo "== ruff ($("${ruff_cmd[@]}" --version))"
-    "${ruff_cmd[@]}" check --isolated --no-cache --select E9,F63,F7,F82 --target-version py311 \
+    "${ruff_cmd[@]}" check --isolated --no-cache --select E9,F63,F7,F82 --target-version py312 \
         src tests scripts || status=$?
 else
     echo "== ruff: not installed, skipped (CI runs ruff==0.17.4; '$py -m pip install ruff' to run it here)"
