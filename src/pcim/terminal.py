@@ -57,7 +57,7 @@ import sys
 from pathlib import Path
 
 from . import modes as intelligence
-from .cli import _home
+from .cli import WEB_MODULES, _home
 from .engine import PersonalCI, RoutingError
 from .registry import availability, entries
 from .routing import PREFERENCES, TIERS, capability
@@ -1218,6 +1218,10 @@ def cmd_doctor(argv: list[str]) -> int:
     else:
         add("python_deps", "fail",
             f"Python {sys.version.split()[0]} (need >={MIN_PYTHON[0]}.{MIN_PYTHON[1]}); missing={missing_deps}")
+    # Optional: the installer includes the web dashboard unless --no-web, so either answer is fine.
+    missing_web = [m for m in WEB_MODULES if importlib.util.find_spec(m) is None]
+    add("web_dashboard", "ok", "installed (pcim serve)" if not missing_web else
+        f"not installed (no {', '.join(missing_web)}); scripts/install_alter.sh adds it unless --no-web")
 
     # 2. PCIM_HOME identity
     home = _home()

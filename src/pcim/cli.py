@@ -23,6 +23,9 @@ from pathlib import Path
 from .engine import PersonalCI
 from .types import KINDS, Sensitivity
 
+# What `pcim serve` needs beyond the core: the `api` extra in pyproject.toml (starlette comes with fastapi).
+WEB_MODULES = ("fastapi", "uvicorn", "starlette")
+
 
 def _home() -> Path:
     return Path(os.environ.get("PCIM_HOME", Path.home() / ".pcim"))
@@ -100,8 +103,16 @@ def main(argv=None) -> int:
               "Nothing else.")
         return 0
     if a.cmd == "serve":
-        import uvicorn
-        from .api import create_app
+        try:
+            import uvicorn
+            from .api import create_app
+        except ModuleNotFoundError as e:
+            if e.name not in WEB_MODULES:
+                raise
+            print(f"pcim serve: the web dashboard is not installed here (no module {e.name!r}). Run "
+                  "scripts/install_alter.sh again without --no-web, or: pip install 'contextual-intelligence[api]'",
+                  file=sys.stderr)
+            return 1
         home = _home()
         print(f"Personal CI on http://{a.host}:{a.port}  (data: {home})")
         uvicorn.run(create_app(_open_store(home)), host=a.host, port=a.port, log_level="warning")

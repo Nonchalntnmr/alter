@@ -1,6 +1,7 @@
 """scripts/install_alter.sh end to end: build the wheel from this checkout, install it into a throwaway
-ALTER_HOME and ALTER_BIN without the semantic extra, run the installed `alter` (--version, setup,
-doctor --json), upgrade to a newer wheel, roll back, and uninstall.
+ALTER_HOME and ALTER_BIN without the semantic extra (and first without the web dashboard), run the
+installed `alter` (--version, setup, doctor --json) and `pcim serve`, upgrade to a newer wheel, roll
+back, and uninstall.
 
 pip downloads the core dependencies and setuptools (for the build), so the test needs PyPI or the
 index in PIP_INDEX_URL: it is skipped when that cannot be reached, and marked slow (-m "not slow"
@@ -14,6 +15,9 @@ import shutil
 import socket
 import subprocess
 import sys
+import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -49,6 +53,39 @@ def _run(argv, env, cwd=None, check=True):
     return r
 
 
+def _free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def _status(url: str) -> int:
+    try:
+        with urllib.request.urlopen(url, timeout=2) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return e.code
+
+
+def _serve_answers(pcim, env) -> tuple[int, int]:
+    """Start the installed `pcim serve`, and return what / and an API route without a token answer."""
+    port = _free_port()
+    proc = subprocess.Popen([str(pcim), "serve", "--port", str(port)], env=env,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    try:
+        base = f"http://127.0.0.1:{port}"
+        for _ in range(120):
+            assert proc.poll() is None, f"pcim serve exited {proc.returncode}: {proc.stdout.read()}"
+            try:
+                return _status(base + "/"), _status(base + "/v1/projects")
+            except urllib.error.URLError:
+                time.sleep(0.25)
+        raise AssertionError("pcim serve did not answer within 30 s")
+    finally:
+        proc.terminate()
+        proc.wait(timeout=10)
+
+
 def _checkout_for_version(dest: Path, version: str) -> Path:
     """A copy of this checkout for the installer to build."""
     dest.mkdir()
@@ -78,9 +115,10 @@ def test_install_setup_doctor_upgrade_rollback_uninstall(tmp_path):
     mine.write_text("#!/bin/sh\necho mine\n")
     mine.chmod(0o755)
 
-    # 1. install: the script builds the wheel from this checkout (no wheel given)
-    r = _run(["bash", SCRIPT, "--no-semantic", "--no-doctor", "--python", sys.executable], env)
+    # 1. install: the script builds the wheel from this checkout (no wheel given), here without the web dashboard
+    r = _run(["bash", SCRIPT, "--no-semantic", "--no-web", "--no-doctor", "--python", sys.executable], env)
     assert f"installing {__version__}" in r.stdout and "building a wheel" in r.stderr
+    assert "(without the semantic extra and the web dashboard)" in r.stdout
     venv_bin = (alter_home / "venv" / "bin").resolve()
     for c in ("alter", "ci", "pcim"):
         link = alter_bin / c
@@ -88,10 +126,11 @@ def test_install_setup_doctor_upgrade_rollback_uninstall(tmp_path):
     assert (alter_bin / "pcim.pre-alter").read_text() == "#!/bin/sh\necho mine\n"
     kept = sorted(p.name for p in (alter_home / "wheels").glob("*.whl"))
     assert kept == [f"contextual_intelligence-{__version__}-py3-none-any.whl"]
-    probe = _run([venv_bin / "python", "-c", "import pcim, importlib.util as u; "
-                  "print(pcim.__file__); print(u.find_spec('sentence_transformers') is not None)"], env)
-    where, semantic = probe.stdout.split()
-    assert Path(where).resolve().is_relative_to(alter_home.resolve()) and semantic == "False"
+    probe = _run([venv_bin / "python", "-c", "import pcim, importlib.util as u; print(pcim.__file__); "
+                  "print(u.find_spec('sentence_transformers') is not None); print(u.find_spec('uvicorn') is not None)"],
+                 env)
+    where, semantic, web = probe.stdout.split()
+    assert Path(where).resolve().is_relative_to(alter_home.resolve()) and semantic == "False" and web == "False"
 
     # 2. the installed commands, through the links, as a new person: empty HOME, no claude CLI
     home = tmp_path / "home"
@@ -110,11 +149,19 @@ def test_install_setup_doctor_upgrade_rollback_uninstall(tmp_path):
     checks = {c["name"]: c["status"] for c in doc["checks"]}
     assert doc["ok"] is True and checks["pcim_home"] == "ok" and checks["alter_command"] == "ok"
     assert checks["claude_cli"] == "warn" and checks["outcome_memory"] == "ok"
+    web = next(c for c in doc["checks"] if c["name"] == "web_dashboard")
+    assert web["status"] == "ok" and web["detail"].startswith("not installed")
+    r = _run([alter_bin / "pcim", "serve", "--port", str(_free_port())], cmd_env, check=False)
+    assert r.returncode == 1 and "web dashboard is not installed" in r.stderr and "Traceback" not in r.stderr
 
-    # 3. run again: nothing to change, nothing backed up twice
+    # 3. run again, now with the web dashboard (the default): nothing else to change, nothing backed up twice
     r = _run(["bash", SCRIPT, "--no-semantic", "--no-doctor", alter_home / "wheels" / kept[0]], env)
     assert f"reinstall: {__version__} -> {__version__}" in r.stdout and "linked" not in r.stdout
+    assert "(without the semantic extra)" in r.stdout
     assert sorted(p.name for p in alter_bin.iterdir()) == ["alter", "ci", "pcim", "pcim.pre-alter"]
+    doc = json.loads(_run([alter, "doctor", "--json"], cmd_env, cwd=work).stdout)
+    assert {c["name"]: c["detail"] for c in doc["checks"]}["web_dashboard"] == "installed (pcim serve)"
+    assert _serve_answers(alter_bin / "pcim", cmd_env) == (200, 401)  # the page, and the API wants the token
 
     original = alter_home / "wheels" / kept[0]
     original_bytes = original.read_bytes()

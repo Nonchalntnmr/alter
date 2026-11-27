@@ -37,7 +37,7 @@ All commands use the owner identity and authorized project for the current direc
 
 ## Web/API
 
-Start the existing local dashboard with `pcim serve` (127.0.0.1 default); paste your existing API bearer token. In Execution select the project, describe the outcome, create a plan, inspect it, then select Run next step. The same service snapshots supply plan/tasks/roles, progress/attempts, evidence, verification, pending approvals and history. Polling is read-only, pauses when hidden or a run action has focus, and preserves objective/steering drafts. Retry errors through Refresh or the affected control. No browser visual/accessibility certification is claimed from DOM tests.
+Start the existing local dashboard with `pcim serve` (127.0.0.1 default; `scripts/install_alter.sh` installs it unless `--no-web`); paste your existing API bearer token. In Execution select the project, describe the outcome, create a plan, inspect it, then select Run next step. The same service snapshots supply plan/tasks/roles, progress/attempts, evidence, verification, pending approvals and history. Polling is read-only, pauses when hidden or a run action has focus, and preserves objective/steering drafts. Retry errors through Refresh or the affected control. No browser visual/accessibility certification is claimed from DOM tests.
 
 Canonical routes (all require bearer auth):
 
