@@ -8,6 +8,7 @@
 #
 # Options:
 #   --no-semantic        leave out the local embedding model (sentence-transformers and torch, about 1 GB)
+#   --no-web             leave out the web dashboard, `pcim serve` (fastapi and uvicorn, a few MB)
 #   --python PY          the interpreter for a new venv (default: the newest python3.1x >= 3.12 on PATH)
 #   --constraints FILE   pins for every dependency (default: requirements-lock.txt next to this script)
 #   --no-doctor          do not run `alter doctor` at the end
@@ -32,15 +33,16 @@ unset PYTHONPATH  # a checkout on it would shadow the installed package, for pip
 
 say() { printf 'install_alter: %s\n' "$*"; }
 die() { printf 'install_alter: %s\n' "$*" >&2; exit 1; }
-usage() { sed -n '2,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,23p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
-mode=install wheel="" semantic=1 doctor=1 force=0 python="" constraints=""
+mode=install wheel="" semantic=1 web=1 doctor=1 force=0 python="" constraints=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --uninstall) mode=uninstall ;;
         --rollback) [[ $# -ge 2 ]] || die "--rollback needs the wheel to go back to"
                     mode=rollback; wheel="$2"; shift ;;
         --no-semantic) semantic=0 ;;
+        --no-web) web=0 ;;
         --no-doctor) doctor=0 ;;
         --force) force=1 ;;
         --python) [[ $# -ge 2 ]] || die "--python needs an interpreter"; python="$2"; shift ;;
@@ -215,12 +217,17 @@ install_wheel() {
     if [[ "$cached" != "$wheels/$name" ]]; then
         say "saved this rebuild at $cached"
     fi
-    [[ $semantic == 1 ]] && extras="[semantic]"
+    [[ $semantic == 1 ]] && extras="semantic"
+    [[ $web == 1 ]] && extras="${extras:+$extras,}api"
+    extras="${extras:+[$extras]}"
     "$venv/bin/python" -m pip install --quiet -c "$constraints" "$cached$extras"
     # The line above skips a wheel whose version is already installed (a rebuild of the same version):
     # this puts this wheel's files in place either way, without touching the dependencies.
     "$venv/bin/python" -m pip install --quiet --no-deps --force-reinstall "$cached"
-    say "installed $(installed_version) in $venv$([[ $semantic == 1 ]] || echo ' (without the semantic extra)')"
+    local left_out=""
+    [[ $semantic == 1 ]] || left_out="the semantic extra"
+    [[ $web == 1 ]] || left_out="${left_out:+$left_out and }the web dashboard"
+    say "installed $(installed_version) in $venv${left_out:+ (without $left_out)}"
 }
 
 link_commands() {

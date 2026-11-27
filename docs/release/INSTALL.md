@@ -39,9 +39,10 @@ scripts/install_alter.sh path/to/contextual_intelligence-0.3.0a1-py3-none-any.wh
    is >= 3.12. An existing venv on an older Python is recreated.
 2. **Venv:** creates `${ALTER_HOME:-~/.alter}/venv`, or keeps the one there. A venv whose Python was
    removed (a Homebrew upgrade) is recreated; so is one whose Python differs from `--python`.
-3. **Package:** installs the wheel with every dependency pinned by `requirements-lock.txt`, and with
-   the `semantic` extra unless `--no-semantic`. It keeps a copy of the wheel in
-   `~/.alter/wheels/`, for rollback.
+3. **Package:** installs the wheel with every dependency pinned by `requirements-lock.txt`, with
+   the `semantic` extra unless `--no-semantic`, and with the `api` extra (the web dashboard,
+   `pcim serve`) unless `--no-web`. It keeps a copy of the wheel in `~/.alter/wheels/`, for
+   rollback.
 4. **Commands:** links `alter`, `ci` and `pcim` into `${ALTER_BIN:-~/.local/bin}`.
    - A file already there that is not this install's link is moved to `NAME.pre-alter` first.
    - It says so if that folder is not on your PATH, and prints the line to add to `~/.zshrc`.
@@ -49,11 +50,16 @@ scripts/install_alter.sh path/to/contextual_intelligence-0.3.0a1-py3-none-any.wh
    yet), until `alter setup`.
 
 It never changes your data in `PCIM_HOME` (default `~/.pcim`). Options: `--no-semantic`,
-`--python PY`, `--constraints FILE`, `--no-doctor`, `--force`; `scripts/install_alter.sh --help`.
+`--no-web`, `--python PY`, `--constraints FILE`, `--no-doctor`, `--force`; `scripts/install_alter.sh --help`.
 
 **Without the semantic extra.** `--no-semantic` installs the core only, and a new store uses the
 offline lexical embedder. A store created with the semantic extra installed keeps needing it:
 `alter doctor` fails its `embedder` check without it. A store's embedder never changes on its own.
+
+**The web dashboard.** `pcim serve` starts it at http://127.0.0.1:8765; paste the token from
+`~/.pcim/token` (`pbcopy < ~/.pcim/token`). It shows the same runs as `alter runs`. `--no-web`
+leaves out `fastapi` and `uvicorn`. Then `pcim serve` says how to add them, and `alter doctor`
+reports `web_dashboard: not installed`. Running the script again without `--no-web` adds them.
 
 ## Onboard: `alter setup`
 
@@ -142,7 +148,7 @@ What the script does, for a machine where you would rather type it:
 ```sh
 python3.13 -m pip wheel --no-deps -w dist .
 python3.13 -m venv ~/.alter/venv
-~/.alter/venv/bin/pip install -c requirements-lock.txt "dist/contextual_intelligence-0.3.0a1-py3-none-any.whl[semantic]"
+~/.alter/venv/bin/pip install -c requirements-lock.txt "dist/contextual_intelligence-0.3.0a1-py3-none-any.whl[semantic,api]"
 mkdir -p ~/.local/bin
 for c in alter ci pcim; do ln -s ~/.alter/venv/bin/$c ~/.local/bin/$c; done   # fails if one is there: move it first
 alter setup
