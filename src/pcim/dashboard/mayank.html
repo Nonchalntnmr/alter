@@ -16,7 +16,7 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 13px/1.45 var(--sans);
   overflow: hidden; -webkit-font-smoothing: antialiased; }
-canvas#gl { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; cursor: grab; }
+canvas#gl { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; cursor: grab; touch-action: none; }
 canvas#gl.grabbing { cursor: grabbing; } canvas#gl.pointing { cursor: pointer; }
 svg#leaders { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; }
 .caps { font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--ink3); }
@@ -127,6 +127,16 @@ button.danger:hover { color: var(--rose); border-color: var(--rose); }
 #toast.show { display: block; animation: rise .3s; }
 #fatal { position: fixed; inset: 0; display: none; place-items: center; text-align: center; color: var(--ink2); padding: 40px; }
 @media (max-width: 1100px) { #ticker, #formnote { display: none; } #cmd { width: calc(100vw - 56px); bottom: 80px; } #legend { display: none; } }
+@media (max-width: 800px) {
+  #brand { left: 16px; top: 16px; } #brand h1 { font-size: 17px; } #brand .sub { display: none; }
+  #status { left: 16px; top: 46px; } #status .mono { display: none; }
+  #forms { right: 14px; top: 14px; } #forms button { font-size: 9.5px; padding: 2px 0; } #forms button .k { display: none; }
+  #demo { top: 72px; left: 16px; transform: none; font-size: 8.5px; letter-spacing: .12em; white-space: nowrap; padding: 4px 10px; }
+  #cmd { min-width: 0; width: calc(100vw - 32px); bottom: 64px; } #cmd .hint { display: none; } #cmd input { font-size: 16px; }
+  #perf { right: 14px; bottom: 12px; } #perf .row:first-child, #perfline { display: none; } #perf .row button { padding: 3px 8px; font-size: 10px; }
+  #inspector { left: 12px; right: 12px; width: auto; top: auto; bottom: 118px; max-height: 46vh; padding: 16px; }
+  .zone { display: none; }
+}
 </style>
 </head>
 <body>

@@ -45,11 +45,11 @@ void main() {
   if (uIsEntity == 0) size *= mix(0.55, 1.0, vis);
   gl_PointSize = clamp(size, uIsEntity == 1 ? 3.2 : 1.0, 64.0);   // a record is never smaller than a readable dot
   vec3 c = aColor * (uLight * (0.7 + 0.3 * vis));
-  c = mix(c, vec3(1.0, 0.93, 0.84), clamp(act * 0.75 + search * 0.55, 0.0, 1.0));
+  c = mix(c, vec3(1.0, 0.93, 0.84), clamp((act * 0.75 + search * 0.55) * (uIsEntity == 1 ? 1.0 : 0.6), 0.0, 1.0));
   if (pending) c = mix(c, vec3(0.50, 0.82, 0.86), 0.55 + 0.25 * sin(uTime * 4.0));
   float flowPulse = 0.65 + 0.35 * sin(uTime * 2.6 - aSeed * 40.0);
   float base = uIsEntity == 1 ? 1.0 : mix(1.0, flowPulse, uFlow);
-  vAlpha = base * mix(0.04, 1.0, vis) * (uIsEntity == 1 ? 1.0 : 0.62 + act * 0.6 + search * 0.3);
+  vAlpha = base * mix(0.04, 1.0, vis) * (uIsEntity == 1 ? 1.0 : 0.62 + act * 0.32 + search * 0.3);   // a lit region glows, it does not bloom
   vColor = c; vRing = selected ? 1.0 : (hovered ? 0.6 : 0.0); vCore = uIsEntity == 1 ? 1.0 : 0.0;
 }`;
 

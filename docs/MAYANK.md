@@ -18,6 +18,23 @@ PCIM_HOME=/tmp/mayank-demo pcim serve                           # open /mayank; 
 python scripts/mayank_demo.py --home /tmp/mayank-demo --live    # optional: keep ALTER busy (real tasks in a scratch folder)
 ```
 
+**A static demonstration you can share.** This has no ALTER behind it and holds demonstration data
+only:
+
+```sh
+python scripts/mayank_static.py --out ../mayank-site     # then deploy the folder to any static host
+```
+
+The builder seeds a fresh throwaway home and records real governed actions in it. It writes the
+field and those audit events as JSON next to the page. The page then runs read-only:
+- no sign-in;
+- search matches words, since a static page has no embedder;
+- the recorded events replay on a loop, labelled as a replay;
+- every action button is replaced by a note saying this is a snapshot.
+
+The builder refuses to write any file that contains an absolute path, the throwaway home's path or
+the machine's user name.
+
 ## What each point is
 
 `src/pcim/mayank.py` builds the field from ALTER's records, reading them through the same objects

@@ -271,46 +271,54 @@ def seed(home: Path, ci: PersonalCI) -> dict:
     return {"uid": uid, "research": research.id, "pending": pending.id, "root": str(root)}
 
 
-def live(home: Path, ci: PersonalCI, interval: float) -> None:
-    """Keep ALTER busy: real tasks in the scratch folder (some left for you to approve), new memories,
-    new unassisted skill checks. Every one is a governed action, so it lands in the audit chain."""
-    uid = ci.user_for_token((home / "token").read_text().strip())
-    ws = Workspace(ci)
-    ledger = ClaimLedger(ws)
-    queue = TaskQueue(ws, Governor(ws), claims=ledger)
-    # the demo project ALTER may write in (found by its workspace, not its name, so older seeds work too)
-    research = next((p for p in ws.list_projects(uid)
-                     if (ws.briefing(uid, p.id).get("workspace") or {}).get("can_write")), None)
-    if research is None:
-        refuse("no demo project with a writable workspace here; seed a fresh home")
-    rnd, n = random.Random(), 0
-    print(f"live: one governed action every {interval:.0f}s (Ctrl-C stops)")
-    while True:
-        n += 1
-        roll = rnd.random()
+class Busy:
+    """One governed action at a time in a seeded home: a real task in the scratch folder (some left
+    for you to approve), a new memory, or a new unassisted skill check. Each lands in the audit chain."""
+
+    def __init__(self, home: Path, ci: PersonalCI, seed: int | None = None):
+        self.ci = ci
+        self.uid = ci.user_for_token((home / "token").read_text().strip())
+        self.ws = Workspace(ci)
+        ledger = ClaimLedger(self.ws)
+        self.queue = TaskQueue(self.ws, Governor(self.ws), claims=ledger)
+        # the demo project ALTER may write in (found by its workspace, not its name, so older seeds work too)
+        self.project = next((p for p in self.ws.list_projects(self.uid)
+                             if (self.ws.briefing(self.uid, p.id).get("workspace") or {}).get("can_write")), None)
+        if self.project is None:
+            refuse("no demo project with a writable workspace here; seed a fresh home")
+        self.rnd, self.n = random.Random(seed), 0
+
+    def step(self) -> str:
+        ci, uid, queue, pid, rnd = self.ci, self.uid, self.queue, self.project.id, self.rnd
+        self.n += 1
+        n, roll = self.n, rnd.random()
         if roll < 0.5:
             path = f"notes/live-{n:03d}.md"
-            t = queue.propose(uid, research.id, "write_file", {"path": path, "content": f"# {n}\n[demo] live\n",
-                                                                "reason": D + f"live draft {n}"})
+            t = queue.propose(uid, pid, "write_file", {"path": path, "content": f"# {n}\n[demo] live\n",
+                                                       "reason": D + f"live draft {n}"})
             if rnd.random() < 0.6:
                 queue.approve(uid, t.id)
-                print(f"  wrote {path}")
-            else:
-                print(f"  {path}: waiting for your approval in MAYANK")
-        elif roll < 0.7:
-            t = queue.propose(uid, research.id, "run_tests", {"reason": D + "check the notes"})
-            r = queue.approve(uid, t.id)
-            print(f"  tests: {r.status} {r.reason or ''}".rstrip())
-        elif roll < 0.85:
+                return f"wrote {path}"
+            return f"{path}: waiting for your approval in MAYANK"
+        if roll < 0.7:
+            r = queue.approve(uid, queue.propose(uid, pid, "run_tests", {"reason": D + "check the notes"}).id)
+            return f"tests: {r.status} {r.reason or ''}".rstrip()
+        if roll < 0.85:
             name = rnd.choice(list(SKILLS))
             ok = rnd.random() < 0.6
             ci.probe(uid, D + name, ok, assisted=False, source="demo")
-            print(f"  unassisted check: {name} {'right' if ok else 'wrong'}")
-        else:
-            fact = rnd.choice(["Noted a new source on heat islands", "Linked eigenvalues to stability of dynamics",
-                               "Found a counterexample worth testing", "Re-derived the normal equations"])
-            ci.remember(uid, D + f"{fact} ({n})", "fact")
-            print(f"  remembered: {fact}")
+            return f"unassisted check: {name} {'right' if ok else 'wrong'}"
+        fact = rnd.choice(["Noted a new source on heat islands", "Linked eigenvalues to stability of dynamics",
+                           "Found a counterexample worth testing", "Re-derived the normal equations"])
+        ci.remember(uid, D + f"{fact} ({n})", "fact")
+        return f"remembered: {fact}"
+
+
+def live(home: Path, ci: PersonalCI, interval: float) -> None:
+    busy = Busy(home, ci)
+    print(f"live: one governed action every {interval:.0f}s (Ctrl-C stops)")
+    while True:
+        print("  " + busy.step())
         time.sleep(interval)
 
 

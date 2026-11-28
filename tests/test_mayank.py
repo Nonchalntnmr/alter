@@ -240,3 +240,22 @@ def test_api_request_models_have_unique_names():
     import re
     names = re.findall(r"^class (\w+)\(BaseModel\)", (REPO / "src" / "pcim" / "api.py").read_text(), re.M)
     assert len(names) == len(set(names)), sorted(n for n in set(names) if names.count(n) > 1)
+
+
+def test_the_static_build_holds_only_demonstration_data_and_no_local_paths(tmp_path):
+    out = tmp_path / "site"
+    r = subprocess.run([sys.executable, str(REPO / "scripts" / "mayank_static.py"), "--out", str(out), "--steps", "3",
+                        "--pause", "0"], capture_output=True, text=True, timeout=300,
+                       env={"PCIM_EMBEDDER": "hashing-512", "PATH": "/usr/bin:/bin"})
+    assert r.returncode == 0, r.stderr
+    import json
+    field = json.loads((out / "data" / "field.json").read_text())
+    replay = json.loads((out / "data" / "replay.json").read_text())
+    assert field["entities"] and field["demo"] == len(field["entities"])
+    assert replay["events"] and all("dt" in e for e in replay["events"])
+    page = (out / "index.html").read_text()
+    assert "window.MAYANK_STATIC" in page and "/static/mayank-app.js" in page
+    assert {p.name for p in (out / "static").iterdir()} == {"mayank-app.js", "mayank-gl.js", "mayank-forms.js"}
+    for f in out.rglob("*.json"):
+        text = f.read_text()
+        assert "/Users/" not in text and "/private/" not in text and str(tmp_path) not in text

@@ -5,7 +5,10 @@ import { FORMS, ENTITY_FORMS, sampleBody, assignParents, substrateFor, rng, hash
 
 const $ = s => document.querySelector(s);
 const params = new URLSearchParams(location.search);
-const N_SUB = Math.max(4000, Math.min(160000, +params.get("points") || 42000));
+const STATIC = window.MAYANK_STATIC || null;   // a shared snapshot: demonstration data, no ALTER behind it
+const SMALL = matchMedia("(max-width: 800px)").matches;
+const N_SUB = Math.max(4000, Math.min(160000, +params.get("points") || (SMALL ? 26000 : 42000)));
+const READONLY = "This is a read-only snapshot of demonstration data. With ALTER running (pcim serve), this is where you would act.";
 
 // ------------------------------------------------------------------ token and API
 let token = "";
@@ -15,7 +18,28 @@ try {
   token = sessionStorage.getItem("pcim_token") || "";
 } catch (_) {}
 
+let staticField = null;
+async function staticApi(path, method) {
+  if (method !== "GET") throw new Error(READONLY);
+  if (path.startsWith("/v1/mayank/field")) {
+    staticField = staticField || await (await fetch(STATIC.field)).json();
+    return staticField;
+  }
+  if (path.startsWith("/v1/mayank/search")) {   // no embedder in a static page: words only, and it says so
+    const q = new URLSearchParams(path.split("?")[1]).get("q") || "";
+    const words = q.toLowerCase().split(/\W+/).filter(w => w.length > 1);
+    const results = staticField.entities.map(e => {
+      const label = e.label.toLowerCase(), hay = label + " " + e.text.toLowerCase();
+      const hit = words.filter(w => hay.includes(w)).length;
+      return { id: e.id, score: hit ? hit / words.length + (words.some(w => label.includes(w)) ? 0.2 : 0) : 0 };
+    }).filter(r => r.score > 0).sort((a, b) => b.score - a.score).slice(0, 40);
+    return { query: q, embedder: "words", results };
+  }
+  throw new Error(READONLY);
+}
+
 async function api(path, { method = "GET", body } = {}) {
+  if (STATIC) return staticApi(path, method);
   const r = await fetch(path, { method, headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
                                 body: body ? JSON.stringify(body) : undefined });
   if (r.status === 401) {
@@ -382,10 +406,12 @@ function counts() {
   const bad = f.sources.filter(s => s.error);
   if (bad.length) toast(`Could not read: ${bad.map(s => `${s.name} (${s.error})`).join("; ")}`, 9000);
   const demo = $("#demo");
-  if (f.demo) { demo.style.display = "block"; demo.textContent = `Demonstration data · ${f.demo} of ${f.entities.length} records are demo (scripts/mayank_demo.py)`; }
+  if (STATIC) { demo.style.display = "block"; demo.textContent = SMALL ? "Demo · made-up data · read-only" : "Demonstration snapshot · made-up data · read-only"; }
+  else if (f.demo) { demo.style.display = "block"; demo.textContent = `Demonstration data · ${f.demo} of ${f.entities.length} records are demo (scripts/mayank_demo.py)`; }
   else demo.style.display = "none";
 }
 function buildChrome() {
+  if (SMALL) $("#q").placeholder = "Search, or : for commands";
   $("#forms").innerHTML = FORMS.map((f, i) => `<button data-form="${f}">${f}<span class="k">${i + 1}</span></button>`).join("");
   $("#forms").querySelectorAll("button").forEach(b => b.onclick = () => setForm(b.dataset.form));
   $("#palettes").innerHTML = Object.keys(PALETTES).map(p => `<button data-p="${p}" class="${p === S.palette ? "on" : ""}">${p}</button>`).join("");
@@ -513,6 +539,11 @@ async function act(desc, fn) {
 }
 
 function actions(e, box) {
+  if (STATIC) {
+    const note = document.createElement("div"); note.className = "note"; note.textContent = READONLY;
+    box.append(note, btn(S.isolate ? "show everything" : "isolate", toggleIsolate), btn("expand", expand));
+    return;
+  }
   const id = e.id, meta = e.meta || {};
   if (e.kind === "task") {
     if (e.status === "awaiting_approval") {
@@ -562,6 +593,7 @@ function actions(e, box) {
 function rawSkill(e) { return e.id.startsWith("skill:") ? e.id.slice(6) : e.label; }
 
 function challengeClaim(claim) {
+  if (STATIC) { toast(READONLY); return; }
   if (!claim) return;
   if (!confirm(`MAYANK will look for the weakest points in:\n\n“${claim}”\n\nThis is a routed model call through ALTER (consent and audit apply, and it may cost money). Go on?`)) return;
   act("Challenge recorded: see the hypotheses form", async () => { const r = await api("/v1/mayank/hypotheses", { method: "POST", body: { claim } }); setTimeout(() => setForm("hypotheses"), 900); return r; });
@@ -609,12 +641,22 @@ function pathBetween(a, b) {
 const canvas = $("#gl");
 let drag = null;
 canvas.addEventListener("contextmenu", e => e.preventDefault());
+const touches = new Map();
+let pinch = 0;
 canvas.addEventListener("pointerdown", e => {
+  touches.set(e.pointerId, [e.clientX, e.clientY]);
+  if (touches.size === 2) { const [a, b] = [...touches.values()]; pinch = Math.hypot(a[0] - b[0], a[1] - b[1]); drag = null; return; }
   canvas.setPointerCapture(e.pointerId); R.camera.touch();
   const hit = R.pick(e.clientX, e.clientY, 16, i => visibility(i) > 0.1);
   drag = { x: e.clientX, y: e.clientY, button: e.button, shift: e.shiftKey, hit, moved: false, meta: e.metaKey || e.ctrlKey };
 });
 canvas.addEventListener("pointermove", e => {
+  if (touches.has(e.pointerId)) touches.set(e.pointerId, [e.clientX, e.clientY]);
+  if (touches.size === 2) {
+    const [a, b] = [...touches.values()], d = Math.hypot(a[0] - b[0], a[1] - b[1]);
+    if (pinch) R.camera.radius *= pinch / Math.max(1, d);
+    pinch = d; R.camera.touch(); return;
+  }
   if (!drag) {
     const h = R.pick(e.clientX, e.clientY, 14, i => visibility(i) > 0.1);
     if (h !== S.hovered) { S.hovered = h; updateState(); canvas.classList.toggle("pointing", h >= 0); }
@@ -643,7 +685,10 @@ canvas.addEventListener("pointermove", e => {
   } else { R.camera.vt = -dx * 0.0042; R.camera.vp = -dy * 0.0042; }
   drag.x = e.clientX; drag.y = e.clientY;
 });
-canvas.addEventListener("pointerup", () => {
+const lift = e => { touches.delete(e.pointerId); if (touches.size < 2) pinch = 0; };
+canvas.addEventListener("pointercancel", e => { lift(e); drag = null; });
+canvas.addEventListener("pointerup", e => {
+  lift(e);
   canvas.classList.remove("grabbing");
   if (drag && !drag.moved) {
     if (drag.meta && S.selected >= 0 && drag.hit >= 0) { S.path = pathBetween(S.selected, drag.hit); S.trail = new Set(S.path); buildLines(); updateState(); inspector(); }
@@ -759,7 +804,9 @@ function onEvent(ev) {
   let label = "";
   for (const ref of ev.refs) {
     const i = m.byId.get(ref);
-    if (i != null) { S.act[i] = 1; label = label || m.entities[i].label; } else S.pendingActivate.add(ref);
+    // the record an event is about lights fully; its project is context and only glows
+    if (i != null) { const ctx = m.entities[i].kind === "project"; S.act[i] = Math.max(S.act[i], ctx ? 0.25 : 1); if (!ctx) label = label || m.entities[i].label; }
+    else S.pendingActivate.add(ref);
   }
   if (ev.event === "growth.probe") { m.entities.forEach((e, i) => { if (e.kind === "skill") S.act[i] = Math.max(S.act[i], 0.25); }); }
   const tick = $("#ticker"), row = document.createElement("div");
@@ -768,11 +815,24 @@ function onEvent(ev) {
   row.className = "fresh"; tick.prepend(row); setTimeout(() => row.classList.remove("fresh"), 2500);
   while (tick.children.length > 9) tick.lastChild.remove();
   S.lastEvents.push(ev); if (S.lastEvents.length > 50) S.lastEvents.shift();
-  if (STRUCTURAL.test(ev.event)) scheduleRefresh();
+  if (STRUCTURAL.test(ev.event) && !STATIC) scheduleRefresh();
 }
 function setLive(on, text) {
   S.live = on; $("#livedot").classList.toggle("on", on);
   $("#livetext").textContent = text || (on ? `live · audit #${S.cursor}` : "reconnecting");
+}
+async function replayLoop() {
+  // the audit events recorded when this snapshot was made, replayed on a loop with their own timing
+  const rec = await (await fetch(STATIC.replay)).json().catch(() => ({ events: [] }));
+  setLive(true, rec.events.length ? `replaying activity recorded ${rec.recorded_at}` : "snapshot");
+  if (!rec.events.length) return;
+  for (;;) {
+    for (const ev of rec.events) {
+      await new Promise(res => setTimeout(res, Math.max(900, Math.min(4500, ev.dt * 1000))));
+      onEvent({ ...ev, ts: new Date().toISOString() });
+    }
+    await new Promise(res => setTimeout(res, 5000));
+  }
 }
 async function liveLoop() {
   for (;;) {
@@ -840,7 +900,7 @@ function showGate(message = "") {
 }
 let started = false;
 async function start() {
-  if (!token) { showGate(); return; }
+  if (!token && !STATIC) { showGate(); return; }
   if (started) return;
   let field;
   try { field = await api("/v1/mayank/field"); }
@@ -856,8 +916,7 @@ async function start() {
   initParticles(null);
   setForm(S.form, { frame: false });
   const f = FRAMING.human; R.camera.theta = 0.9; R.camera.radius = 5.2; R.camera.phi = 1.3; R.camera.frame(f[0], f[1], f[2], f[3], 3800);
-  setLive(true, "live");
-  liveLoop();
+  if (STATIC) replayLoop(); else { setLive(true, "live"); liveLoop(); }
   window.__mayank.ready = true;
   if (!field.entities.length) toast("This store has no records yet. Seed demonstration data with scripts/mayank_demo.py, or start working with ALTER.", 9000);
 }
