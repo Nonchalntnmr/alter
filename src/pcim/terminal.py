@@ -1191,6 +1191,18 @@ def cmd_undo(argv: list[str]) -> int:
     return 0
 
 
+def _test_sandbox_check(confined: int) -> tuple[str, str, str]:
+    """Whether `test_confinement = "required"` can run here. The probe really runs (in a temporary
+    directory); it matters only to workspaces that require it, so only they make it a warning."""
+    from .sandbox import unavailable_reason
+    why = unavailable_reason()
+    if why is None:
+        return "test_sandbox", "ok", "bubblewrap passed the confinement probe; confined test runs work here"
+    if confined:
+        return "test_sandbox", "warn", f"{confined} workspace(s) run tests only in the sandbox, which is unavailable: {why}"
+    return "test_sandbox", "ok", f"not used (approved tests run on this machine); unavailable here: {why}"
+
+
 def cmd_doctor(argv: list[str]) -> int:
     """Read-only diagnostic check for environment, identity, CLI isolation, cache, store, and Stop-all."""
     import importlib
@@ -1279,17 +1291,19 @@ def cmd_doctor(argv: list[str]) -> int:
             ws = Workspace(ci)
             projects = ws.list_projects(uid)
             bad_ws = []
-            ws_count = 0
+            ws_count = confined = 0
             for p in projects:
                 w = ws.briefing(uid, p.id).get("workspace")
                 if w:
                     ws_count += 1
+                    confined += w.get("test_confinement") == "required"
                     if not Path(w["root"]).is_dir():
                         bad_ws.append(w["root"])
             if bad_ws:
                 add("workspaces", "warn", f"missing workspace dirs: {', '.join(bad_ws)}")
             else:
                 add("workspaces", "ok", f"{ws_count} authorized workspace(s) present")
+            add(*_test_sandbox_check(confined))
             halted = ws.is_halted(uid)
             add("stop_all", "fail" if halted else "ok",
                 "halted (run `ci resume` to clear)" if halted else "clear")

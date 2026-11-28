@@ -106,6 +106,34 @@ alter config get memory
 `CONFIG.md` lists every key. `alter permissions` still works, and reads and writes the same
 settings, plus the per-project ones (providers, vault topics, autonomy grants).
 
+## Confined test runs on Linux
+
+By default ALTER runs an approved test command on this machine, and the receipt says it was
+unconfined (`verified: false`). A project made with `alter init --confine-tests` runs its tests
+only in a bubblewrap sandbox instead: a copy of the project, no network, no home folder and no
+inherited environment. Where that sandbox cannot be verified (macOS, or Linux without it), its
+test runs are refused, never run on the host.
+
+It needs Linux, the distribution's `bubblewrap` package (a root-owned `/usr/bin/bwrap`) and
+`/usr/bin/python3`. The `test_sandbox` line of `alter doctor` runs the real probe and says whether
+it works; `alter init --confine-tests` says so too.
+
+**Ubuntu 23.10 and later** refuse unprivileged user namespaces through AppArmor
+(`kernel.apparmor_restrict_unprivileged_userns = 1`), and bubblewrap needs them, so the probe
+fails and names that cause. `scripts/linux/bwrap.apparmor` lets `/usr/bin/bwrap`, and nothing else,
+create them. The kernel setting stays on for every other program. Any program may still start
+bubblewrap, which is how every program behaves on Ubuntu before 23.10 and on Debian.
+
+```sh
+sudo apt install bubblewrap
+sudo install -m 0644 scripts/linux/bwrap.apparmor /etc/apparmor.d/bwrap
+sudo apparmor_parser -r /etc/apparmor.d/bwrap
+alter doctor          # test_sandbox: bubblewrap passed the confinement probe
+```
+
+ALTER's CI does the same on GitHub's Ubuntu 24.04 runner before it runs the confined checks. To
+undo it: `sudo apparmor_parser -R /etc/apparmor.d/bwrap && sudo rm /etc/apparmor.d/bwrap`.
+
 ## Upgrade
 
 ```sh

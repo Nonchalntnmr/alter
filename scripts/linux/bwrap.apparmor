@@ -1,0 +1,17 @@
+# Lets bubblewrap, and nothing else, create unprivileged user namespaces where AppArmor
+# refuses them (Ubuntu 23.10 and later: kernel.apparmor_restrict_unprivileged_userns = 1).
+# ALTER's confined test runs (`alter init --confine-tests`) need them; without this the
+# sandbox probe fails there and no project code runs. The sysctl itself stays as it is, and
+# so does every other program. The CI job that runs the confined checks installs this file.
+#
+#   install: sudo install -m 0644 scripts/linux/bwrap.apparmor /etc/apparmor.d/bwrap
+#            sudo apparmor_parser -r /etc/apparmor.d/bwrap
+#   remove:  sudo apparmor_parser -R /etc/apparmor.d/bwrap && sudo rm /etc/apparmor.d/bwrap
+abi <abi/4.0>,
+include <tunables/global>
+
+profile bwrap /usr/bin/bwrap flags=(unconfined) {
+  userns,
+
+  include if exists <local/bwrap>
+}

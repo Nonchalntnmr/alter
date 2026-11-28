@@ -114,9 +114,16 @@ jobs:
 
   # The five specialist checks that need a verified Linux sandbox (bubblewrap with user,
   # network, PID and mount namespaces, and /usr/bin/python3). Elsewhere they are skipped, never
-  # passed. This job installs the distro's root-owned bubblewrap, changes no kernel or AppArmor
-  # policy, and runs scripts/verify_alt4_execution.py, whose report says PASS, FAIL or BLOCKED.
-  # Not yet required: whether a hosted Ubuntu image permits the sandbox is what it finds out.
+  # passed. This job installs the distro's root-owned bubblewrap, sets the machine up the way
+  # docs/release/INSTALL.md tells a Linux user to, and runs scripts/verify_alt4_execution.py,
+  # whose report says PASS, FAIL or BLOCKED.
+  #
+  # Ubuntu 24.04 refuses unprivileged user namespaces through AppArmor, so on the stock image
+  # bubblewrap cannot build the sandbox and every check is BLOCKED. scripts/linux/bwrap.apparmor
+  # lets /usr/bin/bwrap, and nothing else, create them. The kernel setting stays on for every
+  # other program, and ALTER's sandbox is unchanged: the probe still has to see the outside
+  # write refused and separate network and PID namespaces before any project code runs.
+  # Not yet required: making it a required check is a branch-protection decision.
   confined-linux:
     name: confined specialist checks (Linux bubblewrap; evidence, not yet required)
     runs-on: ubuntu-24.04
@@ -138,6 +145,13 @@ jobs:
           ls -l /usr/bin/bwrap /usr/bin/python3
           bwrap --version
           sysctl kernel.apparmor_restrict_unprivileged_userns kernel.unprivileged_userns_clone 2>/dev/null || true
+          grep -rl 'usr/bin/bwrap' /etc/apparmor.d 2>/dev/null || echo "no AppArmor profile for /usr/bin/bwrap yet"
+      - name: Let bubblewrap alone create user namespaces (scripts/linux/bwrap.apparmor)
+        run: |
+          sudo install -m 0644 scripts/linux/bwrap.apparmor /etc/apparmor.d/bwrap
+          sudo apparmor_parser -r /etc/apparmor.d/bwrap
+          sudo grep -E '^bwrap ' /sys/kernel/security/apparmor/profiles
+          sysctl kernel.apparmor_restrict_unprivileged_userns
       - name: Install
         run: python -m pip install -c requirements-lock.txt -e ".[test]"
       - name: Verify the five confined checks

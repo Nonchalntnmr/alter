@@ -85,8 +85,22 @@ pathlib.Path('/work/probe-ok').write_text('ok')
     except (OSError, subprocess.TimeoutExpired):
         raise SandboxUnavailable("confinement probe could not run") from None
     if r.returncode or outside.read_text() != "unchanged" or not (work / "probe-ok").is_file():
-        raise SandboxUnavailable("confinement probe failed; project code was not executed")
+        raise SandboxUnavailable("confinement probe failed; project code was not executed" + _userns_hint())
     (work / "probe-ok").unlink()
+
+
+APPARMOR_USERNS = Path("/proc/sys/kernel/apparmor_restrict_unprivileged_userns")
+
+
+def _userns_hint() -> str:
+    """Why a probe most often fails on Ubuntu 23.10 and later, said where the failure is reported."""
+    try:
+        restricted = APPARMOR_USERNS.read_text().strip() == "1"
+    except OSError:
+        return ""
+    return ("; AppArmor restricts unprivileged user namespaces here (kernel.apparmor_restrict_unprivileged_userns=1). "
+            "scripts/linux/bwrap.apparmor lets bubblewrap alone create them: see docs/release/INSTALL.md, "
+            "'Confined test runs on Linux'") if restricted else ""
 
 
 def _excluded(rel: Path) -> bool:
