@@ -171,6 +171,10 @@ class PrefIn(BaseModel):
     value: str = Field(min_length=1, max_length=300)
 
 
+class MayankAskIn(BaseModel):
+    question: str = Field(min_length=1, max_length=4000)
+
+
 class HypothesisIn(BaseModel):
     claim: str = Field(min_length=3, max_length=2000)
     project_id: str | None = None
@@ -673,8 +677,8 @@ def create_app(ci: PersonalCI, *, run_service=None) -> FastAPI:
         return mayank.search(ci, uid, q, k=k, **field_kw())
 
     @app.get("/v1/mayank/events")
-    def mayank_events(after: int = 0, wait: float = 20.0, uid: str = Depends(user)):
-        return mayank.events(ci, uid, after, wait)
+    def mayank_events(after: int = 0, wait: float = 20.0, run_after: int | None = None, uid: str = Depends(user)):
+        return mayank.events(ci, uid, after, wait, run_after=run_after)
 
     @app.post("/v1/mayank/hypotheses")
     def mayank_challenge(body: HypothesisIn, uid: str = Depends(user)):
@@ -683,6 +687,14 @@ def create_app(ci: PersonalCI, *, run_service=None) -> FastAPI:
     @app.post("/v1/mayank/hypotheses/{cid}/resolve")
     def mayank_resolve(cid: str, body: HypothesisOutcomeIn, uid: str = Depends(user)):
         return guard(challenge_mod.resolve, ci, uid, cid, body.outcome, body.note)
+
+    @app.post("/v1/mayank/ask")
+    def mayank_ask(body: MayankAskIn, uid: str = Depends(user)):
+        return guard(mayank.ask, ci, uid, body.question)  # 409 when routing refuses, with its reason
+
+    @app.post("/v1/mayank/hypotheses/{cid}/assumptions/{k}/challenge")
+    def mayank_interrogate(cid: str, k: int, uid: str = Depends(user)):
+        return guard(mayank.challenge_assumption, ci, uid, cid, k)
 
     @app.post("/v1/mayank/hypotheses/{cid}/evidence")
     def mayank_rebut(cid: str, body: HypothesisEvidenceIn, uid: str = Depends(user)):

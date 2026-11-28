@@ -121,7 +121,11 @@ The same particles move between forms. Each record keeps its point, and only the
 | anything claimed | challenge this (a routed model call; the page asks first) | **new** `POST /v1/mayank/hypotheses` → `challenge.challenge` |
 | a hypothesis | record held, failed or inconclusive | **new** `POST /v1/mayank/hypotheses/{id}/resolve` → `challenge.resolve` |
 | a hypothesis | bring evidence (a routed model call; the page asks first) | **new** `POST /v1/mayank/hypotheses/{id}/evidence` |
-| a skill | record an unassisted right or wrong answer | `/v1/growth/probe` (`assisted: false`) |
+| a skill | take a test MAYANK writes and marks (below), or record a check done elsewhere | `/v1/growth/probe` (`assisted: false`) |
+| a question (end it with `?`, `:ask`, or say it) | MAYANK answers, and shows the records the answer rests on (a routed model call; the page asks once per session) | **new** `POST /v1/mayank/ask` → `ask_routed` |
+| an assumption | interrogate it on its own: it becomes the claim under challenge, linked back to it (`interrogates`) | **new** `POST /v1/mayank/hypotheses/{id}/assumptions/{k}/challenge` |
+| a project (`:goal <objective>`) | start a run; its agents appear in the execution form | `POST /v1/projects/{pid}/runs` |
+| a run | advance one agent turn (a model call; the page asks first) | `POST /v1/projects/{pid}/runs/{rid}/advance` |
 | everything | Stop-all, and resume | `/v1/autonomy/halt`, `/resume` |
 
 **Bringing evidence** puts the claim back to the same challenge, together with the person's evidence,
@@ -129,9 +133,51 @@ as a new record that `revises` the old one. The change in the model's estimate i
 record: the inspector shows it as "34% → 46%", or shows that it didn't move. The challenge mode's
 routing, consent, egress checks and audit apply as they do to any other request.
 
-**Live updates.** `GET /v1/mayank/events?after=SEQ&wait=20` long-polls the audit chain. Each event
-names the records it touched, and those records light up. An event that changes records triggers a
-field refresh: existing points move from where they are, and new records emerge from the head.
+**Answers show what they rest on.** An answer comes back with the IDs of the memory items ALTER sent
+with the question (`receipt.sent`). Those points light up, the answer panel lists them, and the new
+request record links to each one (`informed`) and to the model that served it (`served_by`).
+
+**Tests MAYANK writes and marks itself.** `mayank-learn.js` has 23 question generators. Each one
+computes its own answer, with no model involved, for skills such as:
+- eigenvalues, determinants, SVD, PCA;
+- Bayes' rule, martingales, gradients, convexity, Fourier periods;
+- heaps, dynamic programming, hypothesis tests, difference-in-differences;
+- portfolio variance, shrinkage, VaR, put-call parity;
+- Lagrangian and Hamiltonian mechanics, entropy.
+
+How it works:
+- Difficulty starts from mastery and moves up or down after each answer.
+- The rest of the page dims while you answer.
+- The working appears only after you answer.
+- The result is recorded as an unassisted check, the only kind that moves mastery.
+
+The mastery form lists skills that are due for review on the FSRS schedule. A skill with no generator
+falls back to an honest self-check. A test (outside the repository) verified 28,800 generated
+questions against independently computed answers.
+
+**Traces.** A task shows what actually ran:
+- the command (absolute paths cut to their last part), its exit code and the tail of its output;
+- whether it ran sandboxed or on the host;
+- for a write, the file, its size and its hash.
+
+A goal shows its verification line, a run shows its event history, and an agent shows its attempts
+and their problems.
+
+**Contradictions** are drawn in every form. A memory in conflict pulses rose and says that neither
+claim wins until you settle it.
+
+**Voice** uses the browser's Web Speech API, where available (Chrome, Safari). Press `V` or the
+microphone, then say a search or a question. Questions are asked, and spoken answers are read
+aloud.
+
+**Live updates.** `GET /v1/mayank/events?after=SEQ&run_after=SEQ&wait=20` long-polls two sources:
+- the audit chain;
+- the specialist runs' own event log. Runs do not write to the audit chain, and only their run and
+  project IDs are read.
+
+Each event names the records it touched, and those records light up. An event that changes records
+triggers a field refresh: existing points move from where they are, and new records emerge from
+the head.
 
 ## How it is built, and why
 
@@ -163,15 +209,16 @@ the hashing embedder it takes 49 ms.
 
 These parts of the brief are not implemented. Nothing on the page pretends otherwise.
 
-- **Voice, hand gestures, WebXR or mixed reality.** The renderer is plain WebGL2, so a WebXR session
-  could reuse it, but nothing has been built or tested on that hardware.
-- **Generated assessments.** MAYANK records unassisted checks that the person reports. It doesn't yet
-  write the questions itself.
-- **Questioning a single assumption.** It can be challenged as a new claim, but not yet in place
-  within its hypothesis.
-- **Plans don't run from the page.** Plans are drawn, but compiling or running one still happens in
-  the terminal (`ci plan`, `alter`).
-- **Agent internals.** The page shows what the audit chain and the records say. It doesn't show, and
+- **Hand gestures, WebXR and mixed reality.** The renderer is plain WebGL2, so a WebXR session could
+  reuse it, but nothing has been built or tested on that hardware.
+- **Voice on real hardware.** The voice path was tested with a stand-in speech recognizer, because a
+  headless browser has no microphone. Recognition itself is the browser's.
+- **Questions for arbitrary skills.** Tests cover the 23 generators. MAYANK does not ask a model to
+  write questions for other skills.
+- **Plans run only from the terminal.** Plans are drawn, but compiling or running an intent-compiler
+  plan still happens in the terminal (`ci plan`, `alter`). Runs, by contrast, can be started and
+  advanced from the page.
+- **Agent internals.** The page shows what the records and the audit chain say. It doesn't show, and
   doesn't claim to show, a model's internal reasoning.
 
 ## Tests
@@ -186,7 +233,12 @@ These parts of the brief are not implemented. Nothing on the page pretends other
   - the long-poll feed;
   - authentication on the routes and the shipped assets;
   - the hypothesis routes, with the model call mocked;
-  - the demo seeder refusing a home it didn't make.
+  - the demo seeder refusing a home it didn't make;
+  - asking, with the records sent;
+  - interrogating an assumption;
+  - traces without absolute paths;
+  - contradictions and review schedules;
+  - a new run reaching the field and the live feed.
 - An end-to-end browser pass (Playwright driving Chrome, outside the repository) checked 18
   interactions:
   - clicking to inspect;
@@ -196,4 +248,14 @@ These parts of the brief are not implemented. Nothing on the page pretends other
   - recording a hypothesis outcome;
   - an unassisted check moving mastery from 0.28 to 0.70;
   - switching forms from the keyboard;
+  - no page errors.
+- A second browser pass checked 16 more:
+  - a question offered as "Ask MAYANK", answered with the model that served it and the 24 records
+    it drew on, which lit up;
+  - a test question written, a right answer marked right with its working and recorded, and a wrong
+    answer marked wrong;
+  - a test run's trace;
+  - interrogating an assumption;
+  - `:goal` starting a run whose agents appear;
+  - a spoken question asked, answered and read aloud;
   - no page errors.

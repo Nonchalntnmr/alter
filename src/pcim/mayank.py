@@ -24,12 +24,15 @@ Anything marked "[demo]" (scripts/mayank_demo.py) is flagged `demo` so the page 
 """
 from __future__ import annotations
 
+import datetime as dt
 import hashlib
 import json
 import threading
 import time
 
 import numpy as np
+
+from .memory import CONFLICT_FLAG
 
 MAX_ENTITIES = 4000
 TEXT_MAX = 600
@@ -42,12 +45,12 @@ REGIONS = {
     "counter": "head", "alternative": "head", "experiment": "head",
     "project": "torso", "goal": "torso", "plan": "torso", "objective": "torso", "decision": "torso", "note": "torso",
     "run": "arms", "agent": "arms", "task": "arms",
-    "claim": "legs", "evidence": "legs", "exchange": "legs",
+    "claim": "legs", "evidence": "legs", "exchange": "legs", "model": "arms",
 }
 
 _cache_lock = threading.Lock()
 _vectors: dict[str, np.ndarray] = {}  # sha1(text) -> unit vector, shared by every user's field (text only)
-_fields: dict[str, tuple[int, float, dict]] = {}  # uid -> (audit seq, built at, field)
+_fields: dict[str, tuple[tuple, float, dict]] = {}  # uid -> ((audit seq, run seq), built at, field)
 FIELD_TTL_S = 30.0
 
 
@@ -81,6 +84,16 @@ class _Field:
         }
         return eid
 
+    def model(self, provider, model) -> str:
+        """One entity per model ALTER used, so you can see which model did what."""
+        mid = f"model:{provider or '?'}:{model}"
+        if mid not in self.entities:
+            mock = provider == "mock"  # the offline test double: it answers, but it is not a model
+            self.add(mid, "model", str(model), status="used", weight=0.7, source="demo" if mock else str(provider or ""),
+                     text="the offline mock provider: a test double, not a real model" if mock else f"provider {provider or 'unknown'}",
+                     meta={"provider": provider, "model": model, "test_double": mock})
+        return mid
+
     def link(self, a: str | None, b: str | None, rel: str) -> None:
         if a and b and a != b:
             self.links.append({"a": a, "b": b, "rel": rel})
@@ -93,6 +106,30 @@ class _Field:
         except Exception as e:  # one unreadable source must not blank the field; it is reported instead
             self.sources.append({"name": name, "entities": len(self.entities) - before,
                                  "error": f"{type(e).__name__}: {_clip(e, 200)}"})
+
+
+def _base(v):
+    """An absolute path keeps only its last part: traces show what ran, never where on this machine."""
+    v = str(v)
+    return v.rsplit("/", 1)[-1] if v.startswith("/") else v
+
+
+def _trace(t) -> dict:
+    """What a tool call actually did, from its result: the file it wrote, the test output it produced."""
+    r = t.result if isinstance(t.result, dict) else {}
+    out = {}
+    if t.tool == "write_file":
+        out = {k: r.get(k) for k in ("path", "created", "bytes", "sha256_after") if k in r}
+    elif t.tool == "run_tests":
+        out = {"argv": [_base(a) for a in (r.get("argv") or [])][:8], "exit_code": r.get("exit_code"),
+               "timed_out": r.get("timed_out"), "stdout_tail": str(r.get("stdout_tail") or "")[-900:],
+               "stderr_tail": str(r.get("stderr_tail") or "")[-400:]}
+        conf = r.get("confinement") or {}
+        if isinstance(conf, dict):
+            out["confinement"] = {k: conf.get(k) for k in ("backend", "verified", "network") if k in conf}
+    elif t.tool in ("read_file", "search_code"):
+        out = {k: r.get(k) for k in ("path", "bytes", "lines_total", "matches") if k in r}
+    return {k: v for k, v in out.items() if v not in (None, "", [])}
 
 
 # --------------------------------------------------------------------------- sources
@@ -109,6 +146,7 @@ def _memory(f: _Field, ci, uid: str) -> None:
               meta={"memory_kind": i.kind, "trust": getattr(i.trust, "value", str(i.trust)),
                     "sensitivity": getattr(i.sensitivity, "value", str(i.sensitivity)),
                     "pinned": bool(getattr(i, "pinned", False)), "key": i.key,
+                    "conflict": CONFLICT_FLAG in (getattr(i, "flags", ()) or ()),
                     "valid_from": _iso(i.valid_from), "valid_to": _iso(i.valid_to)})
     for i in items:
         if getattr(i, "superseded_by", None):
@@ -139,9 +177,15 @@ def _workspace(f: _Field, ci, uid: str, ws, queue, ledger, runs) -> None:
             f.add(g.id, "goal", g.objective, text=pay.get("reason") or "", t=g.created_at, status=g.status,
                   project=p.id, weight=0.85,
                   meta={"verdict": ver.get("verdict") if isinstance(ver, dict) else None,
+                        "verification": ({k: ver.get(k) for k in ("verdict", "line", "tests_after_writes")
+                                          if k in ver} if isinstance(ver, dict) else None),
                         "provider": pay.get("provider"), "model": pay.get("model"), "turns": pay.get("turns"),
+                        "checkpoints": len(pay.get("checkpoints") or []), "steers": len(pay.get("steers") or []),
+                        "cost_usd": round(sum((pay.get("session_costs") or {}).values()), 4) if pay.get("session_costs") else None,
                         "cites": ((pay.get("context") or {}).get("cites") or [])[:12]})
             f.link(g.id, p.id, "part_of")
+            if pay.get("model"):
+                f.link(g.id, f.model(pay.get("provider"), pay["model"]), "used")
             for s in pay.get("sessions") or []:
                 session_owner[s if isinstance(s, str) else str(s)] = g.id
             for k, cite in enumerate(((pay.get("context") or {}).get("cites") or [])[:12]):
@@ -154,7 +198,14 @@ def _workspace(f: _Field, ci, uid: str, ws, queue, ledger, runs) -> None:
             for r in runs.list(uid, p.id):
                 f.add(r["id"], "run", r.get("goal") or "run", t=r.get("created_at"), status=r.get("status"),
                       project=p.id, weight=0.8, meta={"usage": r.get("usage"), "limits": r.get("limits"),
-                                                      "provider": r.get("provider"), "model": r.get("model")})
+                                                      "provider": r.get("provider"), "model": r.get("model"),
+                                                      "events": [{"type": ev.get("type"), "at": ev.get("at")}
+                                                                 for ev in (r.get("events") or [])[-12:]],
+                                                      "verification": {k: v for k, v in (r.get("verification") or {}).items()
+                                                                       if k in ("artifacts_current", "tests_after_writes", "scope")},
+                                                      "steers": len(r.get("steers") or [])})
+                if r.get("model"):
+                    f.link(r["id"], f.model(r.get("provider"), r["model"]), "used")
                 f.link(r["id"], p.id, "part_of")
                 for w in r.get("work") or []:
                     aid = f.add(f"{r['id']}/{w['id']}", "agent", f"{w.get('role', 'agent')}: {w.get('objective', '')}",
@@ -162,6 +213,10 @@ def _workspace(f: _Field, ci, uid: str, ws, queue, ledger, runs) -> None:
                                 project=p.id, weight=0.7,
                                 meta={"role": w.get("role"), "artifacts": list(w.get("artifacts") or []),
                                       "require_tests": w.get("require_tests"), "run": r["id"], "work": w["id"]})
+                    f.entities[aid]["meta"]["attempts"] = [
+                        {"status": a.get("status"), "problems": (a.get("evidence") or {}).get("problems") or [],
+                         "pending": len(a.get("pending") or []), "finished_at": a.get("finished_at")}
+                        for a in (r.get("attempts") or []) if a.get("work_id") == w["id"]][-4:]
                     f.link(aid, r["id"], "part_of")
                     for dep in w.get("depends_on") or []:
                         f.link(aid, f"{r['id']}/{dep}", "depends_on")
@@ -176,7 +231,7 @@ def _workspace(f: _Field, ci, uid: str, ws, queue, ledger, runs) -> None:
                   meta={"tool": t.tool, "risk": t.risk, "reason": t.reason, "requested_by": t.requested_by,
                         "started_at": t.started_at, "finished_at": t.finished_at, "duration_ms": t.duration_ms,
                         "exit_code": (t.result or {}).get("exit_code") if isinstance(t.result, dict) else None,
-                        "session": t.session_id})
+                        "session": t.session_id, "trace": _trace(t)})
             f.link(t.id, session_owner.get(t.session_id or "", p.id), "ran_for")
         from .exchange import author_label, claim_status
         for c in ledger.list(uid, p.id):
@@ -207,6 +262,8 @@ def _challenges(f: _Field, ci, uid: str) -> None:
                         "revises": rec.get("revises"), "evidence_offered": rec.get("evidence_offered")})
         if rec.get("revises"):
             f.link(hid, rec["revises"], "revises")
+        if rec.get("interrogates"):
+            f.link(hid, rec["interrogates"], "interrogates")
         weights = {"high": 0.85, "medium": 0.6, "low": 0.4}
         for k, a in enumerate(ch.get("assumptions") or []):
             aid = f.add(f"{rec['id']}/a{k}", "assumption", a.get("text"), text=a.get("evidence_given") or "",
@@ -233,13 +290,17 @@ def _skills(f: _Field, ci, uid: str) -> None:
         report = ci.skill_report(uid) or {}
     except Exception:
         report = {}
-    per = {s.get("skill"): s for s in (report.get("skills") or []) if isinstance(s, dict)}
+    per = report.get("skills") if isinstance(report.get("skills"), dict) else {}
     for name, state in ci.store.list_skills(uid).items():
         p = float(state.get("p_mastery", state.get("p_known", 0.0)) or 0.0)
         status = "mastered" if p >= 0.95 else "learning" if p >= 0.4 else "gap"
         sid = f.add(f"skill:{name}", "skill", name, t=state.get("updated_at"), status=status, weight=0.3 + 0.7 * p,
                     meta={"p_mastery": round(p, 3), "path": [s.strip() for s in name.replace(DEMO_MARK, "").split("/")],
-                          "report": {k: v for k, v in (per.get(name) or {}).items() if k != "skill"}})
+                          "review": (per.get(name) or {}).get("review"),
+                          "unassisted": (per.get(name) or {}).get("unassisted"),
+                          "assisted": (per.get(name) or {}).get("assisted"),
+                          "dependency_gap": (per.get(name) or {}).get("dependency_gap"),
+                          "trend": ((per.get(name) or {}).get("trend") or {}).get("direction")})
         parts = [s.strip() for s in name.split("/")]
         if len(parts) > 1:  # "mathematics / linear algebra / eigenvalues": a prerequisite tree by path
             f.link(sid, f"skill:{' / '.join(parts[:-1])}" if " / " in name else f"skill:{'/'.join(parts[:-1])}",
@@ -279,11 +340,23 @@ def _exchanges(f: _Field, ci, uid: str) -> None:
                     "reward": r.get("reward")})
         for i in (r.get("selected") or [])[:40]:
             f.link(i, r["id"], "informed")
+        if r.get("model"):
+            f.link(r["id"], f.model(r.get("provider"), r["model"]), "served_by")
 
 
 # --------------------------------------------------------------------------- field
 def audit_seq(ci, uid: str) -> int:
     row = ci.store.query("SELECT MAX(seq) AS s FROM audit WHERE user_id=?", (uid,))
+    return int(row[0]["s"] or 0) if row else 0
+
+
+def run_seq(ci, uid: str) -> int:
+    """Specialist runs keep their own event log (specialist_events), not the audit chain, so the
+    field watches both. Run and project ids are plaintext there; the events themselves stay sealed."""
+    try:
+        row = ci.store.query("SELECT MAX(seq) AS s FROM specialist_events WHERE user_id=?", (uid,))
+    except Exception:  # no run has ever been stored here
+        return 0
     return int(row[0]["s"] or 0) if row else 0
 
 
@@ -318,12 +391,12 @@ def build(ci, uid: str, *, ws, queue, ledger, runs=None) -> dict:
         next_challenge = None
     return {"entities": ents, "links": links, "sources": f.sources, "kinds": kinds, "next_challenge": next_challenge,
             "omitted": max(0, len(f.entities) - len(ents)), "demo": sum(e["demo"] for e in ents),
-            "cursor": audit_seq(ci, uid), "embedder": embedder, "regions": REGIONS}
+            "cursor": audit_seq(ci, uid), "run_cursor": run_seq(ci, uid), "embedder": embedder, "regions": REGIONS}
 
 
 def field(ci, uid: str, **kw) -> dict:
-    """The field, rebuilt when the audit chain has moved (any governed change) or after FIELD_TTL_S."""
-    seq = audit_seq(ci, uid)
+    """The field, rebuilt when the audit chain or a run's event log has moved, or after FIELD_TTL_S."""
+    seq = (audit_seq(ci, uid), run_seq(ci, uid))
     with _cache_lock:
         hit = _fields.get(uid)
     if hit and hit[0] == seq and time.monotonic() - hit[1] < FIELD_TTL_S:
@@ -397,13 +470,21 @@ def search(ci, uid: str, q: str, k: int = 24, **kw) -> dict:
 
 
 # --------------------------------------------------------------------------- live
-def events(ci, uid: str, after: int, wait: float = 20.0, poll: float = 0.4) -> dict:
-    """Audit entries after `after`, waiting up to `wait` seconds for the first one (long poll)."""
+def events(ci, uid: str, after: int, wait: float = 20.0, poll: float = 0.4, run_after: int | None = None) -> dict:
+    """Audit entries after `after` (and run events after `run_after`), waiting up to `wait` seconds
+    for the first one (long poll). A run event names its run and project, so their points light."""
     deadline = time.monotonic() + max(0.0, min(wait, 25.0))
     while True:
         rows = ci.store.query("SELECT seq, ts, event, payload FROM audit WHERE user_id=? AND seq>? ORDER BY seq LIMIT 200",
                               (uid, int(after)))
-        if rows or time.monotonic() >= deadline:
+        runs = []
+        if run_after is not None:
+            try:
+                runs = ci.store.query("SELECT seq, run_id, project_id FROM specialist_events WHERE user_id=? AND seq>? "
+                                      "ORDER BY seq LIMIT 200", (uid, int(run_after)))
+            except Exception:
+                runs = []
+        if rows or runs or time.monotonic() >= deadline:
             out = []
             for r in rows:
                 try:
@@ -413,7 +494,14 @@ def events(ci, uid: str, after: int, wait: float = 20.0, poll: float = 0.4) -> d
                 refs = sorted({str(v) for v in payload.values() if isinstance(v, str) and len(v) < 120})
                 out.append({"seq": r["seq"], "ts": r["ts"], "event": r["event"], "refs": refs,
                             "payload": {k: v for k, v in payload.items() if isinstance(v, (str, int, float, bool))}})
-            return {"events": out, "cursor": out[-1]["seq"] if out else int(after)}
+            now = dt.datetime.now(dt.timezone.utc).isoformat()
+            for r in runs:
+                out.append({"seq": None, "run_seq": r["seq"], "ts": now, "event": "run.update",
+                            "refs": [r["run_id"], r["project_id"]], "payload": {}})
+            result = {"events": out, "cursor": rows[-1]["seq"] if rows else int(after)}
+            if run_after is not None:
+                result["run_cursor"] = runs[-1]["seq"] if runs else int(run_after)
+            return result
         time.sleep(poll)
 
 
@@ -436,3 +524,38 @@ def challenge_with_evidence(ci, uid: str, challenge_id: str, evidence: str, **kw
             r.update(claim=old["claim"], revises=challenge_id, evidence_offered=evidence)
     challenge._write(ci, uid, version, log)
     return rec | {"claim": old["claim"], "revises": challenge_id, "evidence_offered": evidence}
+
+
+def ask(ci, uid: str, question: str, **kw) -> dict:
+    """A question to MAYANK, answered through ALTER's routing (consent, egress, audit as always). The
+    answer comes back with the records that were sent with it, so the page can show what it rests on."""
+    question = " ".join(str(question or "").split())[:4000]
+    if not question:
+        raise ValueError("the question is empty")
+    r = ci.ask_routed(uid, question, **kw)
+    rec = r.receipt or {}
+    return {"interaction_id": r.interaction_id, "text": r.text,
+            "served_by": (rec.get("route") or {}).get("served_by") or rec.get("model"),
+            "cost_usd": rec.get("cost_usd"), "sent": [s["id"] for s in rec.get("sent") or []],
+            "withheld": len(rec.get("withheld_by_egress") or [])}
+
+
+def challenge_assumption(ci, uid: str, challenge_id: str, k: int, **kw) -> dict:
+    """Interrogate one assumption of a hypothesis on its own: the assumption becomes the claim under
+    challenge, and the new record says which assumption of which hypothesis it examines."""
+    from . import challenge
+    old = next((r for r in challenge.records(ci, uid) if r["id"] == challenge_id), None)
+    if old is None:
+        raise KeyError(challenge_id)
+    assumptions = (old.get("challenge") or {}).get("assumptions") or []
+    if not 0 <= k < len(assumptions):
+        raise KeyError(f"{challenge_id}/a{k}")
+    text = assumptions[k]["text"]
+    rec = challenge.challenge(ci, uid, text, **kw)
+    version, log = challenge._log(ci, uid)
+    for r in log:
+        if r["id"] == rec["id"]:
+            r.update(interrogates=f"{challenge_id}/a{k}", about=challenge_id)
+    challenge._write(ci, uid, version, log)
+    return rec | {"interrogates": f"{challenge_id}/a{k}", "about": challenge_id}
+

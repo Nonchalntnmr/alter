@@ -32,7 +32,7 @@ from pcim.exchange import ClaimLedger  # noqa: E402
 from pcim.goals import GoalStore  # noqa: E402
 from pcim.governor import Governor  # noqa: E402
 from pcim.tasks import TaskQueue  # noqa: E402
-from pcim.types import new_id, utcnow  # noqa: E402
+from pcim.types import Trust, new_id, utcnow  # noqa: E402
 from pcim.workspace import Workspace  # noqa: E402
 
 D = "[demo] "
@@ -154,6 +154,13 @@ def seed(home: Path, ci: PersonalCI) -> dict:
     for kind, text, key, value in MEMORY:
         kw = {"key": key, "value": value} if key else {}
         ci.remember(uid, D + (f"{text}: {value}" if key else text), kind, **kw)
+    # a contradiction: something ALTER inferred disagrees with what the person said, so neither wins
+    ci.remember(uid, D + "View on night-time cooling: canopy can trap heat at night", "fact", key="night_cooling_view",
+                value="canopy can trap heat at night", trust=Trust.INFERRED, confidence=0.7)
+    # questions answered through ALTER's routing (the offline mock model): each records what it was sent
+    for q in ("What do I know about eigenvalues?", "What have I decided about the street-tree study?",
+              "Which of my skills are weakest?"):
+        ci.ask_routed(uid, D + q)
 
     ws = Workspace(ci)
     ledger = ClaimLedger(ws)
@@ -303,11 +310,16 @@ class Busy:
         if roll < 0.7:
             r = queue.approve(uid, queue.propose(uid, pid, "run_tests", {"reason": D + "check the notes"}).id)
             return f"tests: {r.status} {r.reason or ''}".rstrip()
-        if roll < 0.85:
+        if roll < 0.78:
             name = rnd.choice(list(SKILLS))
             ok = rnd.random() < 0.6
             ci.probe(uid, D + name, ok, assisted=False, source="demo")
             return f"unassisted check: {name} {'right' if ok else 'wrong'}"
+        if roll < 0.88:
+            q = rnd.choice(["What do I know about heat islands?", "What should I study next?",
+                            "What evidence do I have about canopy and night temperature?"])
+            ci.ask_routed(uid, D + q)
+            return f"asked: {q}"
         fact = rnd.choice(["Noted a new source on heat islands", "Linked eigenvalues to stability of dynamics",
                            "Found a counterexample worth testing", "Re-derived the normal equations"])
         ci.remember(uid, D + f"{fact} ({n})", "fact")

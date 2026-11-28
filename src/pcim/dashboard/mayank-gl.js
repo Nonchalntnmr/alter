@@ -47,6 +47,8 @@ void main() {
   vec3 c = aColor * (uLight * (0.7 + 0.3 * vis));
   c = mix(c, vec3(1.0, 0.93, 0.84), clamp((act * 0.75 + search * 0.55) * (uIsEntity == 1 ? 1.0 : 0.6), 0.0, 1.0));
   if (pending) c = mix(c, vec3(0.50, 0.82, 0.86), 0.55 + 0.25 * sin(uTime * 4.0));
+  bool conflict = mod(floor(flags / 16.0), 2.0) >= 1.0;
+  if (conflict) c = mix(c, vec3(0.86, 0.42, 0.37), 0.5 + 0.3 * sin(uTime * 3.0));   // a contradiction does not rest
   float flowPulse = 0.65 + 0.35 * sin(uTime * 2.6 - aSeed * 40.0);
   float base = uIsEntity == 1 ? 1.0 : mix(1.0, flowPulse, uFlow);
   vAlpha = base * mix(0.04, 1.0, vis) * (uIsEntity == 1 ? 1.0 : 0.62 + act * 0.32 + search * 0.3);   // a lit region glows, it does not bloom

@@ -125,6 +125,37 @@ button.danger:hover { color: var(--rose); border-color: var(--rose); }
 #toast { position: fixed; left: 50%; bottom: 110px; transform: translateX(-50%); padding: 9px 16px; display: none; max-width: 560px;
   text-align: center; }
 #toast.show { display: block; animation: rise .3s; }
+#answer { position: fixed; left: 28px; top: 270px; width: 380px; max-height: calc(100vh - 560px); min-height: 120px; overflow: auto;
+  padding: 18px 20px; display: none; }
+#answer.show { display: block; animation: rise .45s cubic-bezier(.2, .8, .2, 1); }
+#answer h3 { margin: 6px 0 10px; font-weight: 400; font-size: 15px; line-height: 1.35; }
+#answer .body, #assess .body { color: var(--ink2); white-space: pre-wrap; margin: 10px 0; }
+#answer .meta, #assess .meta { color: var(--ink3); font-size: 11px; display: flex; flex-wrap: wrap; gap: 4px 12px; }
+#answer .meta b { color: var(--ink2); font-weight: 500; }
+#answer .rel { display: flex; gap: 8px; align-items: baseline; padding: 4px 6px; margin: 0 -6px; border-radius: 6px; cursor: pointer; }
+#answer .rel:hover { background: rgba(236, 228, 214, 0.06); }
+#answer .rel .rn { color: var(--ink3); font-size: 10.5px; min-width: 40px; font-family: var(--mono); }
+#answer .rel i { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+#answer .acts, #assess .acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+#answer .x, #assess .x { position: absolute; right: 14px; top: 12px; border: none; font-size: 16px; padding: 2px 8px; }
+#answer .sect { margin-top: 12px; } #answer .note { color: var(--ink3); font-size: 11px; margin-top: 8px; }
+#assess { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(520px, calc(100vw - 32px));
+  padding: 26px 28px; display: none; z-index: 5; }
+#assess.show { display: block; animation: rise .4s cubic-bezier(.2, .8, .2, 1); }
+#assess h2 { margin: 6px 0 4px; font-weight: 400; font-size: 18px; }
+#assess .rule { color: var(--ink3); font-size: 11px; line-height: 1.5; }
+#assess .question { font-size: 16px; line-height: 1.5; margin: 18px 0 12px; color: var(--ink); }
+#assess input { width: 100%; background: rgba(0, 0, 0, .35); color: var(--ink); border: 1px solid var(--line); border-radius: 10px;
+  padding: 11px 14px; font: 15px var(--mono); outline: none; }
+#assess input:focus { border-color: rgba(207, 138, 90, 0.55); }
+#assess .right { color: #b9d8a8; margin-top: 14px; } #assess .wrong { color: var(--rose); margin-top: 14px; }
+#as-score { color: var(--ink3); margin-top: 10px; }
+pre.trace { white-space: pre-wrap; background: rgba(0, 0, 0, .3); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+  color: var(--ink2); max-height: 160px; overflow: auto; margin: 8px 0 0; }
+pre.trace.err { color: var(--rose); }
+#mic { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 34px; height: 34px; padding: 0; border-radius: 50%;
+  font-size: 13px; color: var(--copper); top: 23px; }
+#mic.on { background: var(--copper); color: #1a120c; animation: pulse 1.2s infinite; }
 #fatal { position: fixed; inset: 0; display: none; place-items: center; text-align: center; color: var(--ink2); padding: 40px; }
 @media (max-width: 1100px) { #ticker, #formnote { display: none; } #cmd { width: calc(100vw - 56px); bottom: 80px; } #legend { display: none; } }
 @media (max-width: 800px) {
@@ -135,6 +166,7 @@ button.danger:hover { color: var(--rose); border-color: var(--rose); }
   #cmd { min-width: 0; width: calc(100vw - 32px); bottom: 64px; } #cmd .hint { display: none; } #cmd input { font-size: 16px; }
   #perf { right: 14px; bottom: 12px; } #perf .row:first-child, #perfline { display: none; } #perf .row button { padding: 3px 8px; font-size: 10px; }
   #inspector { left: 12px; right: 12px; width: auto; top: auto; bottom: 118px; max-height: 46vh; padding: 16px; }
+  #answer { left: 12px; right: 12px; width: auto; top: auto; bottom: 118px; max-height: 46vh; }
   .zone { display: none; }
 }
 </style>
@@ -167,11 +199,24 @@ button.danger:hover { color: var(--rose); border-color: var(--rose); }
 <div id="cmd">
   <div class="panel" id="cmdout"></div>
   <span class="glyph">◎</span>
-  <input id="q" autocomplete="off" spellcheck="false" placeholder="Search what ALTER knows, or type : for a command">
-  <div class="hint">/ search · 1–8 forms · click to inspect · drag a point out to keep it · I isolate · Esc clear · ? help</div>
+  <input id="q" autocomplete="off" spellcheck="false" placeholder="Search what ALTER knows, ask a question, or type : for a command">
+  <button id="mic" title="speak a search or a question (V)" aria-label="speak">●</button>
+  <div class="hint">/ search · end with ? to ask · 1–8 forms · click to inspect · drag a point out · T test a skill · V speak · ? help</div>
 </div>
 
 <aside class="panel" id="inspector" aria-live="polite"></aside>
+<aside class="panel" id="answer" aria-live="polite"></aside>
+<div class="panel" id="assess" role="dialog" aria-label="Unassisted check">
+  <button class="x" id="as-close" title="done (Esc)">×</button>
+  <span class="caps">unassisted check · <span id="as-level"></span></span>
+  <h2 id="as-skill"></h2>
+  <div class="rule" id="as-rule"></div>
+  <div class="question" id="as-q"></div>
+  <input id="as-a" autocomplete="off" spellcheck="false">
+  <div class="acts"><button class="primary" id="as-submit">check my answer</button></div>
+  <div id="as-result"></div>
+  <div class="mono" id="as-score"></div>
+</div>
 <div id="demo"></div>
 <button id="putback" class="panel">put back</button>
 <div class="panel" id="toast"></div>

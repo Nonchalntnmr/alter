@@ -173,11 +173,11 @@ def test_routes_need_the_token_and_the_page_and_assets_are_served(world):
     assert c.get("/v1/mayank/events", params={"after": f["cursor"], "wait": 0}, headers=h).json()["events"] == []
     page = c.get("/mayank")
     assert page.status_code == 200 and "<title>MAYANK</title>" in page.text and "/static/mayank-app.js" in page.text
-    for asset in ("mayank-app.js", "mayank-gl.js", "mayank-forms.js"):
+    for asset in ("mayank-app.js", "mayank-gl.js", "mayank-forms.js", "mayank-learn.js"):
         r = c.get(f"/static/{asset}")
         assert r.status_code == 200 and "javascript" in r.headers["content-type"]
     shipped = {p.name for p in resources.files("pcim").joinpath("dashboard").iterdir()}
-    assert {"mayank.html", "mayank-app.js", "mayank-gl.js", "mayank-forms.js"} <= shipped  # package-data "dashboard/*"
+    assert {"mayank.html", "mayank-app.js", "mayank-gl.js", "mayank-forms.js", "mayank-learn.js"} <= shipped  # package-data "dashboard/*"
 
 
 def test_outcomes_and_evidence_go_through_the_challenge_log(world, monkeypatch):
@@ -255,7 +255,83 @@ def test_the_static_build_holds_only_demonstration_data_and_no_local_paths(tmp_p
     assert replay["events"] and all("dt" in e for e in replay["events"])
     page = (out / "index.html").read_text()
     assert "window.MAYANK_STATIC" in page and "/static/mayank-app.js" in page
-    assert {p.name for p in (out / "static").iterdir()} == {"mayank-app.js", "mayank-gl.js", "mayank-forms.js"}
+    assert {p.name for p in (out / "static").iterdir()} == {"mayank-app.js", "mayank-gl.js", "mayank-forms.js", "mayank-learn.js"}
     for f in out.rglob("*.json"):
         text = f.read_text()
         assert "/Users/" not in text and "/private/" not in text and str(tmp_path) not in text
+
+
+def test_ask_answers_through_routing_and_says_what_it_drew_on(world):
+    c = TestClient(create_app(PersonalCI(world["data"], seed=0)))
+    h = {"Authorization": "Bearer " + world["token"]}
+    r = c.post("/v1/mayank/ask", json={"question": "What do I know about eigenvalues?"}, headers=h)
+    assert r.status_code == 200, r.text
+    a = r.json()
+    assert a["text"] and a["served_by"] and a["interaction_id"]
+    assert a["sent"]                                    # the records sent with the question, by id
+    mayank._fields.clear()
+    f = c.get("/v1/mayank/field", headers=h).json()
+    by = {e["id"]: e for e in f["entities"]}
+    ex = by[a["interaction_id"]]
+    assert ex["kind"] == "exchange"
+    sent_links = {l["a"] for l in f["links"] if l["rel"] == "informed" and l["b"] == ex["id"]}
+    assert set(a["sent"]) <= sent_links                 # the answer's foundations are in the field
+    assert any(l["rel"] == "served_by" and l["a"] == ex["id"] and by[l["b"]]["kind"] == "model" for l in f["links"])
+    assert c.post("/v1/mayank/ask", json={"question": ""}, headers=h).status_code == 422
+
+
+def test_one_assumption_can_be_interrogated_on_its_own(world, monkeypatch):
+    seen = {}
+
+    def fake_challenge(ci, uid, claim, **kw):
+        seen["claim"] = claim
+        rec = {"id": new_id("ch"), "ts": utcnow().isoformat(), "interaction": None, "claim": claim, "parsed": True,
+               "challenge": {}, "served_by": "fake", "status": "open", "resolved_at": None, "note": None}
+        version, log = challenge._log(ci, uid)
+        challenge._write(ci, uid, version, log + [rec])
+        return rec
+    monkeypatch.setattr(challenge, "challenge", fake_challenge)
+    c = TestClient(create_app(PersonalCI(world["data"], seed=0)))
+    h = {"Authorization": "Bearer " + world["token"]}
+    r = c.post(f"/v1/mayank/hypotheses/{world['challenge']}/assumptions/0/challenge", headers=h)
+    assert r.status_code == 200, r.text
+    assert seen["claim"] == "It can be measured in advance"
+    assert c.post(f"/v1/mayank/hypotheses/{world['challenge']}/assumptions/9/challenge", headers=h).status_code == 404
+    mayank._fields.clear()
+    f = c.get("/v1/mayank/field", headers=h).json()
+    assert any(l["rel"] == "interrogates" and l["a"] == r.json()["id"] and l["b"] == f"{world['challenge']}/a0"
+               for l in f["links"])
+
+
+def test_traces_show_what_ran_and_never_where_on_this_machine(world):
+    import json
+    f = build(world)
+    task = next(e for e in f["entities"] if e["id"] == world["task"])
+    assert task["meta"]["trace"] == {"path": "a.md", "created": True, "bytes": 1,
+                                     "sha256_after": task["meta"]["trace"]["sha256_after"]}
+    assert "abs_path" not in json.dumps(f) and str(world["data"].parent) not in json.dumps(f)
+    assert mayank._base("/usr/bin/python3") == "python3" and mayank._base("pytest") == "pytest"
+
+
+def test_a_contradiction_and_the_review_schedule_reach_the_field(world):
+    from pcim.types import Trust
+    world["ci"].remember("ana", "Study hour: noon", "fact", key="study_hour", value="noon", trust=Trust.INFERRED, confidence=0.6)
+    f = build(world)
+    flagged = [e for e in f["entities"] if e["kind"] == "memory" and e["meta"]["conflict"]]
+    assert flagged and any(l["rel"] == "contradicts" and flagged[0]["id"] in (l["a"], l["b"]) for l in f["links"])
+    skill = next(e for e in f["entities"] if e["kind"] == "skill")
+    assert skill["meta"]["review"]["due"] and skill["meta"]["unassisted"]["n"] == 3
+
+
+def test_starting_a_run_reaches_the_field_and_the_live_feed(world):
+    """Runs keep their own event log, not the audit chain: the field and the feed watch both."""
+    from pcim.run_service import RunService
+    kw = {"ws": world["ws"], "queue": world["queue"], "ledger": world["ledger"], "runs": RunService(world["ci"])}
+    a = mayank.field(world["ci"], "ana", **kw)
+    run_after = a["run_cursor"]
+    run = kw["runs"].start("ana", world["pid"], "Summarise the notes", {"mock"})
+    b = mayank.field(world["ci"], "ana", **kw)
+    assert b is not a and any(e["id"] == run["id"] for e in b["entities"])
+    feed = mayank.events(world["ci"], "ana", b["cursor"], wait=0, run_after=run_after)
+    assert any(e["event"] == "run.update" and run["id"] in e["refs"] for e in feed["events"])
+    assert feed["run_cursor"] > run_after

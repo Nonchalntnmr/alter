@@ -2,6 +2,7 @@
 // and acts only through ALTER's own routes (approve, deny, pause, steer, halt, probe, challenge).
 import { Renderer } from "/static/mayank-gl.js";
 import { FORMS, ENTITY_FORMS, sampleBody, assignParents, substrateFor, rng, hash01 } from "/static/mayank-forms.js";
+import { generatorFor, difficultyFor, check as checkAnswer, ANSWER_HINT } from "/static/mayank-learn.js";
 
 const $ = s => document.querySelector(s);
 const params = new URLSearchParams(location.search);
@@ -62,7 +63,7 @@ const PALETTES = {
 const KIND_T = {
   skill: 0.99, memory: 0.93, hypothesis: 0.88, experiment: 0.84, alternative: 0.8, assumption: 0.76, counter: 0.72,
   decision: 0.7, project: 0.66, goal: 0.62, plan: 0.58, objective: 0.54, note: 0.5,
-  run: 0.42, agent: 0.37, task: 0.31, claim: 0.24, evidence: 0.16, exchange: 0.09,
+  model: 0.46, run: 0.42, agent: 0.37, task: 0.31, claim: 0.24, evidence: 0.16, exchange: 0.09,
 };
 const KIND_NAME = { counter: "counterexample", exchange: "request", objective: "outcome / step" };
 const ROSE = [0.81, 0.42, 0.37], CYAN = [0.53, 0.79, 0.81], IVORY = [1, 0.95, 0.87];
@@ -228,7 +229,13 @@ const FORM_NOTE = {
   grid: () => "One band per kind, oldest first, left to right: the record laid flat.",
   execution: () => "Read left to right: what each goal was given (its sources) and its project, then the goal or run, then the agents and every tool call made for it, then the claims those calls support. A cyan pulse is waiting for your approval.",
   hypotheses: () => "Each peak is a hypothesis you put to MAYANK. Its height is the model's estimate that it holds: an estimate, not a measurement. Assumptions ring the base; counterexamples and the strongest alternative sit in the valleys.",
-  mastery: () => `Your skills, by path. Height is mastery, moved only by unassisted checks: an assisted success never counts.${S.field.next_challenge ? ` Next challenge: ${S.field.next_challenge.replace("[demo] ", "")}.` : ""}`,
+  mastery: () => {
+    const now = Date.now(), due = S.model.entities.filter(e => e.kind === "skill" && e.meta.review && Date.parse(e.meta.review.due) <= now);
+    return `Your skills, by path. Height is mastery, moved only by unassisted checks: an assisted success never counts.`
+      + (S.field.next_challenge ? ` Next challenge: ${S.field.next_challenge.replace("[demo] ", "")}.` : "")
+      + (due.length ? ` Due for review now (FSRS): ${due.slice(0, 5).map(e => e.meta.path[e.meta.path.length - 1]).join(", ")}${due.length > 5 ? ` and ${due.length - 5} more` : ""}.` : "")
+      + " Select a skill and press T to be tested.";
+  },
 };
 
 function setForm(form, { frame = true } = {}) {
@@ -254,6 +261,7 @@ const REL_COLOR = {
   evidence: [0.96, 0.92, 0.85, 0.32], depends_on: [0.9, 0.76, 0.6, 0.35], part_of: [0.96, 0.92, 0.85, 0.12],
   ran_for: [0.81, 0.54, 0.35, 0.22], tests: [0.96, 0.92, 0.85, 0.4], revises: [0.53, 0.79, 0.81, 0.55],
   derived_from: [0.9, 0.76, 0.6, 0.3], informed: [0.96, 0.92, 0.85, 0.12], serves: [0.9, 0.76, 0.6, 0.3], produced: [0.96, 0.92, 0.85, 0.3],
+  interrogates: [0.86, 0.5, 0.42, 0.55], served_by: [0.53, 0.79, 0.81, 0.3], used: [0.53, 0.79, 0.81, 0.25],
 };
 function buildLines() {
   const m = S.model; if (!m) return;
@@ -265,7 +273,8 @@ function buildLines() {
   const sel = S.selected;
   const extra = sel >= 0 ? m.out[sel].concat(m.inn[sel]) : [];
   const trailLinks = m.links.filter(l => S.trail.has(l.ai) && S.trail.has(l.bi));
-  const all = [...new Set([...list, ...extra, ...trailLinks])];
+  const contra = m.links.filter(l => l.rel === "contradicts");   // competing structures stay visible in every form
+  const all = [...new Set([...list, ...contra, ...extra, ...trailLinks])];
   const f = new Float32Array(all.length * 6), t = new Float32Array(all.length * 6), c = new Float32Array(all.length * 8);
   all.forEach((l, k) => {
     for (const [j, idx] of [[0, l.ai], [1, l.bi]]) {
@@ -330,6 +339,7 @@ function updateState() {
     if (i === S.hovered) flags |= 2;
     if (S.trail.has(i)) flags |= 4;
     if (e.status === "awaiting_approval") flags |= 8;
+    if (e.meta && e.meta.conflict) flags |= 16;
     stateBuf[i * 4] = Math.round(Math.min(1, S.act[i]) * 255);
     stateBuf[i * 4 + 1] = flags;
     stateBuf[i * 4 + 2] = Math.round((S.search.get(i) || 0) * 255);
@@ -402,7 +412,8 @@ function legend() {
 function counts() {
   const f = S.field;
   $("#counts").textContent = `${f.entities.length} entities · ${f.links.length} relations · ${N_SUB.toLocaleString()} structure points`
-    + (f.omitted ? ` · ${f.omitted} older left out` : "");
+    + (f.omitted ? ` · ${f.omitted} older left out` : "")
+    + ` · ${f.links.filter(l => l.rel === "contradicts").length} contradictions`;
   const bad = f.sources.filter(s => s.error);
   if (bad.length) toast(`Could not read: ${bad.map(s => `${s.name} (${s.error})`).join("; ")}`, 9000);
   const demo = $("#demo");
@@ -511,21 +522,46 @@ function kindDetail(e, meta) {
     if (meta.what_would_change_my_mind) h += `<div class="sect"><span class="caps">what would change its mind</span><div class="body">${esc(meta.what_would_change_my_mind)}</div></div>`;
   } else if (e.kind === "skill") {
     h += bar(meta.p_mastery || 0, "mastery (unassisted checks only)");
-    h += `<div class="note">Assisted attempts are logged and never move this. Answer from memory, then record honestly.</div>`;
+    const u = meta.unassisted || {}, as = meta.assisted || {}, rv = meta.review;
+    h += `<div class="meta">${u.n ? `<span>unassisted <b>${u.correct}/${u.n}</b></span>` : ""}${as.n ? `<span>assisted <b>${as.correct}/${as.n}</b> (not counted)</span>` : ""}${meta.trend && meta.trend !== "not enough evidence" ? `<span>trend <b>${esc(meta.trend)}</b></span>` : ""}</div>`;
+    if (rv && rv.due) h += `<div class="note">Next unassisted check ${Date.parse(rv.due) <= Date.now() ? "<b>is due now</b>" : "due " + esc(when(rv.due).replace(" ago", " from now"))}. ${esc(rv.reason || "")}</div>`;
+    h += `<div class="note">${generatorFor(e.label) ? "MAYANK can test this itself: it writes the question, computes the answer and shows the working only after you answer." : "MAYANK has no generator for this skill yet: answer a check elsewhere, then record it honestly."}</div>`;
   } else if (e.kind === "task") {
     h += `<div class="meta"><span>tool <b>${esc(meta.tool)}</b></span><span>risk <b>${esc(meta.risk)}</b></span>${meta.exit_code != null ? `<span>exit <b>${meta.exit_code}</b></span>` : ""}${meta.duration_ms ? `<span><b>${Math.round(meta.duration_ms)}</b> ms</span>` : ""}<span>by <b>${esc(meta.requested_by)}</b></span></div>`;
     if (meta.reason) h += `<div class="note">${esc(meta.reason)}</div>`;
+    const tr = meta.trace || {};
+    if (Object.keys(tr).length) {
+      h += `<div class="sect"><span class="caps">what it actually did</span>`;
+      if (tr.argv) h += `<div class="mono" style="color:var(--ink2)">$ ${esc(tr.argv.join(" "))} → exit ${esc(tr.exit_code)}${tr.timed_out ? " (timed out)" : ""}</div>`;
+      if (tr.confinement) h += `<div class="note">${tr.confinement.verified ? `ran in a verified ${esc(tr.confinement.backend)} sandbox, network ${esc(tr.confinement.network)}` : "ran on this machine, unconfined (receipt: verified false)"}</div>`;
+      if (tr.path) h += `<div class="mono" style="color:var(--ink2)">${tr.created ? "created" : "wrote"} ${esc(tr.path)} · ${esc(tr.bytes)} bytes${tr.sha256_after ? ` · sha256 ${esc(tr.sha256_after.slice(0, 12))}…` : ""}</div>`;
+      if (tr.stdout_tail) h += `<pre class="mono trace">${esc(tr.stdout_tail)}</pre>`;
+      if (tr.stderr_tail) h += `<pre class="mono trace err">${esc(tr.stderr_tail)}</pre>`;
+      h += `</div>`;
+    }
   } else if (e.kind === "memory") {
     h += `<div class="meta"><span>trust <b>${esc(meta.trust)}</b></span><span>sensitivity <b>${esc(meta.sensitivity)}</b></span>${meta.pinned ? "<span><b>pinned</b></span>" : ""}</div>`;
+    const against = S.model.out[S.selected].concat(S.model.inn[S.selected]).filter(l => l.rel === "contradicts");
+    if (against.length) h += `<div class="note" style="color:var(--rose)">In conflict with ${against.length} other record${against.length > 1 ? "s" : ""}: neither wins until you settle it (confirm one, retract the other).</div>`;
   } else if (e.kind === "assumption") {
     h += `<div class="meta"><span>load-bearing <b>${esc(meta.load_bearing)}</b></span></div>`;
   } else if (e.kind === "goal") {
-    h += `<div class="meta">${meta.verdict ? `<span>verdict <b>${esc(meta.verdict)}</b></span>` : ""}${meta.model ? `<span>model <b>${esc(meta.model)}</b></span>` : ""}${meta.turns != null ? `<span><b>${meta.turns}</b> turns</span>` : ""}</div>`;
+    h += `<div class="meta">${meta.verdict ? `<span>verdict <b>${esc(meta.verdict)}</b></span>` : ""}${meta.model ? `<span>model <b>${esc(meta.model)}</b></span>` : ""}${meta.turns != null ? `<span><b>${meta.turns}</b> turns</span>` : ""}${meta.checkpoints ? `<span><b>${meta.checkpoints}</b> checkpoints</span>` : ""}${meta.cost_usd != null ? `<span><b>$${(+meta.cost_usd).toFixed(4)}</b></span>` : ""}</div>`;
+    if (meta.verification && meta.verification.line) h += `<div class="note">${esc(meta.verification.line)}</div>`;
   } else if (e.kind === "claim") {
     const a = meta.assessments || [];
     if (a.length) h += `<div class="note">${a.map(x => esc(`${x.verdict} (${x.by || "?"})`)).join(" · ")}</div>`;
   } else if (e.kind === "run") {
-    if (meta.usage) h += `<div class="meta"><span><b>${meta.usage.steps}</b> steps</span><span><b>${meta.usage.tool_calls}</b> tool calls</span></div>`;
+    if (meta.usage) h += `<div class="meta"><span><b>${meta.usage.steps}</b> steps</span><span><b>${meta.usage.tool_calls}</b> tool calls</span>${meta.steers ? `<span><b>${meta.steers}</b> steers</span>` : ""}</div>`;
+    if (meta.events && meta.events.length) h += `<div class="sect"><span class="caps">what happened</span>${meta.events.map(ev => `<div class="mono" style="color:var(--ink2)">${esc(when(ev.at))} · ${esc(ev.type)}</div>`).join("")}</div>`;
+    const v = meta.verification || {};
+    if (Object.keys(v).length) h += `<div class="note">artifacts current: <b>${v.artifacts_current ? "yes" : "no"}</b> · tests after writes: <b>${v.tests_after_writes ? "yes" : "no"}</b>${v.scope ? ` · ${esc(v.scope)}` : ""}</div>`;
+  } else if (e.kind === "agent") {
+    h += `<div class="meta"><span>role <b>${esc(meta.role)}</b></span>${(meta.artifacts || []).length ? `<span>makes <b>${esc(meta.artifacts.join(", "))}</b></span>` : ""}${meta.require_tests ? "<span>must pass tests</span>" : ""}</div>`;
+    for (const at of meta.attempts || []) h += `<div class="note">attempt: <b>${esc(at.status)}</b>${at.pending ? ` · ${at.pending} waiting for you` : ""}${at.problems.length ? ` · ${esc(at.problems.join("; "))}` : ""}</div>`;
+  } else if (e.kind === "model") {
+    const served = S.model.inn[S.selected].filter(l => l.rel === "served_by" || l.rel === "used").length;
+    h += `<div class="meta"><span>provider <b>${esc(meta.provider)}</b></span><span>used for <b>${served}</b> record${served === 1 ? "" : "s"} here</span></div>`;
   } else if (e.kind === "exchange") {
     h += `<div class="meta">${meta.model ? `<span>model <b>${esc(meta.model)}</b></span>` : ""}${meta.cost_usd != null ? `<span><b>$${(+meta.cost_usd).toFixed(4)}</b></span>` : ""}<span><b>${meta.context_items}</b> context items</span></div>`;
   }
@@ -540,6 +576,7 @@ async function act(desc, fn) {
 
 function actions(e, box) {
   if (STATIC) {
+    if (e.kind === "skill" && generatorFor(e.label)) box.append(btn("practise, unassisted (T)", () => startAssessment(e), "primary"));
     const note = document.createElement("div"); note.className = "note"; note.textContent = READONLY;
     box.append(note, btn(S.isolate ? "show everything" : "isolate", toggleIsolate), btn("expand", expand));
     return;
@@ -584,6 +621,20 @@ function actions(e, box) {
   if (["memory", "claim", "assumption", "decision", "goal"].includes(e.kind)) {
     box.append(btn("challenge this", () => challengeClaim(e.label)));
   }
+  if (e.kind === "assumption") {
+    const [cid, k] = [e.id.slice(0, e.id.lastIndexOf("/")), +e.id.slice(e.id.lastIndexOf("/a") + 2)];
+    box.append(btn("interrogate this assumption on its own", () => {
+      if (!confirmModel()) return;
+      act("Challenge recorded: it is linked to the assumption it examines", () => api(`/v1/mayank/hypotheses/${cid}/assumptions/${k}/challenge`, { method: "POST" }));
+    }));
+  }
+  if (e.kind === "run") {
+    box.append(btn("advance one agent turn", () => {
+      if (!confirmModel()) return;
+      act("One agent turn ran: see its tasks", () => api(`/v1/projects/${e.project}/runs/${id}/advance`, { method: "POST" }));
+    }, "primary"));
+  }
+  if (e.kind === "skill" && generatorFor(e.label)) box.append(btn("test me, unassisted (T)", () => startAssessment(e), "primary"));
   if (e.kind === "skill") {
     box.append(btn("I got it right, unassisted", () => act("Recorded an unassisted success", () => api("/v1/growth/probe", { method: "POST", body: { skill: rawSkill(e), correct: true, assisted: false } }))),
                btn("I got it wrong", () => act("Recorded an unassisted miss", () => api("/v1/growth/probe", { method: "POST", body: { skill: rawSkill(e), correct: false, assisted: false } }))));
@@ -715,9 +766,55 @@ q.addEventListener("keydown", e => {
   if (e.key === "Enter") {
     const v = q.value.trim();
     if (v.startsWith(":")) { command(v.slice(1)); q.value = ""; out.classList.remove("show"); return; }
-    if (results[resultSel]) select(results[resultSel].i, { fly: true });
+    if (results[resultSel]?.ask) askMayank(v);
+    else if (results[resultSel]) select(results[resultSel].i, { fly: true });
   }
 });
+const QUESTION = /\?\s*$|^(what|why|how|which|who|when|where|should|could|can|do|does|did|is|are|was|will|would|explain|tell me|ask)\b/i;
+function confirmModel() {
+  if (STATIC) { toast(READONLY); return false; }
+  try { if (sessionStorage.getItem("mayank.modelok")) return true; } catch (_) {}
+  const ok = confirm("This sends your words, and the records ALTER selects for them, to a model through ALTER's routing. Consent, egress checks and the audit apply as always, and it may cost money. Allow model calls for this session?");
+  if (ok) try { sessionStorage.setItem("mayank.modelok", "1"); } catch (_) {}
+  return ok;
+}
+async function askMayank(question, { spoken = false } = {}) {
+  question = question.replace(/^ask\s+/i, "").trim();
+  if (!question || !confirmModel()) return;
+  out.classList.remove("show"); q.value = "";   // the question moves to the answer panel
+  showAnswer({ question, pending: true });
+  try {
+    const r = await api("/v1/mayank/ask", { method: "POST", body: { question } });
+    showAnswer({ question, ...r });
+    S.answerSent = r.sent; showFoundations();
+    if (spoken && window.speechSynthesis) speak(r.text);
+    scheduleRefresh(400);
+  } catch (err) { showAnswer({ question, error: err.message }); }
+}
+function showFoundations() {
+  S.search = new Map((S.answerSent || []).map(id => [S.model.byId.get(id), 1]).filter(([i]) => i != null));
+  updateState();
+}
+function showAnswer(a) {
+  const el = $("#answer");
+  if (!a) { el.classList.remove("show"); return; }
+  let h = `<button class="x" id="ans-close">×</button><span class="caps">mayank · answer</span><h3>${esc(a.question)}</h3>`;
+  if (a.pending) h += `<div class="note">Routing your question through ALTER…</div>`;
+  else if (a.error) h += `<div class="note" style="color:var(--rose)">${esc(a.error)}</div>`;
+  else {
+    h += `<div class="body">${esc(a.text)}</div>`;
+    h += `<div class="meta">${a.served_by ? `<span>served by <b>${esc(a.served_by)}</b></span>` : ""}${a.cost_usd != null ? `<span><b>$${(+a.cost_usd).toFixed(4)}</b></span>` : ""}<span>drew on <b>${a.sent.length}</b> record${a.sent.length === 1 ? "" : "s"}</span>${a.withheld ? `<span><b>${a.withheld}</b> withheld by egress rules</span>` : ""}</div>`;
+    const rows = a.sent.map(id => S.model.byId.get(id)).filter(i => i != null).slice(0, 10).map(i => rel(i, "sent")).join("");
+    if (rows) h += `<div class="sect"><span class="caps">what this answer rests on</span>${rows}</div>`;
+    h += `<div class="acts"><button id="ans-show">light what it drew on</button>${window.speechSynthesis ? `<button id="ans-speak">read aloud</button>` : ""}</div>`;
+  }
+  el.innerHTML = h; el.classList.add("show");
+  $("#ans-close").onclick = () => { showAnswer(null); S.answerSent = null; clearSearch(); };
+  el.querySelectorAll(".rel").forEach(r => r.onclick = () => select(+r.dataset.i, { fly: true }));
+  if ($("#ans-show")) $("#ans-show").onclick = showFoundations;
+  if ($("#ans-speak")) $("#ans-speak").onclick = () => speak(a.text);
+}
+
 async function runSearch(v) {
   try {
     const r = await api(`/v1/mayank/search?q=${encodeURIComponent(v)}&k=40`);
@@ -732,20 +829,27 @@ async function runSearch(v) {
       results.push({ i, score: x.score });
     });
     results = results.slice(0, 9); resultSel = 0;
+    if (QUESTION.test(v)) results.unshift({ ask: v });   // a question: offer to ask, first
     drawResults(); updateState();
   } catch (err) { out.innerHTML = `<div class="r">${esc(err.message)}</div>`; out.classList.add("show"); }
 }
 function drawResults() {
   out.innerHTML = results.map((x, k) => {
+    if (x.ask) return `<div class="r${k === resultSel ? " sel" : ""}" data-ask="1"><i style="background:var(--copper)"></i><span>Ask MAYANK: “${esc(trunc(x.ask, 60))}”</span><span class="s">${STATIC ? "needs ALTER running" : "a routed model call · Enter"}</span></div>`;
     const e = S.model.entities[x.i];
     return `<div class="r${k === resultSel ? " sel" : ""}" data-i="${x.i}"><i style="background:${css(entityColor(e, S.palette))}"></i><span>${esc(trunc(e.label, 70))}</span><span class="s">${esc(KIND_NAME[e.kind] || e.kind)} · ${x.score.toFixed(2)}</span></div>`;
   }).join("") || `<div class="r" style="color:var(--ink3)">nothing close</div>`;
   out.classList.add("show");
   out.querySelectorAll(".r[data-i]").forEach(r => r.onclick = () => select(+r.dataset.i, { fly: true }));
+  out.querySelectorAll(".r[data-ask]").forEach(r => r.onclick = () => askMayank(q.value.trim()));
 }
 function clearSearch() { S.search = new Map(); results = []; out.classList.remove("show"); updateState(); }
 
 const COMMANDS = {
+  ask: "ask <question>: MAYANK answers, and shows the records the answer rests on (a routed model call)",
+  goal: "goal <objective>: start a run in the selected record's project; its agents appear in the execution form",
+  test: "test: an unassisted check on the selected skill, written and marked by MAYANK (no model)",
+  listen: "listen: speak a search or a question",
   form: "form <name>: human, constellation, network, timeline, grid, execution, hypotheses, mastery",
   challenge: "challenge <claim>: MAYANK argues against it (a routed model call)",
   approve: "approve: run the selected task you were asked about", deny: "deny: refuse the selected task",
@@ -764,6 +868,10 @@ async function command(text) {
   const sel = S.selected >= 0 ? S.model.entities[S.selected] : null;
   switch (cmd) {
     case "form": setForm(arg); break;
+    case "ask": askMayank(arg); break;
+    case "goal": startGoal(arg, sel); break;
+    case "test": if (sel?.kind === "skill") startAssessment(sel); else toast("Select a skill first (the mastery form, 8)."); break;
+    case "listen": listen(); break;
     case "challenge": challengeClaim(arg || sel?.label); break;
     case "approve": if (sel?.status === "awaiting_approval") act("Approved: ALTER ran it", () => api(`/v1/tasks/${sel.id}/approve`, { method: "POST" })); else toast("Select a task that is waiting for you."); break;
     case "deny": if (sel?.status === "awaiting_approval") act("Denied", () => api(`/v1/tasks/${sel.id}/deny`, { method: "POST" })); else toast("Select a task that is waiting for you."); break;
@@ -777,8 +885,17 @@ async function command(text) {
     case "help": default: help(); break;
   }
 }
+async function startGoal(objective, sel) {
+  if (STATIC) { toast(READONLY); return; }
+  if (!objective) { toast("Say what the goal is: :goal <objective>"); return; }
+  const projects = S.model.entities.filter(e => e.kind === "project");
+  const pid = sel?.project || (projects.length === 1 ? projects[0].id : null);
+  if (!pid) { toast("Select something in the project this goal belongs to, then try again."); return; }
+  await act("Run started: its agents are in the execution form, waiting for you to advance them", () => api(`/v1/projects/${pid}/runs`, { method: "POST", body: { objective } }));
+  setTimeout(() => setForm("execution"), 900);
+}
 function help() {
-  toast("1–8 forms · drag to turn · right-drag to move · wheel to zoom · click a point to inspect · ⌘-click a second for the path between · drag a point out to keep it · I isolate · E expand · P put back · [ ] size · L light · / search · : commands", 9000);
+  toast("1–8 forms · drag to turn · right-drag to move · wheel to zoom · click a point to inspect · ⌘-click a second for the path between · drag a point out to keep it · I isolate · E expand · P put back · [ ] size · L light · / search or ask (end with ?) · T test a skill · V speak · : commands", 9000);
 }
 
 document.addEventListener("keydown", e => {
@@ -795,7 +912,82 @@ document.addEventListener("keydown", e => {
   else if (e.key === "l" || e.key === "L") $("#light").click();
   else if (e.key === "r" || e.key === "R") $("#reset").click();
   else if (e.key === "?") help();
+  else if (e.key === "t" || e.key === "T") { const sel = S.selected >= 0 ? S.model.entities[S.selected] : null; if (sel?.kind === "skill") startAssessment(sel); }
+  else if (e.key === "v" || e.key === "V") listen();
 });
+
+// ------------------------------------------------------------------ assessments: written and marked by MAYANK
+let A = null;
+function startAssessment(e) {
+  const gen = generatorFor(e.label);
+  if (!gen) { toast("MAYANK has no generator for this skill yet."); return; }
+  select(-1);
+  A = { e, gen, d: difficultyFor(e.meta.p_mastery || 0), n: 0, right: 0, item: null, answered: false };
+  R.light = 0.45;                       // the field steps back: nothing on screen helps you answer
+  $("#assess").classList.add("show");
+  $("#as-skill").textContent = e.meta.path ? e.meta.path.join(" / ") : e.label;
+  $("#as-rule").textContent = "Answer from your own head. MAYANK wrote this question and computed its answer itself; no model is involved, and the working appears only after you answer. "
+    + (STATIC ? "This is a snapshot, so nothing is recorded: practice only." : "Your result is recorded as an unassisted check, and only unassisted checks move mastery.");
+  nextQuestion();
+}
+function nextQuestion() {
+  A.item = A.gen(A.d, Math.random); A.answered = false;
+  $("#as-q").textContent = A.item.q;
+  $("#as-a").value = ""; $("#as-a").placeholder = ANSWER_HINT[A.item.kind];
+  $("#as-result").innerHTML = ""; $("#as-submit").textContent = "check my answer";
+  $("#as-level").textContent = ["level 1 of 3", "level 2 of 3", "level 3 of 3"][A.d];
+  $("#as-a").focus();
+}
+async function submitAnswer() {
+  if (!A) return;
+  if (A.answered) { nextQuestion(); return; }
+  if (!$("#as-a").value.trim()) return;
+  const ok = checkAnswer(A.item, $("#as-a").value);
+  A.answered = true; A.n++; if (ok) A.right++;
+  const shown = A.item.kind === "number" ? +A.item.answer.toFixed(4) : A.item.answer;
+  $("#as-result").innerHTML = `<div class="${ok ? "right" : "wrong"}">${ok ? "Right." : `Not quite: the answer is ${esc(shown)}.`}</div><div class="body">${esc(A.item.why)}</div>`;
+  $("#as-score").textContent = `${A.right} of ${A.n} this session`;
+  $("#as-submit").textContent = "next question";
+  A.d = Math.max(0, Math.min(2, A.d + (ok ? 1 : -1)));
+  if (!STATIC) {
+    try { const r = await api("/v1/growth/probe", { method: "POST", body: { skill: rawSkill(A.e), correct: ok, assisted: false } });
+          $("#as-score").textContent += ` · recorded · mastery now ${Math.round(r.p_mastery * 100)}%`; scheduleRefresh(600); }
+    catch (err) { $("#as-score").textContent += ` · not recorded: ${err.message}`; }
+  }
+}
+function endAssessment() { $("#assess").classList.remove("show"); A = null; R.light = 1; }
+$("#as-submit").onclick = submitAnswer;
+$("#as-close").onclick = endAssessment;
+$("#as-a").addEventListener("keydown", ev => { if (ev.key === "Enter") submitAnswer(); if (ev.key === "Escape") endAssessment(); });
+
+// ------------------------------------------------------------------ voice (Web Speech, where the browser has it)
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let listening = null;
+if (!SR) $("#mic").style.display = "none";
+function listen() {
+  if (!SR) { toast("This browser has no speech recognition. Chrome and Safari do."); return; }
+  if (listening) { listening.stop(); return; }
+  const rec = new SR();
+  rec.lang = navigator.language || "en-US"; rec.interimResults = true; rec.maxAlternatives = 1;
+  listening = rec; $("#mic").classList.add("on"); q.placeholder = "Listening…";
+  rec.onresult = ev => {
+    const res = ev.results[ev.results.length - 1], text = res[0].transcript.trim();
+    q.value = text;
+    if (res.isFinal) {
+      if (QUESTION.test(text) && !STATIC) askMayank(text, { spoken: true });
+      else runSearch(text);
+    }
+  };
+  rec.onerror = ev => toast(`Voice: ${ev.error}`);
+  rec.onend = () => { listening = null; $("#mic").classList.remove("on"); q.placeholder = SMALL ? "Search, or : for commands" : "Search what ALTER knows, ask a question, or type : for a command"; };
+  rec.start();
+}
+function speak(text) {
+  if (!window.speechSynthesis) return;
+  speechSynthesis.cancel();
+  speechSynthesis.speak(new SpeechSynthesisUtterance(String(text).slice(0, 900)));
+}
+$("#mic").onclick = listen;
 
 // ------------------------------------------------------------------ live: the audit chain
 const STRUCTURAL = /^(task|goal|memory|claim|challenge|growth|run|project|note|model|plan|workspace|consent|autonomy|exchange)\./;
@@ -837,8 +1029,8 @@ async function replayLoop() {
 async function liveLoop() {
   for (;;) {
     try {
-      const r = await api(`/v1/mayank/events?after=${S.cursor}&wait=20`);
-      S.cursor = r.cursor; setLive(true);
+      const r = await api(`/v1/mayank/events?after=${S.cursor}&run_after=${S.runCursor || 0}&wait=20`);
+      S.cursor = r.cursor; if (r.run_cursor != null) S.runCursor = r.run_cursor; setLive(true);
       r.events.forEach(onEvent);
     } catch (err) {
       setLive(false, err.message === "unauthorized" ? "token needed" : "reconnecting");
@@ -911,7 +1103,7 @@ async function start() {
     return;
   }
   started = true;
-  S.field = field; S.model = buildModel(field); S.cursor = field.cursor;
+  S.field = field; S.model = buildModel(field); S.cursor = field.cursor; S.runCursor = field.run_cursor || 0;
   buildChrome(); buildFloor();
   initParticles(null);
   setForm(S.form, { frame: false });
@@ -931,6 +1123,9 @@ window.__mayank = {
   screenOf: id => { const i = S.model.byId.get(id); return i == null ? null : R.toScreen(R.entityPos(i)); },
   search: v => { q.value = v; return runSearch(v); }, activation: id => S.act[S.model.byId.get(id)] || 0,
   pulled: () => [...S.pulled.keys()].map(i => S.model.entities[i].id),
+  ask: (text, opts) => askMayank(text, opts), assess: id => startAssessment(S.model.entities[S.model.byId.get(id)]),
+  get assessment() { return A ? { q: A.item.q, answer: A.item.answer, kind: A.item.kind, d: A.d, n: A.n, right: A.right } : null; },
+  get highlighted() { return [...S.search.keys()].map(i => S.model.entities[i].id); },
 };
 requestAnimationFrame(frame);
 start();
