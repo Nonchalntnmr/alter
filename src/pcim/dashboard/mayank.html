@@ -166,6 +166,45 @@ body.immersive #legend, body.immersive #cmd, body.immersive #demo, body.immersiv
 body.immersive #perf .row:not(:last-of-type), body.immersive #perfline { display: none; }
 body.immersive #xrcap { bottom: 24px; }
 body.immersive #inspector { top: auto; bottom: 90px; right: 50%; transform: translateX(50%); max-height: 34vh; width: 420px; }
+#timebar { position: fixed; left: 50%; bottom: 112px; transform: translateX(-50%); width: min(820px, calc(100vw - 40px)); display: none;
+  align-items: center; gap: 10px; padding: 10px 14px; z-index: 3; }
+#timebar.show { display: flex; }
+#timebar input { flex: 1; accent-color: var(--copper); }
+#timebar .tl-info { min-width: 150px; text-align: right; color: var(--ink2); line-height: 1.3; }
+#timebar button { padding: 4px 10px; font-size: 11px; } #timebar .speed.on { color: #1a120c; background: var(--copper); border-color: var(--copper); }
+#talkcap { position: fixed; left: 50%; bottom: 168px; transform: translateX(-50%); padding: 8px 16px; display: none; color: var(--ink);
+  letter-spacing: .04em; }
+#talkcap.show { display: block; animation: pulse 2.4s infinite; }
+#campreview { position: fixed; right: 28px; bottom: 150px; width: 192px; height: 144px; border-radius: 12px; overflow: hidden; display: none;
+  border: 1px solid var(--line); background: #000; }
+#campreview.show { display: block; }
+#campreview .camvideo { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); opacity: .55; }
+#campreview .camdots { position: absolute; inset: 0; width: 100%; height: 100%; }
+#camcap { position: fixed; right: 28px; bottom: 128px; width: 300px; text-align: right; color: var(--cyan); font-size: 10.5px; }
+#camconsent { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(520px, calc(100vw - 32px)); padding: 24px 26px;
+  display: none; z-index: 6; }
+#camconsent.show { display: block; } #camconsent p { color: var(--ink2); } #camconsent .note { color: var(--ink3); font-size: 11.5px; }
+#camconsent h3 { margin: 6px 0 8px; font-weight: 400; } #camconsent .acts { display: flex; gap: 8px; margin-top: 12px; }
+#debate, #autopilot { position: fixed; left: 28px; top: 200px; width: 400px; max-height: calc(100vh - 440px); overflow: auto; padding: 18px 20px; display: none; }
+#autopilot { top: auto; bottom: 230px; max-height: 46vh; }
+#debate.show, #autopilot.show { display: block; animation: rise .45s cubic-bezier(.2, .8, .2, 1); }
+#debate h3, #autopilot h3 { margin: 6px 0 10px; font-weight: 400; font-size: 15px; line-height: 1.35; }
+#debate .meta, #autopilot .meta { color: var(--ink3); font-size: 11px; display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 8px 0; }
+#debate .meta b, #autopilot .meta b { color: var(--ink2); font-weight: 500; }
+#debate .turn { border-left: 2px solid var(--copper); padding: 4px 0 4px 10px; margin: 10px 0; }
+#debate .turn.against { border-color: var(--rose); } #debate .turn.judge { border-color: var(--ink); }
+#debate .who { font-size: 10px; letter-spacing: .16em; color: var(--ink3); }
+#debate .body, #autopilot .note { color: var(--ink2); white-space: pre-wrap; font-size: 12.5px; margin-top: 4px; }
+#debate .x, #autopilot .x { position: absolute; right: 14px; top: 12px; border: none; font-size: 16px; padding: 2px 8px; }
+#debate .note { color: var(--ink3); font-size: 11px; }
+#autopilot .meter { margin: 8px 0; font-size: 11px; color: var(--ink2); display: grid; grid-template-columns: 1fr auto; gap: 3px; }
+#autopilot .meter .bar { grid-column: 1 / -1; height: 3px; background: rgba(236, 228, 214, 0.1); border-radius: 2px; overflow: hidden; }
+#autopilot .meter .bar > div { height: 100%; background: linear-gradient(90deg, var(--copper), #f1e2c8); }
+#autopilot .agent { font-size: 11.5px; color: var(--ink2); margin: 3px 0; display: flex; gap: 8px; align-items: center; }
+#autopilot .agent i { width: 7px; height: 7px; border-radius: 50%; background: var(--ink3); }
+#autopilot .agent i.succeeded { background: #b9d8a8; } #autopilot .agent i.running, #autopilot .agent i.awaiting_approval { background: var(--cyan); }
+#autopilot .acts { display: flex; gap: 6px; margin-top: 10px; }
+body.immersive #timebar, body.immersive #debate, body.immersive #autopilot, body.immersive #talkcap { display: none !important; }
 #fatal { position: fixed; inset: 0; display: none; place-items: center; text-align: center; color: var(--ink2); padding: 40px; }
 @media (max-width: 1100px) { #ticker, #formnote { display: none; } #cmd { width: calc(100vw - 56px); bottom: 80px; } #legend { display: none; } }
 @media (max-width: 800px) {
@@ -204,6 +243,9 @@ body.immersive #inspector { top: auto; bottom: 90px; right: 50%; transform: tran
     <button id="light" title="light (L)">light: full</button><button id="reset" title="reset view (R)">reset view</button>
   </div>
   <div class="row">
+    <button id="tlbtn" title="time-lapse (Z)">time-lapse</button><button id="talkbtn" title="talk (K)">talk</button><button id="cambtn" title="camera hands (C)">camera hands</button>
+  </div>
+  <div class="row">
     <button id="handsbtn" title="simulated hands (G)">hands</button><button id="tourbtn" title="watch the gestures (H)">gesture tour</button><button id="vrbtn" title="simulated headset view (X)">headset preview</button>
   </div>
   <div class="mono" id="perfline"></div>
@@ -234,6 +276,27 @@ body.immersive #inspector { top: auto; bottom: 90px; right: 50%; transform: tran
 <button id="putback" class="panel">put back</button>
 <div class="panel" id="toast"></div>
 <div class="panel" id="xrcap" aria-live="polite"></div>
+<div class="panel" id="timebar">
+  <button id="tl-play">pause</button>
+  <input id="tl-slider" type="range" min="0" max="1000" value="0" aria-label="time">
+  <div class="tl-info"><div id="tl-date" class="mono"></div><div id="tl-count" class="mono"></div></div>
+  <button class="speed" data-s="1">1×</button><button class="speed" data-s="4">4×</button><button class="speed" data-s="16">16×</button>
+  <button id="tl-close" title="leave the time-lapse">×</button>
+</div>
+<div class="panel" id="talkcap"></div>
+<div id="campreview"></div><div class="mono" id="camcap"></div>
+<div class="panel" id="camconsent" role="dialog">
+  <span class="caps">camera hands</span><h3>Use your hands</h3>
+  <p>MAYANK will use this computer's camera to track your hands. The video is processed in this browser and
+  never leaves this machine: nothing is uploaded or recorded. The first time, the hand tracker (about 17 MB,
+  Google's MediaPipe) is downloaded from jsdelivr and Google.</p>
+  <p class="note">Point at a record and pinch to select it · keep pinching and move to pull it out · open to leave it ·
+  two hands pinching, apart to spread · open hand swipe to change form · fist and twist to turn · both palms held to put back.
+  C turns it off.</p>
+  <div class="acts"><button class="primary" id="cam-yes">turn the camera on</button><button id="cam-no">not now</button></div>
+</div>
+<aside class="panel" id="debate" aria-live="polite"></aside>
+<aside class="panel" id="autopilot" aria-live="polite"></aside>
 
 <div id="gate"><div class="card panel">
   <h1>MAYANK</h1>

@@ -4,6 +4,7 @@ import { Renderer } from "/static/mayank-gl.js";
 import { FORMS, ENTITY_FORMS, sampleBody, assignParents, substrateFor, rng, hash01 } from "/static/mayank-forms.js";
 import { generatorFor, difficultyFor, check as checkAnswer, ANSWER_HINT } from "/static/mayank-learn.js";
 import { POSES, blendPose, handJoints, BONES, toWorld, roomLines, TOUR } from "/static/mayank-xr.js";
+import { CameraHands } from "/static/mayank-hands.js";
 
 const $ = s => document.querySelector(s);
 const params = new URLSearchParams(location.search);
@@ -62,11 +63,11 @@ const PALETTES = {
   mono: ["#2a2a2a", "#5c5a57", "#9a9590", "#cfcac2", "#f4f1ea"],
 };
 const KIND_T = {
-  skill: 0.99, memory: 0.93, hypothesis: 0.88, experiment: 0.84, alternative: 0.8, assumption: 0.76, counter: 0.72,
+  knowledge: 0.97, skill: 0.99, memory: 0.93, debate: 0.9, argument: 0.82, hypothesis: 0.88, experiment: 0.84, alternative: 0.8, assumption: 0.76, counter: 0.72,
   decision: 0.7, project: 0.66, goal: 0.62, plan: 0.58, objective: 0.54, note: 0.5,
-  model: 0.46, run: 0.42, agent: 0.37, task: 0.31, claim: 0.24, evidence: 0.16, exchange: 0.09,
+  model: 0.46, run: 0.42, agent: 0.37, task: 0.31, claim: 0.24, evidence: 0.16, commit: 0.12, exchange: 0.09,
 };
-const KIND_NAME = { counter: "counterexample", exchange: "request", objective: "outcome / step" };
+const KIND_NAME = { counter: "counterexample", exchange: "request", objective: "outcome / step", knowledge: "vault note" };
 const ROSE = [0.81, 0.42, 0.37], CYAN = [0.53, 0.79, 0.81], IVORY = [1, 0.95, 0.87];
 const NEGATIVE = new Set(["failed", "denied", "gap", "contested", "refuted", "expired", "cancelled", "against"]);
 const ACTIVE = new Set(["running", "approved", "awaiting_approval", "queued"]);
@@ -229,13 +230,13 @@ const FORM_NOTE = {
   timeline: () => "Time rises up the helix, oldest at the bottom. Each kind keeps its own lane.",
   grid: () => "One band per kind, oldest first, left to right: the record laid flat.",
   execution: () => "Read left to right: what each goal was given (its sources) and its project, then the goal or run, then the agents and every tool call made for it, then the claims those calls support. A cyan pulse is waiting for your approval.",
-  hypotheses: () => "Each peak is a hypothesis you put to MAYANK. Its height is the model's estimate that it holds: an estimate, not a measurement. Assumptions ring the base; counterexamples and the strongest alternative sit in the valleys.",
+  hypotheses: () => (S.model.entities.some(e => e.kind === "hypothesis" || e.kind === "debate") ? "" : "Nothing challenged yet: select any record and choose “challenge this” or “two models debate it”, or type :debate <claim>. ") + "Each peak is a hypothesis you put to MAYANK. Its height is the model's estimate that it holds: an estimate, not a measurement. Assumptions ring the base; counterexamples and the strongest alternative sit in the valleys.",
   mastery: () => {
     const now = Date.now(), due = S.model.entities.filter(e => e.kind === "skill" && e.meta.review && Date.parse(e.meta.review.due) <= now);
     return `Your skills, by path. Height is mastery, moved only by unassisted checks: an assisted success never counts.`
       + (S.field.next_challenge ? ` Next challenge: ${S.field.next_challenge.replace("[demo] ", "")}.` : "")
       + (due.length ? ` Due for review now (FSRS): ${due.slice(0, 5).map(e => e.meta.path[e.meta.path.length - 1]).join(", ")}${due.length > 5 ? ` and ${due.length - 5} more` : ""}.` : "")
-      + " Select a skill and press T to be tested.";
+      + (S.model.entities.some(e => e.kind === "skill") ? " Select a skill and press T to be tested." : " No skills recorded yet: `alter practice` or `ci practice` records unassisted checks, and each skill appears here as it is checked.");
   },
 };
 
@@ -263,6 +264,7 @@ const REL_COLOR = {
   ran_for: [0.81, 0.54, 0.35, 0.22], tests: [0.96, 0.92, 0.85, 0.4], revises: [0.53, 0.79, 0.81, 0.55],
   derived_from: [0.9, 0.76, 0.6, 0.3], informed: [0.96, 0.92, 0.85, 0.12], serves: [0.9, 0.76, 0.6, 0.3], produced: [0.96, 0.92, 0.85, 0.3],
   interrogates: [0.86, 0.5, 0.42, 0.55], served_by: [0.53, 0.79, 0.81, 0.3], used: [0.53, 0.79, 0.81, 0.25],
+  links_to: [0.97, 0.9, 0.8, 0.16], follows: [0.85, 0.65, 0.48, 0.2],
 };
 function buildLines() {
   const m = S.model; if (!m) return;
@@ -275,7 +277,8 @@ function buildLines() {
   const extra = sel >= 0 ? m.out[sel].concat(m.inn[sel]) : [];
   const trailLinks = m.links.filter(l => S.trail.has(l.ai) && S.trail.has(l.bi));
   const contra = m.links.filter(l => l.rel === "contradicts");   // competing structures stay visible in every form
-  const all = [...new Set([...list, ...contra, ...extra, ...trailLinks])];
+  let all = [...new Set([...list, ...contra, ...extra, ...trailLinks])];
+  if (TL.on) all = all.filter(l => visibility(l.ai) > 0 && visibility(l.bi) > 0);
   const f = new Float32Array(all.length * 6), t = new Float32Array(all.length * 6), c = new Float32Array(all.length * 8);
   all.forEach((l, k) => {
     for (const [j, idx] of [[0, l.ai], [1, l.bi]]) {
@@ -320,6 +323,11 @@ function visibility(i) {
   const e = S.model.entities[i];
   if (S.hiddenKinds.has(e.kind)) return 0;
   let v = 1;
+  if (TL.on) {                                   // the time-lapse: nothing exists before its moment
+    const tn = TL.tnum[i];
+    if (tn != null && tn > TL.now) return 0;
+    if (TL.tend[i] != null && TL.tend[i] <= TL.now) v = 0.35;
+  }
   const focus = formPositions(S.form).focus;
   if (focus && !focus.has(i)) v = 0.07;
   if (S.isolate && S.selected >= 0 && !S._iso.has(i)) v = 0.05;
@@ -439,6 +447,7 @@ function buildChrome() {
   $("#handsbtn").onclick = () => setHands(!XR.hands);
   $("#tourbtn").onclick = startTour;
   $("#vrbtn").onclick = () => setImmersive(!R.immersive);
+  $("#tlbtn").onclick = toggleTimelapse; $("#talkbtn").onclick = toggleTalk; $("#cambtn").onclick = toggleCamera;
 }
 
 // ------------------------------------------------------------------ selection and inspector
@@ -557,12 +566,25 @@ function kindDetail(e, meta) {
     if (a.length) h += `<div class="note">${a.map(x => esc(`${x.verdict} (${x.by || "?"})`)).join(" · ")}</div>`;
   } else if (e.kind === "run") {
     if (meta.usage) h += `<div class="meta"><span><b>${meta.usage.steps}</b> steps</span><span><b>${meta.usage.tool_calls}</b> tool calls</span>${meta.steers ? `<span><b>${meta.steers}</b> steers</span>` : ""}</div>`;
-    if (meta.events && meta.events.length) h += `<div class="sect"><span class="caps">what happened</span>${meta.events.map(ev => `<div class="mono" style="color:var(--ink2)">${esc(when(ev.at))} · ${esc(ev.type)}</div>`).join("")}</div>`;
+    if (meta.events && meta.events.length) h += `<div class="sect"><span class="caps">what happened</span>${meta.events.map(ev => `<div class="mono" style="color:var(--ink2)">${esc(when(ev.at))} · ${esc(ev.type)}${ev.reason ? ` · ${esc(ev.reason)}` : ""}</div>`).join("")}</div>`;
     const v = meta.verification || {};
     if (Object.keys(v).length) h += `<div class="note">artifacts current: <b>${v.artifacts_current ? "yes" : "no"}</b> · tests after writes: <b>${v.tests_after_writes ? "yes" : "no"}</b>${v.scope ? ` · ${esc(v.scope)}` : ""}</div>`;
   } else if (e.kind === "agent") {
     h += `<div class="meta"><span>role <b>${esc(meta.role)}</b></span>${(meta.artifacts || []).length ? `<span>makes <b>${esc(meta.artifacts.join(", "))}</b></span>` : ""}${meta.require_tests ? "<span>must pass tests</span>" : ""}</div>`;
     for (const at of meta.attempts || []) h += `<div class="note">attempt: <b>${esc(at.status)}</b>${at.pending ? ` · ${at.pending} waiting for you` : ""}${at.problems.length ? ` · ${esc(at.problems.join("; "))}` : ""}</div>`;
+  } else if (e.kind === "debate") {
+    if (meta.p_claim_holds != null) h += bar(meta.p_claim_holds, meta.p_label || "estimate");
+    h += `<div class="meta"><span><b>${meta.turns}</b> turns</span>${(meta.models || []).length ? `<span>${esc(meta.models.map(m => m || "ALTER's choice").join(" vs "))}</span>` : ""}</div>`;
+    const args = S.model.inn[S.selected].filter(l => l.rel === "supports" || l.rel === "contradicts").map(l => S.model.entities[l.ai]);
+    args.sort((x, y) => (x.meta.round - y.meta.round) || (x.meta.side === "for" ? -1 : 1));
+    if (args.length) h += `<div class="sect"><span class="caps">the debate</span>${args.map(x => `<div class="note"><b style="color:${x.meta.side === "for" ? "var(--copper)" : "var(--rose)"}">${esc(x.meta.side.toUpperCase())}</b> · ${esc(x.meta.model || "")}${x.meta.p != null ? ` · est. ${Math.round(x.meta.p * 100)}%` : ""}</div><div class="body">${esc(x.text)}</div>`).join("")}</div>`;
+  } else if (e.kind === "argument") {
+    h += `<div class="meta"><span>side <b>${esc(meta.side)}</b></span><span>round <b>${meta.round}</b></span>${meta.model ? `<span>${esc(meta.model)}</span>` : ""}${meta.p != null ? `<span>its estimate <b>${Math.round(meta.p * 100)}%</b></span>` : ""}</div>`;
+  } else if (e.kind === "knowledge") {
+    h += `<div class="meta">${meta.area ? `<span>in <b>${esc(meta.area)}</b></span>` : ""}<span><b>${meta.backlinks || 0}</b> notes link here</span>${(meta.tags || []).length ? `<span>${esc(meta.tags.map(t => "#" + t).join(" "))}</span>` : ""}</div>`;
+    h += `<div class="note">${meta.downloaded === false ? "Still in iCloud: `alter vault download` brings it to this machine." : "From your vault, shown on this machine only. Whether ALTER may send vault notes to a model is a separate setting (alter config vault)."}</div>`;
+  } else if (e.kind === "commit") {
+    h += `<div class="meta"><span>commit <b>${esc(meta.sha)}</b></span><span>in <b>${esc(meta.repo)}</b></span></div>`;
   } else if (e.kind === "model") {
     const served = S.model.inn[S.selected].filter(l => l.rel === "served_by" || l.rel === "used").length;
     h += `<div class="meta"><span>provider <b>${esc(meta.provider)}</b></span><span>used for <b>${served}</b> record${served === 1 ? "" : "s"} here</span></div>`;
@@ -587,7 +609,12 @@ function actions(e, box) {
   }
   const id = e.id, meta = e.meta || {};
   if (e.kind === "task") {
-    if (e.status === "awaiting_approval") {
+    const viaRun = runOfTask(S.selected);   // a run's task is resolved through the run, so the run moves on
+    if (e.status === "awaiting_approval" && viaRun) {
+      const path = `/v1/projects/${viaRun.project}/runs/${viaRun.id}/approvals/${id}`;
+      box.append(btn("approve and run", () => act("Approved: the run continues", () => api(path, { method: "POST", body: { approve: true } })), "primary"),
+                 btn("deny", () => act("Denied", () => api(path, { method: "POST", body: { approve: false } })), "danger"));
+    } else if (e.status === "awaiting_approval") {
       box.append(btn("approve and run", () => act("Approved: ALTER ran it", () => api(`/v1/tasks/${id}/approve`, { method: "POST" })), "primary"),
                  btn("deny", () => act("Denied", () => api(`/v1/tasks/${id}/deny`, { method: "POST" })), "danger"));
     } else if (e.status === "approved" || e.status === "running") {
@@ -625,6 +652,9 @@ function actions(e, box) {
   if (["memory", "claim", "assumption", "decision", "goal"].includes(e.kind)) {
     box.append(btn("challenge this", () => challengeClaim(e.label)));
   }
+  if (["hypothesis", "memory", "claim", "knowledge", "decision"].includes(e.kind)) {
+    box.append(btn("two models debate it", () => startDebate(e.label)));
+  }
   if (e.kind === "assumption") {
     const [cid, k] = [e.id.slice(0, e.id.lastIndexOf("/")), +e.id.slice(e.id.lastIndexOf("/a") + 2)];
     box.append(btn("interrogate this assumption on its own", () => {
@@ -633,6 +663,7 @@ function actions(e, box) {
     }));
   }
   if (e.kind === "run") {
+    box.append(btn("autopilot", () => autopilot(e.id, e.project), "primary"));
     box.append(btn("advance one agent turn", () => {
       if (!confirmModel()) return;
       act("One agent turn ran: see its tasks", () => api(`/v1/projects/${e.project}/runs/${id}/advance`, { method: "POST" }));
@@ -1020,6 +1051,11 @@ function drawResults() {
 function clearSearch() { S.search = new Map(); results = []; out.classList.remove("show"); updateState(); }
 
 const COMMANDS = {
+  debate: "debate <claim>: two models argue opposite sides from your records; a third judges (5 model calls)",
+  do: "do <ambition>: start a run and put it on autopilot, stopping at every approval and at its budget",
+  timelapse: "timelapse: replay your history, record by record",
+  talk: "talk: a spoken conversation; the memories it uses light up as it answers",
+  camera: "camera: real hand tracking from your camera (runs in this browser; the video never leaves)",
   ask: "ask <question>: MAYANK answers, and shows the records the answer rests on (a routed model call)",
   goal: "goal <objective>: start a run in the selected record's project; its agents appear in the execution form",
   test: "test: an unassisted check on the selected skill, written and marked by MAYANK (no model)",
@@ -1043,6 +1079,11 @@ async function command(text) {
   switch (cmd) {
     case "form": setForm(arg); break;
     case "ask": askMayank(arg); break;
+    case "debate": startDebate(arg || sel?.label); break;
+    case "do": startAmbition(arg, sel); break;
+    case "timelapse": toggleTimelapse(); break;
+    case "talk": toggleTalk(); break;
+    case "camera": toggleCamera(); break;
     case "goal": startGoal(arg, sel); break;
     case "test": if (sel?.kind === "skill") startAssessment(sel); else toast("Select a skill first (the mastery form, 8)."); break;
     case "listen": listen(); break;
@@ -1069,7 +1110,7 @@ async function startGoal(objective, sel) {
   setTimeout(() => setForm("execution"), 900);
 }
 function help() {
-  toast("1–8 forms · drag to turn · right-drag to move · wheel to zoom · click a point to inspect · ⌘-click a second for the path between · drag a point out to keep it · I isolate · E expand · P put back · [ ] size · L light · / search or ask (end with ?) · T test a skill · V speak · G hands · H gesture tour · X headset preview · : commands", 9000);
+  toast("1–8 forms · drag to turn · right-drag to move · wheel to zoom · click a point to inspect · ⌘-click a second for the path between · drag a point out to keep it · I isolate · E expand · P put back · [ ] size · L light · / search or ask (end with ?) · T test a skill · V speak · G hands · H gesture tour · X headset preview · Z time-lapse · K talk · C camera hands · : commands", 10000);
 }
 
 document.addEventListener("keydown", e => {
@@ -1089,6 +1130,9 @@ document.addEventListener("keydown", e => {
   else if (e.key === "t" || e.key === "T") { const sel = S.selected >= 0 ? S.model.entities[S.selected] : null; if (sel?.kind === "skill") startAssessment(sel); }
   else if (e.key === "v" || e.key === "V") listen();
   else if (e.key === "g" || e.key === "G") setHands(!XR.hands);
+  else if (e.key === "z" || e.key === "Z") toggleTimelapse();
+  else if (e.key === "k" || e.key === "K") toggleTalk();
+  else if (e.key === "c" || e.key === "C") toggleCamera();
   else if (e.key === "h" || e.key === "H") startTour();
   else if (e.key === "x" || e.key === "X") setImmersive(!R.immersive);
   else if ((e.key === "m" || e.key === "M") && R.immersive) { R.showRoom = !R.showRoom; xrCaption(""); }
@@ -1171,9 +1215,293 @@ function speak(text) {
 }
 $("#mic").onclick = listen;
 
+// ------------------------------------------------------------------ time-lapse: your history, record by record
+const TL = { on: false, playing: false, u: 0, now: 0, tnum: [], tend: [], times: [], events: [], evAt: 0, speed: 1, lastLines: 0 };
+async function toggleTimelapse() {
+  if (TL.on) return endTimelapse();
+  const ents = S.model.entities;
+  TL.tnum = ents.map(e => e.t ? Date.parse(e.t) : null);
+  TL.tend = ents.map(e => e.t_end ? Date.parse(e.t_end) : null);
+  let events = [];
+  try {
+    events = STATIC ? (await (await fetch(STATIC.replay)).json()).events : (await api("/v1/mayank/history")).events;
+  } catch (_) { events = []; }
+  TL.events = events.map(ev => ({ ...ev, tn: Date.parse(ev.ts) })).filter(ev => !isNaN(ev.tn)).sort((a, b) => a.tn - b.tn);
+  // the slider moves through records, not empty months: time is warped by where things happened
+  TL.times = [...TL.tnum.filter(x => x != null), ...TL.events.map(e => e.tn)].sort((a, b) => a - b);
+  if (TL.times.length < 2) { toast("Not enough dated records for a time-lapse yet."); return; }
+  TL.on = true; TL.playing = true; TL.u = 0; TL.evAt = 0; TL.now = TL.times[0] - 1;
+  select(-1); putBack();
+  $("#timebar").classList.add("show"); $("#tlbtn").classList.add("on");
+  updateState(); buildLines(); drawTimebar();
+}
+function endTimelapse() {
+  TL.on = false; TL.playing = false;
+  $("#timebar").classList.remove("show"); $("#tlbtn").classList.remove("on");
+  updateState(); buildLines();
+}
+function timeAt(u) {
+  const n = TL.times.length, x = Math.max(0, Math.min(1, u)) * (n - 1), k = Math.floor(x);
+  return k >= n - 1 ? TL.times[n - 1] : TL.times[k] + (TL.times[k + 1] - TL.times[k]) * (x - k);
+}
+function setTimelapse(u) {
+  const before = TL.now;
+  TL.u = Math.max(0, Math.min(1, u)); TL.now = timeAt(TL.u);
+  if (TL.now > before) {
+    S.model.entities.forEach((e, i) => { const tn = TL.tnum[i]; if (tn != null && tn > before && tn <= TL.now) S.act[i] = 1; });
+    while (TL.evAt < TL.events.length && TL.events[TL.evAt].tn <= TL.now) {
+      const ev = TL.events[TL.evAt++];
+      if (TL.evAt % 2 === 0 || TL.events.length < 400) onEvent({ ...ev, payload: ev.payload || {} }, { replay: true });
+    }
+  } else if (TL.now < before) {                  // scrubbing back: replay events from the new moment
+    TL.evAt = TL.events.findIndex(ev => ev.tn > TL.now); if (TL.evAt < 0) TL.evAt = TL.events.length;
+  }
+  if (S.form === "mastery") masteryAt(TL.now);
+  updateState();
+  const nowMs = performance.now();
+  if (nowMs - TL.lastLines > 180) { TL.lastLines = nowMs; buildLines(); }
+  drawTimebar();
+}
+function masteryAt(t) {   // in the mastery form, each skill stands as high as it was at that moment
+  const to = R.layers.entities.cpu.to.slice(), cur = R.currentPositions("entities");
+  let moved = false;
+  S.model.entities.forEach((e, i) => {
+    if (e.kind !== "skill") return;
+    const hist = e.meta.history || [];
+    let p = 0;
+    for (const [ts, pv] of hist) { if (Date.parse(ts) <= t) p = pv; else break; }
+    const y = -0.45 + p * 1.05;
+    if (Math.abs(to[i * 3 + 1] - y) > 0.004) { to[i * 3 + 1] = y; moved = true; }
+  });
+  if (moved) { R.updateTargets("entities", cur, to); R.startMorph(500); }
+}
+function tickTimelapse(dt) {
+  if (!TL.on || !TL.playing) return;
+  const u = TL.u + dt / 42 * TL.speed;
+  setTimelapse(u);
+  if (u >= 1) { TL.playing = false; drawTimebar(); }
+}
+function drawTimebar() {
+  const shown = TL.tnum.filter(x => x == null || x <= TL.now).length;
+  const d = new Date(TL.now);
+  $("#tl-date").textContent = isNaN(d) ? "" : d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  $("#tl-count").textContent = `${shown} of ${S.model.entities.length} records`;
+  $("#tl-slider").value = Math.round(TL.u * 1000);
+  $("#tl-play").textContent = TL.playing ? "pause" : (TL.u >= 1 ? "replay" : "play");
+  document.querySelectorAll("#timebar .speed").forEach(b => b.classList.toggle("on", +b.dataset.s === TL.speed));
+}
+$("#tl-play").onclick = () => { if (TL.u >= 1) { TL.u = 0; TL.evAt = 0; TL.now = TL.times[0] - 1; } TL.playing = !TL.playing; drawTimebar(); };
+$("#tl-slider").oninput = ev => { TL.playing = false; setTimelapse(+ev.target.value / 1000); };
+$("#tl-close").onclick = endTimelapse;
+document.querySelectorAll("#timebar .speed").forEach(b => b.onclick = () => { TL.speed = +b.dataset.s; drawTimebar(); });
+
+// ------------------------------------------------------------------ talk: a spoken conversation
+const TALK = { on: false, phase: "" };
+function talkCap(text) { const el = $("#talkcap"); el.textContent = text; el.classList.toggle("show", TALK.on); }
+function toggleTalk() {
+  if (TALK.on) { TALK.on = false; try { TALK.rec && TALK.rec.abort(); } catch (_) {} if (window.speechSynthesis) speechSynthesis.cancel(); talkCap(""); $("#talkbtn").classList.remove("on"); return; }
+  if (STATIC) { toast(READONLY); return; }
+  if (!SR) { toast("This browser has no speech recognition. Chrome and Safari do."); return; }
+  if (!confirmModel()) return;
+  TALK.on = true; $("#talkbtn").classList.add("on"); talkListen();
+}
+function talkListen() {
+  if (!TALK.on) return;
+  const rec = new SR(); TALK.rec = rec;
+  rec.lang = navigator.language || "en-US"; rec.interimResults = true;
+  talkCap("listening… (say “stop talking” to end)"); TALK.phase = "listening";
+  let heard = "";
+  rec.onresult = ev => { const r = ev.results[ev.results.length - 1]; heard = r[0].transcript.trim(); talkCap(`“${heard}”`); };
+  rec.onerror = ev => { if (ev.error !== "no-speech" && ev.error !== "aborted") toast(`Voice: ${ev.error}`); };
+  rec.onend = async () => {
+    if (!TALK.on) return;
+    if (!heard) { setTimeout(talkListen, 250); return; }
+    if (/^(stop talking|goodbye|stop)\b/i.test(heard)) { toggleTalk(); return; }
+    TALK.phase = "thinking"; talkCap("thinking…");
+    try {
+      const r = await api("/v1/mayank/ask", { method: "POST", body: { question: heard } });
+      showAnswer({ question: heard, ...r }); S.answerSent = r.sent; scheduleRefresh(400);
+      await speakLighting(r.text, r.sent);
+    } catch (err) { talkCap(`could not answer: ${err.message}`); await new Promise(res => setTimeout(res, 1800)); }
+    talkListen();
+  };
+  rec.start();
+}
+function speakLighting(text, sent) {   // as it speaks, the records it was given light up one by one
+  return new Promise(res => {
+    if (!window.speechSynthesis) return res();
+    TALK.phase = "speaking"; talkCap("answering…");
+    const ids = (sent || []).map(id => S.model.byId.get(id)).filter(i => i != null);
+    let k = 0;
+    const u = new SpeechSynthesisUtterance(String(text).slice(0, 1200));
+    u.onboundary = () => { if (ids.length) { const i = ids[k++ % ids.length]; S.act[i] = 1; S.search.set(i, 1); updateState(); } };
+    u.onend = u.onerror = () => res();
+    speechSynthesis.cancel(); speechSynthesis.speak(u);
+  });
+}
+
+// ------------------------------------------------------------------ camera hands (real, local)
+const CAM = { hands: null };
+function camPreview(video) {
+  const box = $("#campreview");
+  box.innerHTML = "";
+  if (!video) { box.classList.remove("show"); return; }
+  video.className = "camvideo"; box.append(video);
+  const c = document.createElement("canvas"); c.width = 192; c.height = 144; c.className = "camdots"; box.append(c);
+  box.classList.add("show");
+}
+function camRender(hands, pinched) {
+  const c = $("#campreview canvas");
+  if (c) {
+    const g = c.getContext("2d"); g.clearRect(0, 0, c.width, c.height);
+    (hands || []).forEach((lm, h) => { g.fillStyle = pinched?.[h] ? "#86c9cf" : "#e6c29c"; lm.forEach(([x, y]) => g.fillRect(x * c.width - 1.5, y * c.height - 1.5, 3, 3)); });
+  }
+  if (!hands) { R.clearHands(); return; }
+  const B = viewerBasis(), bones = [], bc = [], joints = [], jc = [];
+  for (const [h, lm] of hands.entries()) {
+    const J = lm.map(([x, y, z]) => {
+      const D = 0.6 - z * 0.9, nx = x * 2 - 1, ny = 1 - y * 2;
+      const cx = nx * tanHalf() * aspectNow() * D, cy = ny * tanHalf() * D;
+      return B.eye.map((e, i) => e + B.r[i] * cx + B.u[i] * cy + B.f[i] * D);
+    });
+    const col = pinched?.[h] ? [0.53, 0.86, 0.9] : [0.97, 0.84, 0.7];
+    for (const [a, b] of BONES) { bones.push(...J[a], ...J[b]); bc.push(...col, 0.8, ...col, 0.8); }
+    J.forEach(p => { joints.push(...p); jc.push(...col, 0.95); });
+  }
+  R.setHands(new Float32Array(bones), new Float32Array(bc), new Float32Array(joints), new Float32Array(jc));
+}
+function screenToWorldAtDepth(px, py, i) {
+  const B = viewerBasis(), p = R.entityPos(i), dist = Math.hypot(...p.map((v, k) => v - B.eye[k]));
+  const nx = px / canvas.clientWidth * 2 - 1, ny = 1 - py / canvas.clientHeight * 2;
+  let d = B.f.map((f, k) => f + B.r[k] * nx * tanHalf() * aspectNow() + B.u[k] * ny * tanHalf());
+  const n = Math.hypot(...d); d = d.map(v => v / n);
+  return B.eye.map((e, k) => e + d[k] * dist);
+}
+CAM.hands = new CameraHands({
+  size: () => [canvas.clientWidth, canvas.clientHeight],
+  pick: (px, py) => R.pick(px, py, 26, i => visibility(i) > 0.1),
+  hovered: () => S.hovered,
+  hover: i => { if (i !== S.hovered) { S.hovered = i; updateState(); } },
+  select: i => select(i),
+  pullTo: (i, px, py) => pullTo(i, screenToWorldAtDepth(px, py, i)),
+  expand: () => { if (S.selected < 0 && S.hovered >= 0) select(S.hovered); expand(); },
+  putBack: () => putBack(),
+  nextForm: dir => setForm(FORMS[(FORMS.indexOf(S.form) + dir + FORMS.length) % FORMS.length]),
+  rotate: d => { R.camera.theta += d; R.camera.touch(); },
+  caption: text => { const el = $("#camcap"); el.textContent = text; },
+  render: camRender, preview: camPreview,
+});
+function toggleCamera() {
+  if (CAM.hands.on || CAM.hands.status !== "off") { CAM.hands.stop(); $("#cambtn").classList.remove("on"); $("#camcap").textContent = ""; return; }
+  $("#camconsent").classList.add("show");
+}
+$("#cam-no").onclick = () => $("#camconsent").classList.remove("show");
+$("#cam-yes").onclick = async () => {
+  $("#camconsent").classList.remove("show"); $("#cambtn").classList.add("on");
+  if (XR.hands) setHands(false);
+  $("#camcap").textContent = "starting the camera…";
+  try { await CAM.hands.start(); $("#camcap").textContent = "camera on · show a hand"; }
+  catch (err) { CAM.hands.stop(); $("#cambtn").classList.remove("on"); toast(`Camera hands: ${err.message || err}`, 7000); }
+};
+
+// ------------------------------------------------------------------ two models debate
+async function debateModels() {
+  try {
+    const grants = await api("/v1/consent");
+    const providers = new Set(grants.filter(g => g.active).map(g => g.provider));
+    if (providers.has("claude-cli")) return ["claude-cli:sonnet", "claude-cli:opus", "claude-cli:haiku"];
+  } catch (_) {}
+  return [null, null, null];            // ALTER's routing chooses
+}
+async function startDebate(claim) {
+  if (STATIC) { toast(READONLY); return; }
+  claim = (claim || "").replace(/^\[demo\]\s*/, "").trim();
+  if (!claim) { toast("Say the claim: :debate <claim>"); return; }
+  if (!confirmModel()) return;
+  const models = await debateModels();
+  const panel = $("#debate");
+  const head = `<button class="x" id="deb-close">×</button><span class="caps">two models debate</span><h3>${esc(claim)}</h3>
+    <div class="meta"><span>for: <b>${esc(models[0] || "ALTER's choice")}</b></span><span>against: <b>${esc(models[1] || "ALTER's choice")}</b></span><span>judge: <b>${esc(models[2] || "ALTER's choice")}</b></span></div>`;
+  let turns = "";
+  const draw = (tail = "") => { panel.innerHTML = head + turns + tail; panel.classList.add("show"); $("#deb-close").onclick = () => panel.classList.remove("show"); };
+  draw(`<div class="note">Opening the debate…</div>`);
+  setForm("hypotheses");
+  try {
+    const d = await api("/v1/mayank/debates", { method: "POST", body: { claim, models } });
+    for (let k = 0; k < 4; k++) {
+      draw(`<div class="note">${k % 2 ? "AGAINST" : "FOR"} is thinking…</div>`);
+      const t = await api(`/v1/mayank/debates/${d.id}/turn`, { method: "POST" });
+      turns += `<div class="turn ${t.side}"><div class="who">${t.side.toUpperCase()} · ${esc(t.served_by || "")}${t.p != null ? ` · est. ${Math.round(t.p * 100)}%` : ""}</div><div class="body">${esc(t.text)}</div></div>`;
+      S.search = new Map((t.sent || []).map(id => [S.model.byId.get(id), 1]).filter(([i]) => i != null)); updateState();
+      draw();
+    }
+    draw(`<div class="note">The judge is reading both sides…</div>`);
+    const j = await api(`/v1/mayank/debates/${d.id}/judge`, { method: "POST" });
+    turns += `<div class="turn judge"><div class="who">JUDGE · ${esc(j.served_by || "")}${j.p != null ? ` · P(claim holds) = ${j.p}` : ""}</div><div class="body">${esc(j.text)}</div></div>`;
+    draw(); scheduleRefresh(300);
+  } catch (err) { draw(`<div class="note" style="color:var(--rose)">${esc(err.message)}</div>`); }
+}
+
+// ------------------------------------------------------------------ an ambition, on autopilot
+const AP = { on: false, run: null, pid: null };
+function runOfTask(i) {
+  for (const l of S.model.out[i] || []) {
+    const t = S.model.entities[l.bi];
+    if (l.rel === "ran_for" && t.kind === "agent" && t.meta.run) return { id: t.meta.run, project: t.project };
+  }
+  return null;
+}
+async function startAmbition(ambition, sel) {
+  if (STATIC) { toast(READONLY); return; }
+  if (!ambition) { toast("Say the ambition: :do <what you want>"); return; }
+  const projects = S.model.entities.filter(e => e.kind === "project");
+  const pid = sel?.project || (projects.length === 1 ? projects[0].id : null);
+  if (!pid) { toast("Select something in the project this belongs to, then try again."); return; }
+  try {
+    const run = await api(`/v1/projects/${pid}/runs`, { method: "POST", body: { objective: ambition } });
+    await refresh(); setForm("execution");
+    autopilot(run.id, pid);
+  } catch (err) { toast(`Could not start: ${err.message}`, 7000); }
+}
+function drawAutopilot(note = "") {
+  const el = $("#autopilot");
+  const i = S.model.byId.get(AP.run);
+  if (i == null) { el.innerHTML = `<span class="caps">autopilot</span><div class="note">${esc(note || "starting…")}</div>`; el.classList.add("show"); return; }
+  const r = S.model.entities[i], m = r.meta || {}, u = m.usage || {}, lim = m.limits || {};
+  const agents = S.model.inn[i].filter(l => S.model.entities[l.ai].kind === "agent").map(l => S.model.entities[l.ai]);
+  const meter = (v, max, label) => `<div class="meter"><span>${label}</span><span class="mono">${v ?? 0} / ${max ?? "?"}</span><div class="bar"><div style="width:${Math.min(100, 100 * (v || 0) / (max || 1))}%"></div></div></div>`;
+  el.innerHTML = `<button class="x" id="ap-close">×</button><span class="caps">autopilot · ${esc(r.status)}</span><h3>${esc(r.label)}</h3>
+    ${meter(u.steps, lim.max_model_steps, "model steps")}${meter(u.tool_calls, lim.max_tool_calls, "tool calls")}${meter(m.attempts, lim.max_attempts, "agent attempts")}
+    <div class="meta"><span>cost so far <b>$${(+m.cost_usd || 0).toFixed(4)}</b></span>${(m.pending || []).length ? `<span style="color:var(--cyan)"><b>${m.pending.length}</b> waiting for you</span>` : ""}</div>
+    ${agents.map(a => `<div class="agent"><i class="${esc(a.status)}"></i>${esc(a.meta.role)} · ${esc(a.status)}</div>`).join("")}
+    <div class="note">${esc(note)}</div>
+    <div class="acts">${AP.on ? `<button id="ap-stop" class="danger">stop autopilot</button>` : `<button id="ap-go" class="primary">continue</button>`}</div>`;
+  el.classList.add("show");
+  $("#ap-close").onclick = () => { AP.on = false; el.classList.remove("show"); };
+  if ($("#ap-stop")) $("#ap-stop").onclick = () => { AP.on = false; drawAutopilot("stopped by you"); };
+  if ($("#ap-go")) $("#ap-go").onclick = () => autopilot(AP.run, AP.pid);
+}
+async function autopilot(rid, pid) {
+  if (STATIC) { toast(READONLY); return; }
+  if (!confirmModel()) return;
+  AP.on = true; AP.run = rid; AP.pid = pid;
+  drawAutopilot("each turn is one model call; it stops at your approvals and at the run's budget");
+  while (AP.on) {
+    const i = S.model.byId.get(rid), r = i != null ? S.model.entities[i] : null;
+    if (r && ["succeeded", "cancelled", "exhausted", "incomplete", "failed", "blocked", "interrupted", "paused"].includes(r.status)) {
+      const why = [...(r.meta.events || [])].reverse().find(ev => ev.reason)?.reason;
+      AP.on = false; drawAutopilot(`the run is ${r.status}${why ? `: ${why}` : ""}`); break;
+    }
+    if (r && r.status === "awaiting_approval") { AP.on = false; drawAutopilot("waiting for you: approve or deny the cyan tasks, then continue"); break; }
+    try { await api(`/v1/projects/${pid}/runs/${rid}/advance`, { method: "POST" }); }
+    catch (err) { AP.on = false; drawAutopilot(`stopped: ${err.message}`); break; }
+    await refresh(); drawAutopilot("working…");
+  }
+}
+
 // ------------------------------------------------------------------ live: the audit chain
 const STRUCTURAL = /^(task|goal|memory|claim|challenge|growth|run|project|note|model|plan|workspace|consent|autonomy|exchange)\./;
-function onEvent(ev) {
+function onEvent(ev, opts = {}) {
   const m = S.model;
   let label = "";
   for (const ref of ev.refs) {
@@ -1184,12 +1512,12 @@ function onEvent(ev) {
   }
   if (ev.event === "growth.probe") { m.entities.forEach((e, i) => { if (e.kind === "skill") S.act[i] = Math.max(S.act[i], 0.25); }); }
   const tick = $("#ticker"), row = document.createElement("div");
-  const time = new Date(ev.ts).toLocaleTimeString(undefined, { hour12: false });
+  const time = opts.replay && TL.on ? new Date(ev.ts).toLocaleDateString(undefined, { day: "numeric", month: "short" }) : new Date(ev.ts).toLocaleTimeString(undefined, { hour12: false });
   row.textContent = `${time}  ${ev.event}${label ? "  " + trunc(label, 38) : ""}${ev.payload.status ? "  · " + ev.payload.status : ""}`;
   row.className = "fresh"; tick.prepend(row); setTimeout(() => row.classList.remove("fresh"), 2500);
   while (tick.children.length > 9) tick.lastChild.remove();
   S.lastEvents.push(ev); if (S.lastEvents.length > 50) S.lastEvents.shift();
-  if (STRUCTURAL.test(ev.event) && !STATIC) scheduleRefresh();
+  if (STRUCTURAL.test(ev.event) && !STATIC && !opts.replay) scheduleRefresh();
 }
 function setLive(on, text) {
   S.live = on; $("#livedot").classList.toggle("on", on);
@@ -1226,6 +1554,7 @@ async function refresh() {
   if (!field) return;
   const old = S.model, prev = new Map(), selId = S.selected >= 0 ? old.entities[S.selected].id : null;
   const pulledIds = new Map([...S.pulled].map(([i, p]) => [old.entities[i].id, p]));
+  const litIds = [...S.search].map(([i, v]) => [old.entities[i]?.id, v]).filter(([id]) => id);   // what is lit stays lit
   old.entities.forEach((e, i) => prev.set(e.id, R.entityPos(i)));
   const sameShape = field.entities.length === old.entities.length && field.entities.every((e, i) => e.id === old.entities[i].id)
     && field.links.length === old.links.length;
@@ -1240,6 +1569,8 @@ async function refresh() {
   for (const ref of S.pendingActivate) { const i = S.model.byId.get(ref); if (i != null) S.act[i] = 1; }
   S.pendingActivate.clear();
   S.selected = selId && S.model.byId.has(selId) ? S.model.byId.get(selId) : -1;
+  S.search = new Map(litIds.filter(([id]) => S.model.byId.has(id)).map(([id, v]) => [S.model.byId.get(id), v]));
+  if (TL.on) { TL.tnum = S.model.entities.map(e => e.t ? Date.parse(e.t) : null); TL.tend = S.model.entities.map(e => e.t_end ? Date.parse(e.t_end) : null); }
   $("#formnote").textContent = FORM_NOTE[S.form]();
   buildLines(); updateState(); if (S.selected >= 0) inspector();
 }
@@ -1252,7 +1583,8 @@ function frame(now) {
     let any = false;
     for (let i = 0; i < S.act.length; i++) if (S.act[i] > 0.002) { S.act[i] *= Math.exp(-dt / 2.4); any = true; }
     if (any || R.morphing) updateState();
-    updateHands(now, dt);
+    tickTimelapse(dt);
+    if (!CAM.hands.on) updateHands(now, dt);
     R.draw(now / 1000, dt);
     if (R.immersive) labelsEl.innerHTML = ""; else renderLabels();
   }
@@ -1312,6 +1644,11 @@ window.__mayank = {
   get xr() { return { hands: XR.hands, immersive: R.immersive, room: R.showRoom, tour: XR.tour ? TOUR[tourStep((performance.now() - XR.tour.t0) / 1000)].cap : null,
                       handJoints: R.handPts ? R.handPts.count : 0, hovered: S.hovered >= 0 ? S.model.entities[S.hovered].id : null }; },
   setHands, setImmersive, startTour,
+  get timelapse() { return TL.on ? { u: TL.u, now: TL.now, shown: TL.tnum.filter(x => x == null || x <= TL.now).length, playing: TL.playing } : null; },
+  timelapseTo: u => setTimelapse(u), toggleTimelapse, toggleTalk, startDebate, startAmbition,
+  camera: { inject: f => CAM.hands.process(f), get gestures() { return CAM.hands.gestures.slice(); }, get status() { return CAM.hands.status; } },
+  get talk() { return { on: TALK.on, phase: TALK.phase }; },
+  get theta() { return R.camera.theta; },
 };
 requestAnimationFrame(frame);
 start();

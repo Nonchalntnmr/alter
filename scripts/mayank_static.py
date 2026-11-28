@@ -38,7 +38,7 @@ from pcim.tasks import TaskQueue  # noqa: E402
 from pcim.workspace import Workspace  # noqa: E402
 
 DASH = REPO / "src" / "pcim" / "dashboard"
-ASSETS = ("mayank-app.js", "mayank-gl.js", "mayank-forms.js", "mayank-learn.js", "mayank-xr.js")
+ASSETS = ("mayank-app.js", "mayank-gl.js", "mayank-forms.js", "mayank-learn.js", "mayank-xr.js", "mayank-hands.js")
 
 
 def record(steps: int, pause: float) -> tuple[dict, dict]:
@@ -72,6 +72,9 @@ def record(steps: int, pause: float) -> tuple[dict, dict]:
             e["dt"] = round((t - last).total_seconds(), 3) if last else 1.0
             last = t
         replay = {"recorded_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d"), "events": events}
+        real = [e["id"] for e in field["entities"] if not e["demo"]]
+        if real:  # only demonstration records may be published; anything else is someone's real data
+            raise SystemExit(f"mayank_static: refusing to publish {len(real)} records not marked demo, e.g. {real[:3]}")
         return check(field, str(home)), check(replay, str(home))
 
 

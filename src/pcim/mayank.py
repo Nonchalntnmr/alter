@@ -32,7 +32,11 @@ import time
 
 import numpy as np
 
+import re
+
 from .memory import CONFLICT_FLAG
+
+LINK_STRIP = re.compile(r"!?\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]")
 
 MAX_ENTITIES = 4000
 TEXT_MAX = 600
@@ -46,6 +50,7 @@ REGIONS = {
     "project": "torso", "goal": "torso", "plan": "torso", "objective": "torso", "decision": "torso", "note": "torso",
     "run": "arms", "agent": "arms", "task": "arms",
     "claim": "legs", "evidence": "legs", "exchange": "legs", "model": "arms",
+    "knowledge": "head", "debate": "head", "argument": "head", "commit": "legs",
 }
 
 _cache_lock = threading.Lock()
@@ -72,7 +77,7 @@ class _Field:
         self.sources: list[dict] = []
 
     def add(self, eid: str, kind: str, label, *, text="", t=None, status="", project=None, weight=0.5,
-            source="", meta=None) -> str:
+            source="", meta=None, t_end=None) -> str:
         label, text = str(label or ""), str(text or "")
         demo = DEMO_MARK in label or DEMO_MARK in text or source == "demo"
         clean = _clip(label.replace(DEMO_MARK, ""), 160) or kind
@@ -80,7 +85,7 @@ class _Field:
             "id": eid, "kind": kind, "region": REGIONS.get(kind, "torso"), "label": clean,
             "text": _clip(text.replace(DEMO_MARK, "")), "t": _iso(t), "status": str(status or ""),
             "project": project, "weight": float(max(0.0, min(1.0, weight))), "source": str(source or ""),
-            "demo": demo, "meta": meta or {},
+            "demo": demo, "meta": meta or {}, "t_end": _iso(t_end),
         }
         return eid
 
@@ -94,9 +99,9 @@ class _Field:
                      meta={"provider": provider, "model": model, "test_double": mock})
         return mid
 
-    def link(self, a: str | None, b: str | None, rel: str) -> None:
+    def link(self, a: str | None, b: str | None, rel: str, t=None) -> None:
         if a and b and a != b:
-            self.links.append({"a": a, "b": b, "rel": rel})
+            self.links.append({"a": a, "b": b, "rel": rel, **({"t": _iso(t)} if t else {})})
 
     def source(self, name: str, fn) -> None:
         before = len(self.entities)
@@ -142,6 +147,7 @@ def _memory(f: _Field, ci, uid: str) -> None:
             status = str(getattr(i, "status"))
         label = f"{i.key} = {i.value}" if i.key and i.value is not None else i.content
         f.add(i.id, "memory", label, text=i.content, t=i.recorded_at, status=status,
+              t_end=i.superseded_at or (i.valid_to if i.valid_to and not current else None),
               weight=float(i.confidence) * (1.0 if current else 0.4), source=i.source,
               meta={"memory_kind": i.kind, "trust": getattr(i.trust, "value", str(i.trust)),
                     "sensitivity": getattr(i.sensitivity, "value", str(i.sensitivity)),
@@ -154,7 +160,7 @@ def _memory(f: _Field, ci, uid: str) -> None:
         for p in getattr(i, "parents", None) or []:
             f.link(i.id, p, "derived_from")
     for c in ci.store.list_conflicts(uid, status=None):
-        f.link(c["item_a"], c["item_b"], "contradicts")
+        f.link(c["item_a"], c["item_b"], "contradicts", t=c.get("detected_at"))
 
 
 def _workspace(f: _Field, ci, uid: str, ws, queue, ledger, runs) -> None:
@@ -199,11 +205,14 @@ def _workspace(f: _Field, ci, uid: str, ws, queue, ledger, runs) -> None:
                 f.add(r["id"], "run", r.get("goal") or "run", t=r.get("created_at"), status=r.get("status"),
                       project=p.id, weight=0.8, meta={"usage": r.get("usage"), "limits": r.get("limits"),
                                                       "provider": r.get("provider"), "model": r.get("model"),
-                                                      "events": [{"type": ev.get("type"), "at": ev.get("at")}
+                                                      "events": [{"type": ev.get("type"), "at": ev.get("at"), "reason": _clip(ev.get("reason") or "", 200)}
                                                                  for ev in (r.get("events") or [])[-12:]],
                                                       "verification": {k: v for k, v in (r.get("verification") or {}).items()
                                                                        if k in ("artifacts_current", "tests_after_writes", "scope")},
-                                                      "steers": len(r.get("steers") or [])})
+                                                      "steers": len(r.get("steers") or []),
+                                                      "attempts": len(r.get("attempts") or []),
+                                                      "cost_usd": round(sum(float(a.get("cost_usd") or 0) for a in r.get("attempts") or []), 4),
+                                                      "pending": [t for a in r.get("attempts") or [] for t in a.get("pending") or []]})
                 if r.get("model"):
                     f.link(r["id"], f.model(r.get("provider"), r["model"]), "used")
                 f.link(r["id"], p.id, "part_of")
@@ -284,6 +293,19 @@ def _challenges(f: _Field, ci, uid: str) -> None:
                          t=rec.get("ts"), status=rec.get("status"), weight=0.7, meta=fals), hid, "tests")
 
 
+def _mastery_history(ci, uid: str) -> dict:
+    from .growth import BKT
+    hist: dict[str, list] = {}
+    state: dict[str, BKT] = {}
+    for a in ci.attempts(uid):
+        if a.get("assisted"):
+            continue
+        b = state.setdefault(a["skill"], BKT())
+        b.observe(bool(a.get("correct")))
+        hist.setdefault(a["skill"], []).append([a.get("ts"), round(b.p_mastery, 3)])
+    return {k: v[-200:] for k, v in hist.items()}
+
+
 def _skills(f: _Field, ci, uid: str) -> None:
     report = {}
     try:
@@ -291,6 +313,10 @@ def _skills(f: _Field, ci, uid: str) -> None:
     except Exception:
         report = {}
     per = report.get("skills") if isinstance(report.get("skills"), dict) else {}
+    try:
+        history = _mastery_history(ci, uid)
+    except Exception:
+        history = {}
     for name, state in ci.store.list_skills(uid).items():
         p = float(state.get("p_mastery", state.get("p_known", 0.0)) or 0.0)
         status = "mastered" if p >= 0.95 else "learning" if p >= 0.4 else "gap"
@@ -300,7 +326,8 @@ def _skills(f: _Field, ci, uid: str) -> None:
                           "unassisted": (per.get(name) or {}).get("unassisted"),
                           "assisted": (per.get(name) or {}).get("assisted"),
                           "dependency_gap": (per.get(name) or {}).get("dependency_gap"),
-                          "trend": ((per.get(name) or {}).get("trend") or {}).get("direction")})
+                          "trend": ((per.get(name) or {}).get("trend") or {}).get("direction"),
+                          "history": history.get(name, [])})
         parts = [s.strip() for s in name.split("/")]
         if len(parts) > 1:  # "mathematics / linear algebra / eigenvalues": a prerequisite tree by path
             f.link(sid, f"skill:{' / '.join(parts[:-1])}" if " / " in name else f"skill:{'/'.join(parts[:-1])}",
@@ -327,6 +354,111 @@ def _plans(f: _Field, ci, uid: str) -> None:
                 f.link(sid, f"{rec['id']}/{d}", "depends_on")
             for o in s.get("serves") or []:
                 f.link(sid, f"{rec['id']}/{o}", "serves")
+
+
+_git_cache: dict[tuple, list] = {}
+
+
+def _git(f: _Field, ci, uid: str, ws) -> None:
+    """Each authorized project's git history (subjects and dates; never authors), newest 300."""
+    import subprocess
+    seen = set()
+    for p in ws.list_projects(uid):
+        try:
+            root = ws.workspace_auth(uid, p.id)["spec"]["root"]
+        except Exception:
+            continue
+        if not root or root in seen:
+            continue
+        seen.add(root)
+        try:
+            head = subprocess.run(["git", "-C", root, "rev-parse", "HEAD"], capture_output=True, text=True, timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if head.returncode:
+            continue
+        key = (root, head.stdout.strip())
+        if key not in _git_cache:
+            log = subprocess.run(["git", "-C", root, "log", "-n", "300", "--date=iso-strict", "--format=%H%x1f%ad%x1f%s"],
+                                 capture_output=True, text=True, timeout=15)
+            _git_cache[key] = [ln.split("\x1f") for ln in log.stdout.splitlines() if ln.count("\x1f") == 2]
+        prev = None
+        for sha, when, subject in reversed(_git_cache[key]):  # oldest first, so each follows the one before
+            cid = f"commit:{sha[:12]}"
+            f.add(cid, "commit", subject, t=when, status="committed", project=p.id, weight=0.35,
+                  source="git", meta={"sha": sha[:12], "repo": root.rstrip("/").rsplit("/", 1)[-1]})
+            f.link(cid, p.id, "part_of")
+            if prev:
+                f.link(cid, prev, "follows")
+            prev = cid
+
+
+def _vault(f: _Field, ci, uid: str, ws) -> None:
+    """The person's notes (Obsidian vault): shown here, on this machine. Whether ALTER may SEND vault
+    notes to a model is a separate setting (`alter config vault`), which this does not change.
+    Notes still in iCloud are listed by title, never downloaded by building the field."""
+    import datetime as _dt
+    from . import thirdeye
+    from .vault import Vault
+    # only a vault the person configured: never thirdeye's fallback search of ~/Documents, which on a
+    # throwaway or demo home would find (and show, or publish) the real owner's notes
+    path = (ws._settings(uid).get(thirdeye.SETTINGS_KEY) or {}).get("vault_path")
+    if not path:
+        return
+    v = Vault(path, fetch_timeout=None)
+    names = list(v.notes)[:1500]
+    for name in names:
+        d = v.notes[name]
+        rel = d["path"]
+        body = LINK_STRIP.sub(lambda m: m.group(1), d["body"]).strip()
+        f.add(f"note:{rel}", "knowledge", name, text=body[:500],
+              t=_dt.datetime.fromtimestamp(d["mtime"], _dt.timezone.utc), status="note",
+              weight=min(1.0, 0.35 + 0.08 * len(v.backlinks.get(name, ()))), source="vault",
+              meta={"path": rel, "area": rel.split("/")[0] if "/" in rel else "", "tags": list(d["tags"])[:8],
+                    "backlinks": len(v.backlinks.get(name, ())), "downloaded": True})
+    for name in names:
+        for link in v.notes[name]["links"]:
+            target = v.resolve(link)
+            if target and target in v.notes:
+                f.link(f"note:{v.notes[name]['path']}", f"note:{v.notes[target]['path']}", "links_to")
+    for rel in v.not_downloaded[:500]:
+        f.add(f"note:{rel}", "knowledge", rel.rsplit("/", 1)[-1][:-3], text="", status="in iCloud", weight=0.3,
+              source="vault", meta={"path": rel, "area": rel.split("/")[0] if "/" in rel else "", "downloaded": False})
+
+
+DEBATES_STATE = "mayank_debates"
+SIDES = ("for", "against")
+
+
+def debates(ci, uid: str) -> list[dict]:
+    return ci._state_json(uid, DEBATES_STATE, [])[1]
+
+
+def _write_debates(ci, uid: str, version, log) -> None:
+    blob = json.dumps(log[-200:]).encode()
+    if version is None:
+        ci.store.save_policy_state(uid, DEBATES_STATE, blob, note="mayank debates")
+    else:
+        ci.store.overwrite_policy_state(uid, DEBATES_STATE, version, blob)
+
+
+def _debates(f: _Field, ci, uid: str) -> None:
+    for d in debates(ci, uid):
+        ps = [t["p"] for t in d["turns"] if t.get("p") is not None]
+        p = (d.get("judge") or {}).get("p")
+        did = f.add(d["id"], "debate", d["claim"], text=(d.get("judge") or {}).get("text") or "", t=d["ts"],
+                    status="judged" if d.get("judge") else f"{len(d['turns'])} turns", weight=0.9,
+                    source=" vs ".join(m or "ALTER's choice" for m in d.get("models") or []),
+                    meta={"p_claim_holds": p if p is not None else (sum(ps) / len(ps) if ps else None),
+                          "p_label": "the judge's estimate" if p is not None else "the debaters' average estimate",
+                          "turns": len(d["turns"]), "models": d.get("models"), "judge_model": (d.get("judge") or {}).get("served_by")})
+        for k, t in enumerate(d["turns"]):
+            aid = f.add(f"{d['id']}/t{k}", "argument", t["text"][:160], text=t["text"], t=t["ts"], status=t["side"],
+                        weight=0.7, source=t.get("served_by") or "",
+                        meta={"side": t["side"], "p": t.get("p"), "round": k // 2 + 1, "model": t.get("served_by")})
+            f.link(aid, did, "supports" if t["side"] == "for" else "contradicts")
+            for i in t.get("sent") or []:
+                f.link(i, aid, "informed")
 
 
 def _exchanges(f: _Field, ci, uid: str) -> None:
@@ -368,6 +500,9 @@ def build(ci, uid: str, *, ws, queue, ledger, runs=None) -> dict:
     f.source("skills", lambda: _skills(f, ci, uid))
     f.source("plans", lambda: _plans(f, ci, uid))
     f.source("exchanges", lambda: _exchanges(f, ci, uid))
+    f.source("debates", lambda: _debates(f, ci, uid))
+    f.source("vault", lambda: _vault(f, ci, uid, ws))
+    f.source("git", lambda: _git(f, ci, uid, ws))
     ents = list(f.entities.values())
     if len(ents) > MAX_ENTITIES:  # keep the newest; the count says what was left out
         ents.sort(key=lambda e: e["t"] or "", reverse=True)
@@ -376,7 +511,7 @@ def build(ci, uid: str, *, ws, queue, ledger, runs=None) -> dict:
     links, seen = [], set()
     for ln in f.links:
         key = (ln["a"], ln["b"], ln["rel"])
-        if ln["a"] in ids and ln["b"] in ids and key not in seen:
+        if ln["a"] in ids and ln["b"] in ids and key not in seen:  # noqa: SIM102
             seen.add(key)
             links.append(ln)
     xyz, embedder = _project(ci, ents)
@@ -558,4 +693,103 @@ def challenge_assumption(ci, uid: str, challenge_id: str, k: int, **kw) -> dict:
             r.update(interrogates=f"{challenge_id}/a{k}", about=challenge_id)
     challenge._write(ci, uid, version, log)
     return rec | {"interrogates": f"{challenge_id}/a{k}", "about": challenge_id}
+
+
+P_LINE = re.compile(r"P\(claim holds\)\s*[=:]\s*(0(?:\.\d+)?|1(?:\.0+)?)", re.I)
+
+
+def _p(text: str):
+    m = P_LINE.search(text or "")
+    return float(m.group(1)) if m else None
+
+
+def debate_start(ci, uid: str, claim: str, models=(None, None, None)) -> dict:
+    """Two models take opposite sides of a claim, citing the person's own records; a third judges."""
+    claim = " ".join(str(claim or "").split())[:500]
+    if len(claim) < 3:
+        raise ValueError("the claim is empty")
+    models = list(models or (None, None, None))[:3] + [None] * (3 - len(list(models or [])[:3]))
+    from . import registry
+    ok = {r["key"] for r in registry.describe({}) if r.get("available")}
+    for m in models:
+        if m is not None and m not in ok:
+            raise ValueError(f"model {m!r} is not available here")
+    from .types import new_id, utcnow
+    rec = {"id": new_id("deb"), "ts": utcnow().isoformat(), "claim": claim, "models": models, "turns": [], "judge": None}
+    version, log = ci._state_json(uid, DEBATES_STATE, [])
+    _write_debates(ci, uid, version, log + [rec])
+    ci.audit.append(uid, "debate.new", debate=rec["id"])
+    return rec
+
+
+def _find(ci, uid, did):
+    version, log = ci._state_json(uid, DEBATES_STATE, [])
+    for d in log:
+        if d["id"] == did:
+            return version, log, d
+    raise KeyError(did)
+
+
+MAX_TURNS = 6
+
+
+def debate_turn(ci, uid: str, did: str) -> dict:
+    """The next turn: sides alternate, each sees the arguments so far and the records ALTER selects."""
+    from .types import utcnow
+    _, _, d = _find(ci, uid, did)
+    if len(d["turns"]) >= MAX_TURNS:
+        raise ValueError("this debate has had its turns; ask for the judge")
+    side = SIDES[len(d["turns"]) % 2]
+    so_far = "\n".join(f"{t['side'].upper()}: {t['text'][:600]}" for t in d["turns"][-4:]) or "(none yet)"
+    prompt = (f"A structured debate for the person whose records you are given.\nClaim: {d['claim']}\n"
+              f"Your side: argue that the claim {'HOLDS' if side == 'for' else 'DOES NOT HOLD'}. Argue honestly: concede "
+              f"what the evidence does not support, and answer the other side's strongest point.\n"
+              f"Arguments so far:\n{so_far}\nUse the person's records you were given as evidence and cite them by "
+              f"their bracket numbers. At most 120 words, then a last line exactly like "
+              f"\"P(claim holds) = 0.xx\" with your honest estimate (not your side's).")
+    r = ci.ask_routed(uid, prompt, pinned=d["models"][0 if side == "for" else 1])
+    rec = r.receipt or {}
+    turn = {"side": side, "text": (r.text or "").strip()[:2000], "p": _p(r.text), "ts": utcnow().isoformat(),
+            "served_by": (rec.get("route") or {}).get("served_by"), "interaction": r.interaction_id,
+            "sent": [x["id"] for x in rec.get("sent") or []]}
+    version, log, d = _find(ci, uid, did)
+    d["turns"].append(turn)
+    _write_debates(ci, uid, version, log)
+    ci.audit.append(uid, "debate.turn", debate=did, side=side, interaction=r.interaction_id)
+    return turn
+
+
+def debate_judge(ci, uid: str, did: str) -> dict:
+    from .types import utcnow
+    _, _, d = _find(ci, uid, did)
+    if not d["turns"]:
+        raise ValueError("nothing to judge yet")
+    both = "\n\n".join(f"{t['side'].upper()} ({t.get('served_by') or 'model'}): {t['text'][:900]}" for t in d["turns"])
+    prompt = (f"Judge this debate for the person.\nClaim: {d['claim']}\n\n{both}\n\nSay which arguments the evidence "
+              f"actually supports, name the strongest point on each side, and what evidence would settle it. At most "
+              f"120 words, then a last line exactly like \"P(claim holds) = 0.xx\".")
+    r = ci.ask_routed(uid, prompt, pinned=d["models"][2])
+    rec = r.receipt or {}
+    judge = {"text": (r.text or "").strip()[:2000], "p": _p(r.text), "ts": utcnow().isoformat(),
+             "served_by": (rec.get("route") or {}).get("served_by"), "interaction": r.interaction_id}
+    version, log, d = _find(ci, uid, did)
+    d["judge"] = judge
+    _write_debates(ci, uid, version, log)
+    ci.audit.append(uid, "debate.judge", debate=did, interaction=r.interaction_id)
+    return judge
+
+
+def history(ci, uid: str, limit: int = 4000) -> dict:
+    """The audit chain in time order (names, times and the ids each entry names), for the time-lapse."""
+    rows = ci.store.query("SELECT seq, ts, event, payload FROM audit WHERE user_id=? ORDER BY seq DESC LIMIT ?",
+                          (uid, int(max(1, min(limit, 20000)))))
+    out = []
+    for r in reversed(rows):
+        try:
+            payload = json.loads(r["payload"])
+        except (TypeError, ValueError):
+            payload = {}
+        out.append({"seq": r["seq"], "ts": r["ts"], "event": r["event"],
+                    "refs": sorted({str(v) for v in payload.values() if isinstance(v, str) and len(v) < 120})})
+    return {"events": out}
 

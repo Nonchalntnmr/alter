@@ -173,11 +173,11 @@ def test_routes_need_the_token_and_the_page_and_assets_are_served(world):
     assert c.get("/v1/mayank/events", params={"after": f["cursor"], "wait": 0}, headers=h).json()["events"] == []
     page = c.get("/mayank")
     assert page.status_code == 200 and "<title>MAYANK</title>" in page.text and "/static/mayank-app.js" in page.text
-    for asset in ("mayank-app.js", "mayank-gl.js", "mayank-forms.js", "mayank-learn.js", "mayank-xr.js"):
+    for asset in ("mayank-app.js", "mayank-gl.js", "mayank-forms.js", "mayank-learn.js", "mayank-xr.js", "mayank-hands.js"):
         r = c.get(f"/static/{asset}")
         assert r.status_code == 200 and "javascript" in r.headers["content-type"]
     shipped = {p.name for p in resources.files("pcim").joinpath("dashboard").iterdir()}
-    assert {"mayank.html", "mayank-app.js", "mayank-gl.js", "mayank-forms.js", "mayank-learn.js", "mayank-xr.js"} <= shipped  # package-data "dashboard/*"
+    assert {"mayank.html", "mayank-app.js", "mayank-gl.js", "mayank-forms.js", "mayank-learn.js", "mayank-xr.js", "mayank-hands.js"} <= shipped  # package-data "dashboard/*"
 
 
 def test_outcomes_and_evidence_go_through_the_challenge_log(world, monkeypatch):
@@ -255,7 +255,7 @@ def test_the_static_build_holds_only_demonstration_data_and_no_local_paths(tmp_p
     assert replay["events"] and all("dt" in e for e in replay["events"])
     page = (out / "index.html").read_text()
     assert "window.MAYANK_STATIC" in page and "/static/mayank-app.js" in page
-    assert {p.name for p in (out / "static").iterdir()} == {"mayank-app.js", "mayank-gl.js", "mayank-forms.js", "mayank-learn.js", "mayank-xr.js"}
+    assert {p.name for p in (out / "static").iterdir()} == {"mayank-app.js", "mayank-gl.js", "mayank-forms.js", "mayank-learn.js", "mayank-xr.js", "mayank-hands.js"}
     for f in out.rglob("*.json"):
         text = f.read_text()
         assert "/Users/" not in text and "/private/" not in text and str(tmp_path) not in text
@@ -335,3 +335,74 @@ def test_starting_a_run_reaches_the_field_and_the_live_feed(world):
     feed = mayank.events(world["ci"], "ana", b["cursor"], wait=0, run_after=run_after)
     assert any(e["event"] == "run.update" and run["id"] in e["refs"] for e in feed["events"])
     assert feed["run_cursor"] > run_after
+
+
+def test_the_vault_is_read_only_from_a_configured_path_never_the_fallback(world, tmp_path, monkeypatch):
+    from pcim import thirdeye
+    elsewhere = tmp_path / "Documents" / "Someone"
+    (elsewhere / ".obsidian").mkdir(parents=True)
+    (elsewhere / "Secret.md").write_text("must never appear")
+    monkeypatch.setattr(thirdeye, "default_vault", lambda: elsewhere)   # what ALTER's fallback would find
+    f = build(world)
+    assert not any(e["kind"] == "knowledge" for e in f["entities"])      # no configured path: no vault
+    vault = tmp_path / "vault"
+    (vault / "Cities").mkdir(parents=True)
+    (vault / "Cities" / "Heat.md").write_text("---\ntags: [cities]\n---\nCities run warm. See [[Trees]].\n")
+    (vault / "Trees.md").write_text("Shade cools. [[Heat]]\n")
+    thirdeye.set_source(world["ws"], "ana", "vault", False, vault_path=str(vault))
+    f = build(world)
+    notes = {e["label"]: e for e in f["entities"] if e["kind"] == "knowledge"}
+    assert set(notes) == {"Heat", "Trees"} and "Secret" not in notes
+    assert notes["Heat"]["meta"]["area"] == "Cities" and notes["Heat"]["meta"]["tags"] == ["cities"]
+    assert "[[" not in notes["Heat"]["text"] and notes["Heat"]["t"]
+    assert {(l["a"], l["b"]) for l in f["links"] if l["rel"] == "links_to"} == {("note:Cities/Heat.md", "note:Trees.md"),
+                                                                                ("note:Trees.md", "note:Cities/Heat.md")}
+    assert thirdeye.settings(world["ws"], "ana")["vault"] is False      # showing it here never turns on sending it
+
+
+def test_git_history_becomes_commits_in_order_without_authors(world, tmp_path):
+    import json
+    root = world["ws"].workspace_auth("ana", world["pid"])["spec"]["root"]
+    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "GIT_AUTHOR_NAME": "Someone Private", "GIT_AUTHOR_EMAIL": "p@example.invalid",
+           "GIT_COMMITTER_NAME": "Someone Private", "GIT_COMMITTER_EMAIL": "p@example.invalid"}
+    for args in (["init", "-q"], ["add", "-A"], ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "first"]):
+        subprocess.run(["git", "-C", root, *args], env=env, check=True, capture_output=True)
+    (Path(root) / "b.md").write_text("b")
+    for args in (["add", "-A"], ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "second"]):
+        subprocess.run(["git", "-C", root, *args], env=env, check=True, capture_output=True)
+    f = build(world)
+    commits = {e["label"]: e for e in f["entities"] if e["kind"] == "commit"}
+    assert set(commits) == {"first", "second"} and commits["second"]["t"]
+    assert any(l["rel"] == "follows" and l["a"] == commits["second"]["id"] and l["b"] == commits["first"]["id"] for l in f["links"])
+    assert "Someone Private" not in json.dumps(f) and "p@example" not in json.dumps(f)
+
+
+def test_a_debate_runs_turn_by_turn_and_reaches_the_field(world):
+    c = TestClient(create_app(PersonalCI(world["data"], seed=0)))
+    h = {"Authorization": "Bearer " + world["token"]}
+    assert c.post("/v1/mayank/debates", json={"claim": "Trees cool streets", "models": ["nowhere:nothing"]}, headers=h).status_code == 422
+    d = c.post("/v1/mayank/debates", json={"claim": "Trees cool streets"}, headers=h).json()
+    sides = [c.post(f"/v1/mayank/debates/{d['id']}/turn", headers=h).json()["side"] for _ in range(4)]
+    assert sides == ["for", "against", "for", "against"]
+    j = c.post(f"/v1/mayank/debates/{d['id']}/judge", headers=h).json()
+    assert j["text"] and j["served_by"]
+    mayank._fields.clear()
+    f = c.get("/v1/mayank/field", headers=h).json()
+    deb = next(e for e in f["entities"] if e["kind"] == "debate")
+    args = [l for l in f["links"] if l["b"] == deb["id"]]
+    assert sorted(l["rel"] for l in args) == ["contradicts", "contradicts", "supports", "supports"]
+    events = c.get("/v1/mayank/history", headers=h).json()["events"]
+    assert [e["event"] for e in events].count("debate.turn") == 4 and events == sorted(events, key=lambda e: e["seq"])
+    assert mayank._p("long argument\nP(claim holds) = 0.35") == 0.35 and mayank._p("no estimate") is None
+
+
+def test_the_time_lapse_has_what_it_needs(world):
+    from pcim.types import Trust
+    world["ci"].remember("ana", "Study hour: noon", "fact", key="study_hour", value="noon", trust=Trust.INFERRED, confidence=0.6)
+    f = build(world)
+    old = next(e for e in f["entities"] if e["kind"] == "memory" and "6 am" in e["label"])
+    assert old["t_end"] and old["t_end"] >= old["t"]                     # superseded: when it stopped being current
+    assert all(l.get("t") for l in f["links"] if l["rel"] == "contradicts" and l["a"].startswith("mem_"))
+    skill = next(e for e in f["entities"] if e["kind"] == "skill")
+    hist = skill["meta"]["history"]
+    assert len(hist) == 3 and all(0 <= p <= 1 for _, p in hist)          # only the unassisted attempts, replayed
