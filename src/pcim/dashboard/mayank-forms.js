@@ -275,7 +275,7 @@ export function hypothesesEntities(model) {
   // each hypothesis is a peak (height = the model's estimate that it holds); what supports it
   // rings its base, what argues against it sits in the valleys beyond.
   const E = model.entities.length, out = new Float32Array(E * 3);
-  const hyps = model.entities.map((e, i) => e.kind === "hypothesis" ? i : -1).filter(i => i >= 0);
+  const hyps = model.entities.map((e, i) => e.kind === "hypothesis" || e.kind === "debate" ? i : -1).filter(i => i >= 0);
   const members = new Set();
   const peaks = [];
   hyps.forEach((h, k) => {

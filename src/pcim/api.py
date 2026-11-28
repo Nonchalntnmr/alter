@@ -171,6 +171,11 @@ class PrefIn(BaseModel):
     value: str = Field(min_length=1, max_length=300)
 
 
+class DebateIn(BaseModel):
+    claim: str = Field(min_length=3, max_length=500)
+    models: list[str | None] | None = Field(default=None, max_length=3)
+
+
 class MayankAskIn(BaseModel):
     question: str = Field(min_length=1, max_length=4000)
 
@@ -695,6 +700,22 @@ def create_app(ci: PersonalCI, *, run_service=None) -> FastAPI:
     @app.post("/v1/mayank/hypotheses/{cid}/assumptions/{k}/challenge")
     def mayank_interrogate(cid: str, k: int, uid: str = Depends(user)):
         return guard(mayank.challenge_assumption, ci, uid, cid, k)
+
+    @app.get("/v1/mayank/history")
+    def mayank_history(limit: int = 4000, uid: str = Depends(user)):
+        return mayank.history(ci, uid, limit)
+
+    @app.post("/v1/mayank/debates")
+    def mayank_debate(body: DebateIn, uid: str = Depends(user)):
+        return guard(mayank.debate_start, ci, uid, body.claim, tuple(body.models or ()))
+
+    @app.post("/v1/mayank/debates/{did}/turn")
+    def mayank_debate_turn(did: str, uid: str = Depends(user)):
+        return guard(mayank.debate_turn, ci, uid, did)  # a routed model call
+
+    @app.post("/v1/mayank/debates/{did}/judge")
+    def mayank_debate_judge(did: str, uid: str = Depends(user)):
+        return guard(mayank.debate_judge, ci, uid, did)  # a routed model call
 
     @app.post("/v1/mayank/hypotheses/{cid}/evidence")
     def mayank_rebut(cid: str, body: HypothesisEvidenceIn, uid: str = Depends(user)):

@@ -52,6 +52,9 @@ the API and the terminal use. Sealed content is opened only for its owner, and n
 | skill | growth mastery (Bayesian Knowledge Tracing; only unassisted attempts move it) | the tree comes from the skill's path, `a / b / c` |
 | plan, outcome / step | intent-compiler plans | `depends_on`, `serves` |
 | request | routed model calls (interactions) | `informed` (the memory items sent) |
+| vault note | your Obsidian vault, from the path set with `alter config set vault.path` (never the `~/Documents` fallback) | `links_to` (wikilinks) |
+| commit | each authorized project's git history: subject and date, never the author | `follows`, `part_of` |
+| debate, argument | debates between two models (below) | `supports` / `contradicts`, `informed` (the records each side was sent) |
 
 - If a source can't be read, the field lists it under `sources` with its error, and still draws
   everything else.
@@ -170,6 +173,63 @@ claim wins until you settle it.
 microphone, then say a search or a question. Questions are asked, and spoken answers are read
 aloud.
 
+**Your history as a time-lapse (`Z`).** Press play and the field rebuilds itself record by record,
+from your oldest note to now:
+- each record appears at its own moment, and lights as it appears;
+- audit events scroll by on their dates;
+- a superseded memory dims at the moment it was replaced, and a contradiction shows from when it was
+  found;
+- in the mastery form, each skill stands as high as it was then, replayed from unassisted attempts
+  only.
+
+The slider moves through records rather than empty months: time is warped by where things happened,
+and the bar shows the real date and a count. You can scrub, pause, and play at 1×, 4× or 16×.
+
+**Talk (`K`).** A spoken conversation:
+- you speak, MAYANK answers aloud, and it listens again;
+- while it speaks, the records it was given light up one by one;
+- "stop talking" ends it.
+
+Each answer is a routed model call, and the page asks once per session. It uses the browser's Web
+Speech API. In Chrome, speech recognition is done by Google's service.
+
+**Camera hands (`C`).** Real hand tracking from the computer's camera, using Google's MediaPipe
+HandLandmarker in the browser:
+- The video is processed on the machine and never uploaded or recorded. The page asks before it turns
+  the camera on.
+- The tracker, about 17 MB at a pinned version, comes from jsdelivr and Google the first time.
+- MediaPipe's 21 landmarks per hand are the same layout as MAYANK's hand model.
+
+Gestures:
+- point at a record, then pinch to select it;
+- keep pinching and move to pull it out, then open your hand to leave it;
+- with two hands pinching, pull apart to spread or bring together to put back;
+- swipe an open hand to change form;
+- twist a fist to turn the field;
+- hold both palms open to put everything back.
+
+Pinch detection uses hysteresis so it doesn't flicker, and swipes have a cooldown.
+
+**Two models debate (`:debate <claim>`).** Two models take opposite sides of a claim, citing your
+records. When your Claude login is permitted, Sonnet argues for and Opus against; otherwise ALTER's
+routing chooses.
+- They alternate for four turns, each answering the other's strongest point and ending with its
+  honest estimate.
+- A third model (Haiku) judges which arguments the evidence supports.
+- The debate appears as a peak on the hypotheses landscape, with its arguments on either side and the
+  records each side was sent.
+- That is five routed model calls, and the page asks first.
+- Routes: `POST /v1/mayank/debates`, `…/{id}/turn`, `…/{id}/judge`.
+
+**An ambition, on autopilot (`:do <ambition>`).** Starts a run whose default plan is three agents
+(builder, then interface, then verifier) and advances it turn after turn. Meters show model steps,
+tool calls and attempts against the run's limits, the cost so far, and each agent's status. It stops:
+- at every approval: the waiting tasks pulse cyan, and approving or denying one goes through the run;
+- at the run's budget, or when the run is blocked, paused, interrupted or finished, with the reason;
+- whenever you press stop.
+
+Each turn is a model call.
+
 **Hands and a headset, simulated.** These show how MAYANK would be operated by gesture and in a
 headset. No camera or headset is read, and the page says so on screen the whole time.
 - **Simulated hands (`G`).** `mayank-xr.js` has a kinematic hand model with 21 joints, the layout
@@ -230,12 +290,13 @@ the hashing embedder it takes 49 ms.
 
 These parts of the brief are not implemented. Nothing on the page pretends otherwise.
 
-- **Real hand tracking and real headsets.** The hands and the headset view are simulations, driven
-  by the mouse and a script. Real hand tracking (camera or WebXR hand input) and real headset
-  rendering (a WebXR session) are not built, and have not been tried on any hardware. The renderer
-  already draws per eye, which a WebXR session would reuse.
-- **Voice on real hardware.** The voice path was tested with a stand-in speech recognizer, because a
-  headless browser has no microphone. Recognition itself is the browser's.
+- **A real headset.** The headset view is a simulation. A real WebXR session is not built; the renderer
+  already draws per eye, which a session would reuse.
+- **Camera hands with a real hand in front of a camera.** The gesture logic was tested with synthetic
+  landmark frames. The full pipeline (camera, tracker download, tracking) was tested with Chrome's
+  fake camera, which shows no hands. How well it tracks a real hand has to be judged on a real camera.
+- **Voice and talk on real hardware.** Both were tested with a stand-in speech recognizer and
+  synthesizer, because a headless browser has no microphone. Recognition itself is the browser's.
 - **Questions for arbitrary skills.** Tests cover the 23 generators. MAYANK does not ask a model to
   write questions for other skills.
 - **Plans run only from the terminal.** Plans are drawn, but compiling or running an intent-compiler

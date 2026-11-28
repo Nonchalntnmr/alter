@@ -17,7 +17,9 @@ It refuses any home that holds a store it did not make, and never touches ~/.pci
 from __future__ import annotations
 
 import argparse
+import os
 import random
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -25,7 +27,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 
-from pcim import challenge, intent_compiler  # noqa: E402
+from pcim import challenge, intent_compiler, mayank, thirdeye  # noqa: E402
 from pcim.cli import write_token  # noqa: E402
 from pcim.engine import PersonalCI  # noqa: E402
 from pcim.exchange import ClaimLedger  # noqa: E402
@@ -125,6 +127,107 @@ CHALLENGES = [
      "if_true": "keep spaced review", "if_false": "return to rereading",
      "cost": "four weeks", "change": "no difference in unassisted scores"},
 ]
+
+
+VAULT = {  # area: [(note, body with [[links]])]
+    "Cities": [("Urban heat islands", "Cities run warmer than the land around them. See [[Street trees]] and [[Asphalt and albedo]]."),
+               ("Street trees", "Shade cools by day; at night a dense canopy can hold heat in. Linked: [[Urban heat islands]], [[Night cooling]]."),
+               ("Asphalt and albedo", "Dark surfaces absorb more sunlight. Measured 20 C above shaded grass. [[Urban heat islands]]"),
+               ("Night cooling", "Open sky lets streets radiate heat after sunset; canopy blocks part of it. [[Street trees]] [[Wind corridors]]"),
+               ("Wind corridors", "Streets aligned with prevailing wind cool faster. [[Night cooling]]"),
+               ("2023 heatwave", "Nine days, nights above 24 C. The loggers caught it. [[Logger network]] [[Night cooling]]"),
+               ("Logger network", "40 loggers on lamp posts, every 10 minutes, since 2021. [[Calibration]]")],
+    "Methods": [("Calibration", "Loggers drift about 0.2 C a year; recalibrate against the airport station. [[Logger network]]"),
+                ("Matched comparisons", "Match blocks on income and building height before comparing. [[Difference in differences]]"),
+                ("Difference in differences", "Compare the change in treated blocks with the change in comparison blocks. [[Matched comparisons]]"),
+                ("Multiple comparisons", "Testing many neighbourhoods raises false positives; correct for it. [[Matched comparisons]]"),
+                ("Confounding by income", "Richer blocks have more canopy and other cooling. [[Matched comparisons]] [[Street trees]]")],
+    "Learning": [("Eigenvalues", "λ with Av = λv. For symmetric matrices they are real. [[Spectral theorem]] [[PCA]]"),
+                 ("Spectral theorem", "A real symmetric matrix is orthogonally diagonalizable. [[Eigenvalues]]"),
+                 ("PCA", "Directions of greatest variance: eigenvectors of the covariance, or the SVD of centred data. [[SVD]] [[Eigenvalues]]"),
+                 ("SVD", "A = UΣVᵀ for any matrix. Singular values are √eig(AᵀA). [[PCA]]"),
+                 ("Bayes rule", "Posterior ∝ likelihood × prior. Base rates matter. [[Base rate neglect]]"),
+                 ("Base rate neglect", "A 99% accurate test for a 1% condition is wrong half the time it says yes. [[Bayes rule]]"),
+                 ("Spaced repetition", "Review just before forgetting; only unassisted recall counts. [[Retrieval practice]]"),
+                 ("Retrieval practice", "Testing yourself beats rereading. [[Spaced repetition]]")],
+    "Reading": [("Tree canopy and night temperature (paper)", "Found canopy cooled afternoons by 2 C but warmed some nights. [[Night cooling]] [[Street trees]]"),
+                ("Albedo field study (paper)", "White roofs lowered roof temperature 15 C. [[Asphalt and albedo]]"),
+                ("Linear Algebra Done Right", "Axler, determinant-free. Chapter 7 on the spectral theorem. [[Spectral theorem]]"),
+                ("Thinking, Fast and Slow", "Base rates and substitution. [[Base rate neglect]]")],
+    "Journal": [("Week 1", "Started the street-tree question. [[Urban heat islands]]"),
+                ("Week 9", "Calibration problem found in three loggers. [[Calibration]]"),
+                ("Week 22", "Heatwave data in. Nights look different from days. [[2023 heatwave]] [[Night cooling]]"),
+                ("Week 31", "Matched comparison design settled. [[Matched comparisons]]"),
+                ("Week 40", "Eigenvalues finally clicked through PCA. [[PCA]] [[Eigenvalues]]")],
+}
+COMMITS = ["Set up the logger data folder", "Add calibration notes", "Import 2021 logger readings", "Fix timezone handling",
+           "Add airport reference station", "Recalibrate three drifting loggers", "Import 2022 readings", "Plot day vs night",
+           "Add canopy measure from aerial survey", "Draft data sources note", "Match blocks on income", "Add building height",
+           "Import heatwave readings", "First difference-in-differences estimate", "Split afternoons and nights",
+           "Add wind direction", "Correct for multiple comparisons", "Write the heatwave case study", "Tidy figures",
+           "Add uncertainty to estimates", "Draft the canopy measure note", "Review notes", "Prepare summary", "Update readme"]
+
+
+def seed_vault(home: Path, ws, uid: str) -> Path:
+    vault, now, rnd = home / "demo-vault", time.time(), random.Random(3)
+    notes = [(area, name, body) for area, items in VAULT.items() for name, body in items]
+    for k, (area, name, body) in enumerate(notes):
+        f = vault / area / f"{name}.md"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(f"---\ntags: [{area.lower()}]\n---\n[demo] {body}\n")
+        age = (len(notes) - k) / len(notes) * 420 * 86400 + rnd.random() * 86400 * 6   # spread over ~14 months
+        os.utime(f, (now - age, now - age))
+    thirdeye.set_source(ws, uid, "vault", False, vault_path=str(vault))   # shown in MAYANK; never sent to a model
+    return vault
+
+
+def seed_git(root: Path) -> None:
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(root), "GIT_CONFIG_NOSYSTEM": "1",
+           "GIT_AUTHOR_NAME": "Demo", "GIT_AUTHOR_EMAIL": "demo@example.invalid",
+           "GIT_COMMITTER_NAME": "Demo", "GIT_COMMITTER_EMAIL": "demo@example.invalid"}
+    git = lambda *a, **kw: subprocess.run(["git", "-C", str(root), "-c", "commit.gpgsign=false", *a], env={**env, **kw},  # noqa: E731
+                                          capture_output=True, text=True, check=True)
+    git("init", "-q")
+    now = time.time()
+    for k, msg in enumerate(COMMITS):
+        f = root / "log" / f"{k:02d}.md"
+        f.parent.mkdir(exist_ok=True)
+        f.write_text(f"[demo] {msg}\n")
+        when = time.strftime("%Y-%m-%dT%H:%M:%S+0000", time.gmtime(now - (len(COMMITS) - k) * 3 * 86400))
+        git("add", "-A")
+        git("commit", "-q", "-m", f"[demo] {msg}", GIT_AUTHOR_DATE=when, GIT_COMMITTER_DATE=when)
+
+
+DEBATE = {
+    "claim": "Street trees cool a city more at night than by day",
+    "turns": [
+        ("for", "Night is when heat stress kills: the 2023 heatwave's danger was nights above 24 C [1]. Canopy blocks the "
+                "sun all day, so stored heat in asphalt is lower by evening [2]. Lower stored heat means cooler nights.", 0.48),
+        ("against", "The loggers say otherwise: two of the shadiest blocks were among the warmest at 3 am [3], and a dense "
+                    "canopy traps longwave radiation that open sky would release [4]. Shade is a daytime effect.", 0.3),
+        ("for", "Those two blocks are also low-wind and high-density [5]; matched on wind and height the night gap shrinks. "
+                "Less stored heat by evening is still real.", 0.4),
+        ("against", "Matching narrows the gap but the sign holds: nights stay warmer under heavy canopy. The day effect, "
+                    "2 C in the paper [6], is the larger and better-measured one.", 0.28),
+    ],
+    "judge": ("The evidence favours AGAINST: canopy cools afternoons clearly, while at night the effect is small and can "
+              "reverse under dense canopy. FOR's best point, less stored heat by evening, is plausible but unmeasured here. "
+              "Settle it with matched blocks compared night by night, wind included.", 0.3),
+}
+
+
+def seed_debate(ci, uid: str) -> None:
+    mem = [i.id for i in ci.memory.current(uid)][:12]
+    rec = {"id": new_id("deb"), "ts": utcnow().isoformat(), "claim": D + DEBATE["claim"],
+           "models": ["demo (no model call)", "demo (no model call)", "demo (no model call)"], "turns": [], "judge": None}
+    for k, (side, text, p_) in enumerate(DEBATE["turns"]):
+        rec["turns"].append({"side": side, "text": D + text + f"\nP(claim holds) = {p_}", "p": p_, "ts": utcnow().isoformat(),
+                             "served_by": "demo (no model call)", "interaction": None, "sent": mem[k * 3:k * 3 + 3]})
+    rec["judge"] = {"text": D + DEBATE["judge"][0], "p": DEBATE["judge"][1], "ts": utcnow().isoformat(),
+                    "served_by": "demo (no model call)", "interaction": None}
+    version, log = ci._state_json(uid, mayank.DEBATES_STATE, [])
+    mayank._write_debates(ci, uid, version, log + [rec])
+    ci.audit.append(uid, "debate.new", debate=rec["id"])
 
 
 def refuse(msg: str) -> None:
@@ -264,6 +367,9 @@ def seed(home: Path, ci: PersonalCI) -> dict:
                                      "role": "fulfilling"} for s, a, d, o in steps]}})
     intent_compiler._write(ci, uid, pversion, plog)
 
+    seed_vault(home, ws, uid)
+    seed_git(root)
+    seed_debate(ci, uid)
     try:
         from pcim.run_service import RunService
         RunService(ci).start(uid, learning.id, D + "Prove the spectral theorem for real symmetric matrices", {"mock"},
