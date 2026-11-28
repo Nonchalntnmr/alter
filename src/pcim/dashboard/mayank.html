@@ -168,10 +168,11 @@ button.danger:hover { color: var(--rose); border-color: var(--rose); }
 
 <div id="gate"><div class="card panel">
   <h1>MAYANK</h1>
-  <p>Paste the API token of this PCIM_HOME. It stays in this tab only.</p>
-  <input id="token" type="password" placeholder="contents of ~/.pcim/token" autocomplete="off">
+  <p>Paste the API token of the PCIM_HOME this server reads. It stays in this tab only.</p>
+  <input id="token" type="password" placeholder="contents of $PCIM_HOME/token" autocomplete="off">
   <button class="primary" id="enter">Enter</button>
-  <p class="mono" style="color:var(--ink3);margin-top:18px">pbcopy &lt; ~/.pcim/token</p>
+  <p id="gateerr" style="color:var(--rose);min-height:1.2em;margin:14px 0 0"></p>
+  <p class="mono" style="color:var(--ink3);margin-top:10px">pbcopy &lt; ~/.pcim/token &nbsp;(or the demo home's token file)</p>
 </div></div>
 <div id="fatal"></div>
 

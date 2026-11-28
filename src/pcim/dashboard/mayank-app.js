@@ -18,7 +18,10 @@ try {
 async function api(path, { method = "GET", body } = {}) {
   const r = await fetch(path, { method, headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
                                 body: body ? JSON.stringify(body) : undefined });
-  if (r.status === 401) { showGate(); throw new Error("unauthorized"); }
+  if (r.status === 401) {
+    showGate(token ? "That token does not open the store this server reads. Each PCIM_HOME has its own token: use the token file of the home this server was started with." : "");
+    throw new Error("unauthorized");
+  }
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.detail ? (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail)) : r.statusText);
   return data;
@@ -828,8 +831,10 @@ function frame(now) {
 }
 
 // ------------------------------------------------------------------ start
-function showGate() {
+function showGate(message = "") {
   $("#gate").classList.add("show");
+  $("#gateerr").textContent = message;
+  setLive(false, "token needed");
   $("#enter").onclick = () => { token = $("#token").value.trim(); try { sessionStorage.setItem("pcim_token", token); } catch (_) {} $("#gate").classList.remove("show"); start(); };
   $("#token").onkeydown = e => { if (e.key === "Enter") $("#enter").click(); };
 }
@@ -838,7 +843,13 @@ async function start() {
   if (!token) { showGate(); return; }
   if (started) return;
   let field;
-  try { field = await api("/v1/mayank/field"); } catch (err) { if (err.message !== "unauthorized") fatal(`Could not read the field: ${err.message}`); return; }
+  try { field = await api("/v1/mayank/field"); }
+  catch (err) {
+    if (err.message === "unauthorized") return;
+    const unreachable = err instanceof TypeError;  // fetch itself failed: no server answered
+    fatal(unreachable ? `Can't reach ALTER at ${location.origin}. Is \`pcim serve\` still running there?` : `Could not read the field: ${err.message}`);
+    return;
+  }
   started = true;
   S.field = field; S.model = buildModel(field); S.cursor = field.cursor;
   buildChrome(); buildFloor();
