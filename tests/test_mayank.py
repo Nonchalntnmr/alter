@@ -173,11 +173,11 @@ def test_routes_need_the_token_and_the_page_and_assets_are_served(world):
     assert c.get("/v1/mayank/events", params={"after": f["cursor"], "wait": 0}, headers=h).json()["events"] == []
     page = c.get("/mayank")
     assert page.status_code == 200 and "<title>MAYANK</title>" in page.text and "/static/mayank-app.js" in page.text
-    for asset in ("mayank-app.js", "mayank-gl.js", "mayank-forms.js", "mayank-learn.js"):
+    for asset in ("mayank-app.js", "mayank-gl.js", "mayank-forms.js", "mayank-learn.js", "mayank-xr.js"):
         r = c.get(f"/static/{asset}")
         assert r.status_code == 200 and "javascript" in r.headers["content-type"]
     shipped = {p.name for p in resources.files("pcim").joinpath("dashboard").iterdir()}
-    assert {"mayank.html", "mayank-app.js", "mayank-gl.js", "mayank-forms.js", "mayank-learn.js"} <= shipped  # package-data "dashboard/*"
+    assert {"mayank.html", "mayank-app.js", "mayank-gl.js", "mayank-forms.js", "mayank-learn.js", "mayank-xr.js"} <= shipped  # package-data "dashboard/*"
 
 
 def test_outcomes_and_evidence_go_through_the_challenge_log(world, monkeypatch):
@@ -255,7 +255,7 @@ def test_the_static_build_holds_only_demonstration_data_and_no_local_paths(tmp_p
     assert replay["events"] and all("dt" in e for e in replay["events"])
     page = (out / "index.html").read_text()
     assert "window.MAYANK_STATIC" in page and "/static/mayank-app.js" in page
-    assert {p.name for p in (out / "static").iterdir()} == {"mayank-app.js", "mayank-gl.js", "mayank-forms.js", "mayank-learn.js"}
+    assert {p.name for p in (out / "static").iterdir()} == {"mayank-app.js", "mayank-gl.js", "mayank-forms.js", "mayank-learn.js", "mayank-xr.js"}
     for f in out.rglob("*.json"):
         text = f.read_text()
         assert "/Users/" not in text and "/private/" not in text and str(tmp_path) not in text

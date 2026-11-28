@@ -104,6 +104,26 @@ void main() {
   o = vec4(c, 1.0);
 }`;
 
+// simulated hands: joints as soft discs (bones use the line program)
+const VS_HAND = `#version 300 es
+layout(location=0) in vec3 aPos; layout(location=1) in vec4 aColor;
+uniform mat4 uProj, uView; uniform float uSize; out vec4 vColor;
+void main() { vec4 mv = uView * vec4(aPos, 1.0); gl_Position = uProj * mv; gl_PointSize = clamp(uSize / max(0.05, -mv.z), 2.0, 40.0); vColor = aColor; }`;
+const FS_HAND = `#version 300 es
+precision highp float; in vec4 vColor; out vec4 o;
+void main() { float r = length(gl_PointCoord * 2.0 - 1.0); if (r > 1.0) discard; float a = smoothstep(1.0, 0.55, r) * vColor.a; o = vec4(vColor.rgb * a, a); }`;
+// a headset lens: the scene seen through a soft-edged circle per eye
+const FS_LENS = `#version 300 es
+precision highp float; in vec2 vUv; uniform vec2 uRes; out vec4 o;
+void main() { vec2 p = (vUv - 0.5) * vec2(uRes.x / uRes.y, 1.0); float d = length(p * vec2(0.92, 1.0));
+  float a = smoothstep(0.43, 0.56, d); o = vec4(0.0, 0.0, 0.0, a); }`;
+
+export function basis(eye, f) {   // right = forward × world up; up = right × forward
+  const rl = Math.hypot(f[2], f[0]) || 1, r = [-f[2] / rl, 0, f[0] / rl];
+  const u = [r[1] * f[2] - r[2] * f[1], r[2] * f[0] - r[0] * f[2], r[0] * f[1] - r[1] * f[0]];
+  return { eye, f, r, u };
+}
+
 export function morphAt(mixv, seed) { // must match stagger() in VS_POINTS
   let t = Math.max(0, Math.min(1, mixv * 1.7 - seed * 0.7));
   return t * t * (3 - 2 * t);
@@ -196,6 +216,11 @@ export class Renderer {
     const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
     gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    this.hand = compile(gl, VS_HAND, FS_HAND);
+    this.lens = compile(gl, VS_BG, FS_LENS);
+    this.handLines = null; this.handPts = null; this.room = null;
+    this.immersive = false; this.showRoom = true; this.head = { yaw: 0, pitch: -0.06 };
+    this.viewer = [0, 0.7, 2.45]; this.ipd = 0.064;
     this.state = gl.createTexture();
     this.layers = {}; this.lines = null; this.floor = null;
     this.mix = 1; this.morphStart = 0; this.morphMs = 2400;
@@ -258,6 +283,43 @@ export class Renderer {
     L.count = from.length / 3;
   }
 
+  _lineBuf(slot, from, color) {
+    const gl = this.gl;
+    const L = this[slot] || (this[slot] = { vao: gl.createVertexArray(), bufs: [gl.createBuffer(), gl.createBuffer(), gl.createBuffer()] });
+    gl.bindVertexArray(L.vao);
+    [[from, 3], [from, 3], [color, 4]].forEach(([d, c], i) => {
+      gl.bindBuffer(gl.ARRAY_BUFFER, L.bufs[i]); gl.bufferData(gl.ARRAY_BUFFER, d, gl.DYNAMIC_DRAW);
+      gl.enableVertexAttribArray(i); gl.vertexAttribPointer(i, c, gl.FLOAT, false, 0, 0);
+    });
+    L.count = from.length / 3;
+  }
+  setRoom(from, color) { this._lineBuf("room", from, color); }
+  setHands(bones, boneColor, joints, jointColor) {
+    this._lineBuf("handLines", bones, boneColor);
+    const gl = this.gl;
+    const P = this.handPts || (this.handPts = { vao: gl.createVertexArray(), bufs: [gl.createBuffer(), gl.createBuffer()] });
+    gl.bindVertexArray(P.vao);
+    [[joints, 3], [jointColor, 4]].forEach(([d, c], i) => {
+      gl.bindBuffer(gl.ARRAY_BUFFER, P.bufs[i]); gl.bufferData(gl.ARRAY_BUFFER, d, gl.DYNAMIC_DRAW);
+      gl.enableVertexAttribArray(i); gl.vertexAttribPointer(i, c, gl.FLOAT, false, 0, 0);
+    });
+    P.count = joints.length / 3;
+  }
+  clearHands() { if (this.handLines) this.handLines.count = 0; if (this.handPts) this.handPts.count = 0; }
+
+  // the immersive preview's head: where the viewer stands and looks
+  headBasis() {
+    const { yaw, pitch } = this.head;
+    const f = [Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch)];
+    return basis(this.viewer, f);
+  }
+  // the orbit camera's basis, for placing hands in front of it
+  cameraBasis() {
+    const eye = this.camera.eye(), t = this.camera.target;
+    const f = [t[0] - eye[0], t[1] - eye[1], t[2] - eye[2]], n = Math.hypot(...f);
+    return basis(eye, f.map(v => v / n));
+  }
+
   startMorph(ms = 2400) { this.mix = 0; this.morphStart = performance.now(); this.morphMs = ms; }
   get morphing() { return this.mix < 1; }
 
@@ -277,30 +339,49 @@ export class Renderer {
   }
 
   draw(t, dt) {
-    const gl = this.gl, t0 = performance.now();
+    const gl = this.gl, t0 = performance.now(), W = this.canvas.width, H = this.canvas.height;
     this.resize();
     this.camera.update(dt);
     if (this.mix < 1) this.mix = Math.min(1, (performance.now() - this.morphStart) / this.morphMs);
-    this.matrices();
-    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    if (this.immersive) {
+      const half = Math.floor(W / 2), b = this.headBasis(), proj = perspective(1.05, half / Math.max(1, H), 0.02, 60);
+      this.eyes = [-1, 1].map(side => {
+        const eye = b.eye.map((v, i) => v + b.r[i] * side * this.ipd / 2);
+        const view = lookAt(eye, eye.map((v, i) => v + b.f[i]));
+        return { view, proj, vp: [side < 0 ? 0 : half, 0, half, H] };
+      });
+      this.proj = proj; this.view = this.eyes[0].view; this.pv = mul(proj, this.view);
+      for (const e of this.eyes) this.drawScene(t, e.view, e.proj, e.vp, true);
+    } else {
+      this.matrices(); this.eyes = null;
+      this.drawScene(t, this.view, this.proj, [0, 0, W, H], false);
+    }
+    this.drawMs = this.drawMs * 0.9 + (performance.now() - t0) * 0.1;
+  }
+
+  drawScene(t, view, proj, vp, lens) {
+    const gl = this.gl;
+    gl.viewport(...vp); gl.enable(gl.SCISSOR_TEST); gl.scissor(...vp);
     gl.disable(gl.DEPTH_TEST); gl.depthMask(false); gl.disable(gl.BLEND);
     gl.useProgram(this.bg.p);
-    gl.uniform1f(this.bg.u.uTime, t); gl.uniform2f(this.bg.u.uRes, this.canvas.width, this.canvas.height);
+    gl.uniform1f(this.bg.u.uTime, t); gl.uniform2f(this.bg.u.uRes, vp[2], vp[3]);
     gl.bindVertexArray(this.bgVao); gl.drawArrays(gl.TRIANGLES, 0, 3);
 
     gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE); // additive: structure and relations glow
     gl.useProgram(this.lin.p);
-    gl.uniformMatrix4fv(this.lin.u.uProj, false, this.proj); gl.uniformMatrix4fv(this.lin.u.uView, false, this.view);
-    if (this.floor) { gl.uniform1f(this.lin.u.uMix, 1); gl.bindVertexArray(this.floor.vao); gl.drawArrays(gl.LINES, 0, this.floor.count); }
+    gl.uniformMatrix4fv(this.lin.u.uProj, false, proj); gl.uniformMatrix4fv(this.lin.u.uView, false, view);
+    gl.uniform1f(this.lin.u.uMix, 1);
+    if (this.immersive && this.showRoom && this.room) { gl.bindVertexArray(this.room.vao); gl.drawArrays(gl.LINES, 0, this.room.count); }
+    if (this.floor) { gl.bindVertexArray(this.floor.vao); gl.drawArrays(gl.LINES, 0, this.floor.count); }
     if (this.lines && this.lines.count) { gl.uniform1f(this.lin.u.uMix, this.mix); gl.bindVertexArray(this.lines.vao); gl.drawArrays(gl.LINES, 0, this.lines.count); }
 
     gl.useProgram(this.pts.p);
     const u = this.pts.u;
-    gl.uniformMatrix4fv(u.uProj, false, this.proj); gl.uniformMatrix4fv(u.uView, false, this.view);
+    gl.uniformMatrix4fv(u.uProj, false, proj); gl.uniformMatrix4fv(u.uView, false, view);
     gl.uniform1f(u.uTime, t); gl.uniform1f(u.uMix, this.mix); gl.uniform1f(u.uBreath, this.breath);
     gl.uniform1f(u.uLight, this.light); gl.uniform1f(u.uFlow, this.flow); gl.uniform1f(u.uSubFollow, this.subFollow);
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.state); gl.uniform1i(u.uState, 0);
-    const pxScale = this.canvas.height / 900;
+    const pxScale = vp[3] / 900 * (this.immersive ? 0.7 : 1);
     if (this.layers.substrate) {
       gl.uniform1i(u.uIsEntity, 0); gl.uniform1f(u.uScale, 8.5 * this.scale * pxScale);
       gl.bindVertexArray(this.layers.substrate.vao); gl.drawArrays(gl.POINTS, 0, this.layers.substrate.count);
@@ -311,7 +392,35 @@ export class Renderer {
       gl.uniform1i(u.uIsEntity, 1); gl.uniform1f(u.uScale, 12.0 * this.scale * pxScale);
       gl.bindVertexArray(this.layers.entities.vao); gl.drawArrays(gl.POINTS, 0, this.layers.entities.count);
     }
-    this.drawMs = this.drawMs * 0.9 + (performance.now() - t0) * 0.1;
+    if (this.handLines && this.handLines.count) {            // the simulated hands, over everything
+      gl.disable(gl.DEPTH_TEST); gl.depthMask(false); gl.blendFunc(gl.ONE, gl.ONE);
+      gl.useProgram(this.lin.p); gl.uniform1f(this.lin.u.uMix, 1);
+      gl.bindVertexArray(this.handLines.vao); gl.drawArrays(gl.LINES, 0, this.handLines.count);
+      gl.useProgram(this.hand.p);
+      gl.uniformMatrix4fv(this.hand.u.uProj, false, proj); gl.uniformMatrix4fv(this.hand.u.uView, false, view);
+      gl.uniform1f(this.hand.u.uSize, 9.0 * vp[3] / 900);
+      gl.bindVertexArray(this.handPts.vao); gl.drawArrays(gl.POINTS, 0, this.handPts.count);
+    }
+    if (lens) {
+      gl.disable(gl.DEPTH_TEST); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      gl.useProgram(this.lens.p); gl.uniform2f(this.lens.u.uRes, vp[2], vp[3]);
+      gl.bindVertexArray(this.bgVao); gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+    gl.disable(gl.SCISSOR_TEST);
+  }
+
+  // the record nearest a ray (for a pointing hand): smallest angle, within maxAngle
+  pickRay(origin, dir, maxAngle = 0.045, filter = null) {
+    const L = this.layers.entities; if (!L) return -1;
+    let best = -1, ba = maxAngle;
+    for (let i = 0; i < L.count; i++) {
+      if (filter && !filter(i)) continue;
+      const p = this.entityPos(i), v = [p[0] - origin[0], p[1] - origin[1], p[2] - origin[2]], d = Math.hypot(...v);
+      if (d < 1e-6) continue;
+      const a = Math.acos(Math.max(-1, Math.min(1, (v[0] * dir[0] + v[1] * dir[1] + v[2] * dir[2]) / d)));
+      if (a < ba) { ba = a; best = i; }
+    }
+    return best;
   }
 
   // where entity i is right now (without the small drift), for picking and labels

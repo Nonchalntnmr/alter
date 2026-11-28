@@ -156,6 +156,16 @@ pre.trace.err { color: var(--rose); }
 #mic { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 34px; height: 34px; padding: 0; border-radius: 50%;
   font-size: 13px; color: var(--copper); top: 23px; }
 #mic.on { background: var(--copper); color: #1a120c; animation: pulse 1.2s infinite; }
+#xrcap { position: fixed; left: 50%; bottom: 112px; transform: translateX(-50%); text-align: center; display: none; pointer-events: none;
+  max-width: min(760px, calc(100vw - 40px)); padding: 9px 18px; }
+#xrcap.show { display: block; }
+#xrcap .step { margin-top: 5px; font-size: 13px; letter-spacing: .18em; text-transform: uppercase; color: var(--ink); }
+#perf .row button.on { color: #1a120c; background: var(--copper); border-color: var(--copper); }
+body.immersive #brand, body.immersive #status, body.immersive #ticker, body.immersive #forms, body.immersive #formnote,
+body.immersive #legend, body.immersive #cmd, body.immersive #demo, body.immersive #putback, body.immersive #answer { display: none !important; }
+body.immersive #perf .row:not(:last-of-type), body.immersive #perfline { display: none; }
+body.immersive #xrcap { bottom: 24px; }
+body.immersive #inspector { top: auto; bottom: 90px; right: 50%; transform: translateX(50%); max-height: 34vh; width: 420px; }
 #fatal { position: fixed; inset: 0; display: none; place-items: center; text-align: center; color: var(--ink2); padding: 40px; }
 @media (max-width: 1100px) { #ticker, #formnote { display: none; } #cmd { width: calc(100vw - 56px); bottom: 80px; } #legend { display: none; } }
 @media (max-width: 800px) {
@@ -193,6 +203,9 @@ pre.trace.err { color: var(--rose); }
     <button id="smaller" title="smaller points ([)">smaller</button><button id="larger" title="larger points (])">larger</button>
     <button id="light" title="light (L)">light: full</button><button id="reset" title="reset view (R)">reset view</button>
   </div>
+  <div class="row">
+    <button id="handsbtn" title="simulated hands (G)">hands</button><button id="tourbtn" title="watch the gestures (H)">gesture tour</button><button id="vrbtn" title="simulated headset view (X)">headset preview</button>
+  </div>
   <div class="mono" id="perfline"></div>
 </div>
 
@@ -220,6 +233,7 @@ pre.trace.err { color: var(--rose); }
 <div id="demo"></div>
 <button id="putback" class="panel">put back</button>
 <div class="panel" id="toast"></div>
+<div class="panel" id="xrcap" aria-live="polite"></div>
 
 <div id="gate"><div class="card panel">
   <h1>MAYANK</h1>

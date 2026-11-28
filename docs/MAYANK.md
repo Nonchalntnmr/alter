@@ -170,6 +170,27 @@ claim wins until you settle it.
 microphone, then say a search or a question. Questions are asked, and spoken answers are read
 aloud.
 
+**Hands and a headset, simulated.** These show how MAYANK would be operated by gesture and in a
+headset. No camera or headset is read, and the page says so on screen the whole time.
+- **Simulated hands (`G`).** `mayank-xr.js` has a kinematic hand model with 21 joints, the layout
+  hand-tracking APIs use, and poses for point, pinch, open, fist and twist. The right hand follows
+  the cursor, points when it is over a record and pinches on click.
+- **Gesture tour (`H`).** A scripted pair of hands performs each gesture: point, pinch to select,
+  pinch and pull a record out, open the hand to leave it there, spread two hands to fan out its
+  neighbours, swipe to the next form, twist to turn the field, and put palms down to put everything
+  back.
+
+  The gestures are not animations of results. They call the same select, pull-out, expand, form and
+  put-back actions as the mouse.
+- **Headset preview (`X`).** The scene is drawn once per eye, side by side, with lens vignettes. You
+  stand life-size in front of the figure, with both hands visible.
+  - A record is picked by the ray from your eye through where the fingertip points, and pinching
+    selects it. The ray is aimed from the pointing pose, so the curling finger of a pinch doesn't
+    move it.
+  - Drag while pinching to pull the record toward you; shift + move or the arrow keys look around.
+  - `M` switches between a wireframe room, which stands in for camera passthrough in mixed reality,
+    and a void (virtual reality).
+
 **Live updates.** `GET /v1/mayank/events?after=SEQ&run_after=SEQ&wait=20` long-polls two sources:
 - the audit chain;
 - the specialist runs' own event log. Runs do not write to the audit chain, and only their run and
@@ -209,8 +230,10 @@ the hashing embedder it takes 49 ms.
 
 These parts of the brief are not implemented. Nothing on the page pretends otherwise.
 
-- **Hand gestures, WebXR and mixed reality.** The renderer is plain WebGL2, so a WebXR session could
-  reuse it, but nothing has been built or tested on that hardware.
+- **Real hand tracking and real headsets.** The hands and the headset view are simulations, driven
+  by the mouse and a script. Real hand tracking (camera or WebXR hand input) and real headset
+  rendering (a WebXR session) are not built, and have not been tried on any hardware. The renderer
+  already draws per eye, which a WebXR session would reuse.
 - **Voice on real hardware.** The voice path was tested with a stand-in speech recognizer, because a
   headless browser has no microphone. Recognition itself is the browser's.
 - **Questions for arbitrary skills.** Tests cover the 23 generators. MAYANK does not ask a model to
@@ -258,4 +281,15 @@ These parts of the brief are not implemented. Nothing on the page pretends other
   - interrogating an assumption;
   - `:goal` starting a run whose agents appear;
   - a spoken question asked, answered and read aloud;
+  - no page errors.
+- A third browser pass checked the simulated hands and headset, with 14 checks:
+  - the hand appears and says no camera is used;
+  - pointing and pinching selects a record;
+  - the tour runs all eight gestures, and its pinch, pull, spread and swipe do the real actions;
+  - palms down puts everything back;
+  - the headset view draws both hands in two eyes, and its ray picks a record;
+  - a pinch selects that record, and the aim holds during the pinch;
+  - `M` switches the room;
+  - it holds 60 fps;
+  - `Esc` exits;
   - no page errors.

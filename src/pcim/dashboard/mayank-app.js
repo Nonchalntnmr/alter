@@ -3,6 +3,7 @@
 import { Renderer } from "/static/mayank-gl.js";
 import { FORMS, ENTITY_FORMS, sampleBody, assignParents, substrateFor, rng, hash01 } from "/static/mayank-forms.js";
 import { generatorFor, difficultyFor, check as checkAnswer, ANSWER_HINT } from "/static/mayank-learn.js";
+import { POSES, blendPose, handJoints, BONES, toWorld, roomLines, TOUR } from "/static/mayank-xr.js";
 
 const $ = s => document.querySelector(s);
 const params = new URLSearchParams(location.search);
@@ -435,6 +436,9 @@ function buildChrome() {
   $("#light").onclick = () => { R.light = R.light > 0.9 ? 0.55 : 1; $("#light").textContent = `light: ${R.light > 0.9 ? "full" : "dim"}`; };
   $("#reset").onclick = () => { const f = FRAMING[S.form]; R.camera.frame(f[0], f[1], f[2], f[3], 1400); };
   $("#putback").onclick = putBack;
+  $("#handsbtn").onclick = () => setHands(!XR.hands);
+  $("#tourbtn").onclick = startTour;
+  $("#vrbtn").onclick = () => setImmersive(!R.immersive);
 }
 
 // ------------------------------------------------------------------ selection and inspector
@@ -688,6 +692,157 @@ function pathBetween(a, b) {
   return p;
 }
 
+// ------------------------------------------------------------------ hypothetical hands and headset (simulated)
+// No camera, no headset. The hands are a kinematic model driven by the mouse or the tour; their
+// gestures call the same real actions as the mouse. The headset view draws the scene once per eye.
+const XR = {
+  hands: false, tour: null, mouse: [0.62, 0.7], down: false, grab: null, look: false,
+  pose: { right: { ...POSES.relaxed }, left: { ...POSES.relaxed } }, want: { right: "relaxed", left: null },
+  anchor: { right: [0.2, -0.24, -0.5], left: [-0.24, -0.27, -0.48] }, aim: { right: null, left: null },
+  roll: 0, tip: null, target: -1, done: new Set(),
+};
+function xrActive() { return XR.hands || XR.tour || R.immersive; }
+function xrCaption(text) {
+  const el = $("#xrcap");
+  const mode = R.immersive ? `IMMERSIVE PREVIEW · simulated headset · ${R.showRoom ? "mixed reality: the wireframe room stands in for camera passthrough" : "virtual reality"} · no headset connected`
+                           : "SIMULATED HANDS · no camera is used: they show how gestures would work";
+  const hov = R.immersive && (S.hovered >= 0 || S.selected >= 0) ? ` · ◎ ${trunc(S.model.entities[S.hovered >= 0 ? S.hovered : S.selected].label, 48)}` : "";
+  el.innerHTML = `<span class="caps" style="color:var(--copper)">${esc(mode)}</span>${text ? `<div class="step">${esc(text)}</div>` : ""}${hov ? `<div class="mono" style="color:var(--ink2)">${esc(hov)}</div>` : ""}`;
+  el.classList.toggle("show", xrActive());
+}
+function setHands(on) {
+  XR.hands = on; $("#handsbtn").classList.toggle("on", on);
+  if (!xrActive()) R.clearHands();
+  xrCaption(on ? (R.immersive ? "" : "Move the mouse: the hand follows. Point at a record, click to pinch it, drag to pull it out.") : "");
+}
+function setImmersive(on) {
+  R.immersive = on; document.body.classList.toggle("immersive", on); $("#vrbtn").classList.toggle("on", on);
+  if (on && !R.room) { const room = roomLines(); R.setRoom(room.from, room.color); }
+  R.head = { yaw: 0, pitch: -0.06 };
+  if (!on) { XR.grab = null; if (!XR.hands && !XR.tour) R.clearHands(); }
+  xrCaption(on ? "Move the mouse to point · click to pinch · drag while pinching to pull · shift + move to look around · M room · X exit" : "");
+}
+function pullTo(i, pos) {
+  const cur = R.currentPositions("entities"), to = R.layers.entities.cpu.to.slice();
+  cur.set(pos, i * 3); to.set(pos, i * 3);
+  R.updateTargets("entities", cur, to); R.mix = 1;
+  S.pulled.set(i, pos); pulledUi(); buildLines();
+}
+function viewerBasis() { return R.immersive ? R.headBasis() : R.cameraBasis(); }
+const tanHalf = () => Math.tan((R.immersive ? 1.05 : 0.62) / 2);
+function aspectNow() { return R.immersive ? (canvas.clientWidth / 2) / canvas.clientHeight : canvas.clientWidth / canvas.clientHeight; }
+// a viewer-frame anchor that puts the index fingertip on the line through screen point (sx, sy)
+function anchorForScreen(sx, sy, depth = 0.6) {
+  const nx = sx * 2 - 1, ny = 1 - sy * 2;
+  return [nx * tanHalf() * aspectNow() * depth + 0.03 * HAND_SCALE, ny * tanHalf() * depth - 0.045 * HAND_SCALE, -(depth - 0.16 * HAND_SCALE)];
+}
+function tipRay(J) {   // from the eye through the index fingertip
+  const B = viewerBasis(), tip = J[8], d = tip.map((v, i) => v - B.eye[i]), n = Math.hypot(...d);
+  return { origin: B.eye, dir: d.map(v => v / n), tip };
+}
+function startTour() {
+  if (XR.tour) return;
+  select(-1); putBack();
+  // the record nearest the middle of the view
+  let best = -1, bd = 1e9;
+  const good = new Set(["goal", "hypothesis", "memory", "claim", "decision", "skill"]);
+  S.model.entities.forEach((e, i) => {
+    if (visibility(i) < 0.5) return;
+    const deg = S.model.out[i].length + S.model.inn[i].length;
+    if (!good.has(e.kind) || deg < 1 || deg > 10) return;
+    const [x, y, w] = R.toScreen(R.entityPos(i)); if (w <= 0) return;
+    const d = (x - canvas.clientWidth * 0.5) ** 2 + (y - canvas.clientHeight * 0.45) ** 2;
+    if (d < bd) { bd = d; best = i; }
+  });
+  if (best < 0) return;
+  XR.tour = { t0: performance.now(), target: best, form: S.form, start: R.entityPos(best), theta: R.camera.theta };
+  XR.done = new Set(); R.camera.auto = false;
+}
+function tourStep(t) { let k = 0; while (k + 1 < TOUR.length && TOUR[k + 1].at <= t) k++; return k; }
+const ease = k => k < 0 ? 0 : k > 1 ? 1 : k * k * (3 - 2 * k);
+function runTour(now) {
+  const T = XR.tour, t = (now - T.t0) / 1000, k = tourStep(t), st = TOUR[k];
+  if (st.end) { XR.tour = null; R.camera.auto = true; XR.want = { right: "relaxed", left: null }; xrCaption(XR.hands ? "" : ""); if (!XR.hands && !R.immersive) R.clearHands(); return; }
+  const once = (name, fn) => { if (!XR.done.has(name)) { XR.done.add(name); fn(); } };
+  const tp = R.toScreen(S.pulled.get(T.target) || R.entityPos(T.target));
+  const tx = tp[0] / canvas.clientWidth, ty = tp[1] / canvas.clientHeight;
+  XR.want = { right: st.right || "relaxed", left: st.left || null };
+  if (st.act === undefined) {                       // point: move from rest onto the record
+    XR.aim.right = anchorForScreen(lerpN(0.78, tx, ease(t / 2.2)), lerpN(0.92, ty, ease(t / 2.2)));
+    S.hovered = t > 1.6 ? T.target : -1;
+  } else if (st.act === "select") {
+    XR.aim.right = anchorForScreen(tx, ty);
+    if (t > st.at + 0.5) once("select", () => select(T.target));
+  } else if (st.act === "pull") {
+    const k2 = ease((t - st.at) / 2.0), B = viewerBasis();
+    const end = B.eye.map((e, i) => e + B.f[i] * 1.35 + B.r[i] * 0.22 + B.u[i] * 0.02);
+    pullTo(T.target, T.start.map((v, i) => lerpN(v, end[i], k2)));
+    const sp = R.toScreen(S.pulled.get(T.target));
+    XR.aim.right = anchorForScreen(sp[0] / canvas.clientWidth, sp[1] / canvas.clientHeight, lerpN(0.6, 0.5, k2));
+  } else if (st.act === "release") {
+    XR.aim.right = [XR.anchor.right[0] + 0.03, XR.anchor.right[1] - 0.02, XR.anchor.right[2]];
+  } else if (st.act === "spread") {
+    const k2 = ease((t - st.at - 0.4) / 1.6);
+    XR.aim.right = [lerpN(0.04, 0.2, k2), -0.06, -0.55]; XR.aim.left = [lerpN(-0.04, -0.2, k2), -0.06, -0.55];
+    if (t > st.at + 1.0) once("spread", () => { select(T.target); expand(); });
+  } else if (st.act === "swipe") {
+    const k2 = ease((t - st.at) / 1.6);
+    XR.aim.right = [lerpN(0.26, -0.22, k2), -0.03, -0.55]; XR.roll = -0.9 * Math.sin(k2 * Math.PI) * 0.3;
+    if (t > st.at + 0.9) once("swipe", () => { putBack(); select(-1); setForm(FORMS[(FORMS.indexOf(T.form) + 1) % FORMS.length]); });
+  } else if (st.act === "twist") {
+    const k2 = ease((t - st.at) / 1.8);
+    XR.aim.right = [0.1, -0.05, -0.55]; XR.roll = -1.2 * k2;
+    R.camera.theta = T.theta + 1.1 * k2;
+  } else if (st.act === "reset") {
+    const k2 = ease((t - st.at) / 1.4);
+    XR.roll = 0; XR.aim.right = [0.18, lerpN(-0.04, -0.16, k2), -0.55]; XR.aim.left = [-0.18, lerpN(-0.04, -0.16, k2), -0.55];
+    if (t > st.at + 0.6) once("reset", () => { select(-1); putBack(); setForm(T.form); });
+  }
+  xrCaption(st.cap);
+}
+const lerpN = (a, b, k) => a + (b - a) * k;
+const HAND_SCALE = 1.3;
+function updateHands(now, dt) {
+  if (!xrActive() || !S.model) return;
+  if (XR.tour) runTour(now);
+  else {
+    // the right hand follows the mouse; it points when it is over a record and pinches on click
+    const [mx, my] = XR.mouse;
+    XR.aim.right = R.immersive ? [lerpN(-0.26, 0.34, mx), lerpN(0.06, -0.34, my), -0.48] : anchorForScreen(mx, my);
+    XR.aim.left = R.immersive ? [-0.2, -0.17, -0.5] : null;
+    XR.want.right = XR.down ? "pinch" : (S.hovered >= 0 ? "point" : "relaxed");
+    XR.want.left = R.immersive ? "relaxed" : null;
+    if (!R.immersive) XR.roll *= 0.9;
+  }
+  const kp = 1 - Math.exp(-dt * 14), ka = 1 - Math.exp(-dt * 12);
+  const bones = [], bc = [], joints = [], jc = [];
+  for (const side of ["right", "left"]) {
+    const want = XR.want[side];
+    if (!want) continue;
+    XR.pose[side] = blendPose(XR.pose[side], POSES[want], kp);
+    if (XR.aim[side]) XR.anchor[side] = XR.anchor[side].map((v, i) => lerpN(v, XR.aim[side][i], ka));
+    const J = toWorld(handJoints(XR.pose[side], side === "right" ? 1 : -1), viewerBasis(), XR.anchor[side], side === "right" ? XR.roll : -XR.roll * 0.3, HAND_SCALE);
+    for (const [a, b] of BONES) { bones.push(...J[a], ...J[b]); bc.push(0.97, 0.82, 0.68, 0.72, 0.97, 0.82, 0.68, 0.72); }
+    J.forEach((p, j) => { joints.push(...p); const tip = [4, 8, 12, 16, 20].includes(j); jc.push(1, 0.94, 0.86, tip ? 0.95 : 0.6); });
+    if (side === "right") {
+      // aim from where the fingertip would be when pointing, so a pinch (which curls the finger) does not move it
+      const aim = toWorld(handJoints(POSES.point, 1), viewerBasis(), XR.anchor.right, XR.roll, HAND_SCALE);
+      const ray = { ...tipRay(aim), tip: J[8] }; XR.tip = ray;
+      if (R.immersive && !XR.tour) {        // in the headset view a record is chosen by the ray, not the cursor
+        const h = XR.grab ? XR.grab.i : R.pickRay(ray.origin, ray.dir, 0.07, i => visibility(i) > 0.1);
+        if (h !== S.hovered) { S.hovered = h; updateState(); }
+        if (XR.grab) pullTo(XR.grab.i, ray.origin.map((o, i) => o + ray.dir[i] * XR.grab.dist));
+      }
+      if (XR.want.right === "point" || XR.want.right === "pinch") {
+        const target = S.hovered >= 0 ? R.entityPos(S.hovered) : ray.tip.map((v, i) => v + ray.dir[i] * 1.2);
+        bones.push(...ray.tip, ...target); bc.push(0.53, 0.79, 0.81, 0.4, 0.53, 0.79, 0.81, 0.08);
+      }
+    }
+  }
+  R.setHands(new Float32Array(bones), new Float32Array(bc), new Float32Array(joints), new Float32Array(jc));
+  if (R.immersive && !XR.tour) xrCaption("Move the mouse to point · click to pinch · drag while pinching to pull · shift + move to look around · M room · X exit");
+}
+
 // ------------------------------------------------------------------ pointer
 const canvas = $("#gl");
 let drag = null;
@@ -695,6 +850,15 @@ canvas.addEventListener("contextmenu", e => e.preventDefault());
 const touches = new Map();
 let pinch = 0;
 canvas.addEventListener("pointerdown", e => {
+  XR.down = true;
+  if (R.immersive) {                       // pinch: select what the ray is on, and hold it to pull it
+    if (S.hovered >= 0) {
+      select(S.hovered);
+      const p = R.entityPos(S.hovered), B = R.headBasis();
+      XR.grab = { i: S.hovered, dist: Math.hypot(...p.map((v, i) => v - B.eye[i])) };
+    }
+    return;
+  }
   touches.set(e.pointerId, [e.clientX, e.clientY]);
   if (touches.size === 2) { const [a, b] = [...touches.values()]; pinch = Math.hypot(a[0] - b[0], a[1] - b[1]); drag = null; return; }
   canvas.setPointerCapture(e.pointerId); R.camera.touch();
@@ -702,6 +866,14 @@ canvas.addEventListener("pointerdown", e => {
   drag = { x: e.clientX, y: e.clientY, button: e.button, shift: e.shiftKey, hit, moved: false, meta: e.metaKey || e.ctrlKey };
 });
 canvas.addEventListener("pointermove", e => {
+  const prev = XR.mouse;
+  XR.mouse = [e.clientX / canvas.clientWidth, e.clientY / canvas.clientHeight];
+  if (R.immersive) {
+    if (e.shiftKey) {                      // look around
+      R.head.yaw += (XR.mouse[0] - prev[0]) * 2.2; R.head.pitch = Math.max(-0.7, Math.min(0.6, R.head.pitch - (XR.mouse[1] - prev[1]) * 1.6));
+    }
+    return;
+  }
   if (touches.has(e.pointerId)) touches.set(e.pointerId, [e.clientX, e.clientY]);
   if (touches.size === 2) {
     const [a, b] = [...touches.values()], d = Math.hypot(a[0] - b[0], a[1] - b[1]);
@@ -739,6 +911,8 @@ canvas.addEventListener("pointermove", e => {
 const lift = e => { touches.delete(e.pointerId); if (touches.size < 2) pinch = 0; };
 canvas.addEventListener("pointercancel", e => { lift(e); drag = null; });
 canvas.addEventListener("pointerup", e => {
+  XR.down = false;
+  if (R.immersive) { XR.grab = null; return; }
   lift(e);
   canvas.classList.remove("grabbing");
   if (drag && !drag.moved) {
@@ -895,7 +1069,7 @@ async function startGoal(objective, sel) {
   setTimeout(() => setForm("execution"), 900);
 }
 function help() {
-  toast("1–8 forms · drag to turn · right-drag to move · wheel to zoom · click a point to inspect · ⌘-click a second for the path between · drag a point out to keep it · I isolate · E expand · P put back · [ ] size · L light · / search or ask (end with ?) · T test a skill · V speak · : commands", 9000);
+  toast("1–8 forms · drag to turn · right-drag to move · wheel to zoom · click a point to inspect · ⌘-click a second for the path between · drag a point out to keep it · I isolate · E expand · P put back · [ ] size · L light · / search or ask (end with ?) · T test a skill · V speak · G hands · H gesture tour · X headset preview · : commands", 9000);
 }
 
 document.addEventListener("keydown", e => {
@@ -903,7 +1077,7 @@ document.addEventListener("keydown", e => {
   const n = +e.key;
   if (n >= 1 && n <= FORMS.length) setForm(FORMS[n - 1]);
   else if (e.key === "/" || e.key === ":") { e.preventDefault(); q.focus(); if (e.key === ":") { q.value = ":"; showCommands(":"); } }
-  else if (e.key === "Escape") { S.isolate = false; select(-1); clearSearch(); }
+  else if (e.key === "Escape") { if (R.immersive) setImmersive(false); S.isolate = false; select(-1); clearSearch(); }
   else if (e.key === "i" || e.key === "I") toggleIsolate();
   else if (e.key === "e" || e.key === "E") expand();
   else if (e.key === "p" || e.key === "P") putBack();
@@ -914,6 +1088,14 @@ document.addEventListener("keydown", e => {
   else if (e.key === "?") help();
   else if (e.key === "t" || e.key === "T") { const sel = S.selected >= 0 ? S.model.entities[S.selected] : null; if (sel?.kind === "skill") startAssessment(sel); }
   else if (e.key === "v" || e.key === "V") listen();
+  else if (e.key === "g" || e.key === "G") setHands(!XR.hands);
+  else if (e.key === "h" || e.key === "H") startTour();
+  else if (e.key === "x" || e.key === "X") setImmersive(!R.immersive);
+  else if ((e.key === "m" || e.key === "M") && R.immersive) { R.showRoom = !R.showRoom; xrCaption(""); }
+  else if (R.immersive && e.key.startsWith("Arrow")) {
+    if (e.key === "ArrowLeft") R.head.yaw -= 0.08; if (e.key === "ArrowRight") R.head.yaw += 0.08;
+    if (e.key === "ArrowUp") R.head.pitch = Math.min(0.6, R.head.pitch + 0.06); if (e.key === "ArrowDown") R.head.pitch = Math.max(-0.7, R.head.pitch - 0.06);
+  }
 });
 
 // ------------------------------------------------------------------ assessments: written and marked by MAYANK
@@ -1070,8 +1252,9 @@ function frame(now) {
     let any = false;
     for (let i = 0; i < S.act.length; i++) if (S.act[i] > 0.002) { S.act[i] *= Math.exp(-dt / 2.4); any = true; }
     if (any || R.morphing) updateState();
+    updateHands(now, dt);
     R.draw(now / 1000, dt);
-    renderLabels();
+    if (R.immersive) labelsEl.innerHTML = ""; else renderLabels();
   }
   frames++;
   if (now - fpsT > 1000) {
@@ -1126,6 +1309,9 @@ window.__mayank = {
   ask: (text, opts) => askMayank(text, opts), assess: id => startAssessment(S.model.entities[S.model.byId.get(id)]),
   get assessment() { return A ? { q: A.item.q, answer: A.item.answer, kind: A.item.kind, d: A.d, n: A.n, right: A.right } : null; },
   get highlighted() { return [...S.search.keys()].map(i => S.model.entities[i].id); },
+  get xr() { return { hands: XR.hands, immersive: R.immersive, room: R.showRoom, tour: XR.tour ? TOUR[tourStep((performance.now() - XR.tour.t0) / 1000)].cap : null,
+                      handJoints: R.handPts ? R.handPts.count : 0, hovered: S.hovered >= 0 ? S.model.entities[S.hovered].id : null }; },
+  setHands, setImmersive, startTour,
 };
 requestAnimationFrame(frame);
 start();

@@ -38,7 +38,7 @@ from pcim.tasks import TaskQueue  # noqa: E402
 from pcim.workspace import Workspace  # noqa: E402
 
 DASH = REPO / "src" / "pcim" / "dashboard"
-ASSETS = ("mayank-app.js", "mayank-gl.js", "mayank-forms.js", "mayank-learn.js")
+ASSETS = ("mayank-app.js", "mayank-gl.js", "mayank-forms.js", "mayank-learn.js", "mayank-xr.js")
 
 
 def record(steps: int, pause: float) -> tuple[dict, dict]:
