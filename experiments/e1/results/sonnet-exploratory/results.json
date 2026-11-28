@@ -392,7 +392,7 @@
       "precision": null,
       "recall": 0.0,
       "prompt_sha256": "eda467ddc8c20e182319d1ab8dc897b06967a90931ffe4fab4696a451a98e85f",
-      "response": "I don't know where you live, so I can't recommend a specific space. Tell me your city or neighborhood and I'll suggest one (if you're near Northeastern in Boston, for example, I could point you to options in that area).",
+      "response": "[redacted 2026-11-28: this model answer named the institution behind the owner's email domain (safety audit H3)]",
       "served_model": "claude-sonnet-5-5",
       "cost_usd": 0.0034471,
       "tokens_in": 656,
