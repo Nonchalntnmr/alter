@@ -51,6 +51,31 @@ def tested_current_files(test, root):
     return current is not None and current == test['result']['confinement']['snapshot_sha256']
 
 
+# Both gates order tasks by when they ran, not when they were proposed, as goals.verify_tasks does:
+# with approvals, a test proposed before a write can run after it, and two writes to one file can
+# land in either order.
+def _at(task, key):
+    return task.get(key) or task.get('updated_at') or task['created_at']
+
+
+def _current_writes(writes):
+    """The write that landed last for each path. An earlier write to the same path is superseded by
+    ALTER's own later write, not stale; its bytes are meant to be gone."""
+    latest = {}
+    for t in sorted(writes, key=lambda t: (_at(t, 'finished_at'), t['created_at'], t['id'])):
+        latest[t['args']['path']] = t
+    return latest
+
+
+def _last_test(tests):
+    return max(tests, key=lambda t: (_at(t, 'started_at'), t['created_at'], t['id'])) if tests else None
+
+
+def _ran_after_writes(test, writes):
+    """The test STARTED after the last write FINISHED."""
+    return not writes or _at(test, 'started_at') > max(_at(w, 'finished_at') for w in writes)
+
+
 class Coordinator:
     def __init__(self, ci, ws, queue, agent):
         self.ci, self.ws, self.queue, self.agent = ci, ws, queue, agent
@@ -66,7 +91,7 @@ class Coordinator:
         tests = [t for t in tasks if verified_test(t)]
         artifacts = []
         auth = self.ws.workspace_auth(uid, pid)
-        for t in writes:
+        for t in _current_writes(writes).values():
             path, sha = t['args']['path'], (t.get('result') or {}).get('sha256_after')
             try:
                 actual = hashlib.sha256(jail(auth['spec']['root'], path).read_bytes()).hexdigest()
@@ -84,9 +109,10 @@ class Coordinator:
             problems.append('no attributable file artifact')
         if not required <= {a['path'] for a in artifacts}:
             problems.append('required artifacts missing from successful writes')
-        if work['require_tests'] and (not tests or (writes and tests[-1]['created_at'] < writes[-1]['created_at'])):
+        last_test = _last_test(tests)
+        if work['require_tests'] and (not last_test or not _ran_after_writes(last_test, writes)):
             problems.append('no successful tests after last write')
-        elif work['require_tests'] and not tested_current_files(tests[-1], auth['spec']['root']):
+        elif work['require_tests'] and not tested_current_files(last_test, auth['spec']['root']):
             problems.append('the files that passed the tests are not the current files')
         if not artifacts and not tests:
             problems.append('no executed artifact or test receipt')
@@ -144,9 +170,7 @@ class Coordinator:
             all_tasks.extend(self.tasks(uid, pid, a['session_id']))
         writes = [t for t in all_tasks if t['tool'] == 'write_file' and t['status'] == 'succeeded']
         tests = [t for t in all_tasks if verified_test(t)]
-        latest = {}
-        for t in sorted(writes, key=lambda t: t['created_at']):
-            latest[t['args']['path']] = t
+        latest = _current_writes(writes)
         auth = self.ws.workspace_auth(uid, pid)
         fresh = True
         for path, t in latest.items():
@@ -158,8 +182,9 @@ class Coordinator:
         exported = {f['file']: f['sha256'] for f in export['files']}
         fresh &= export['accepted'] and all(exported.get(path) == t['result']['sha256_after']
                                              for path, t in latest.items())
-        after = bool(tests) and (not writes or max(t['created_at'] for t in tests) > max(t['created_at'] for t in writes))
-        after = after and tested_current_files(max(tests, key=lambda t: t['created_at']), auth['spec']['root'])
+        last_test = _last_test(tests)
+        after = (last_test is not None and _ran_after_writes(last_test, writes)
+                 and tested_current_files(last_test, auth['spec']['root']))
         run['verification'] = {'export': export, 'artifacts_current': bool(latest) and fresh, 'tests_after_writes': after,
                                'scope': 'executor file hashes and configured test receipts; not independent product acceptance',
                                'test_double': any(a['route']['test_double'] for a in run['attempts'] if a.get('route'))}
