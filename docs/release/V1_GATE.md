@@ -258,3 +258,25 @@ and C10 has one event.
 3. **Who else takes part** (up to 4 more), and who pays for their model use.
 4. **Who checks the analysis.** It should be someone other than the implementer. The implementer
    may compute numbers from the exports, but does not rate success or code free text.
+
+**Decided by the owner on 2026-11-28, before any pilot data:**
+1. **Thresholds: unchanged.**
+   - C5: a median of at most 3 approvals and answers per finished goal.
+   - C6: at most $5.00 per verified goal, with unknown cost on at most 10% of goals.
+   - C7: a median of at most 120 s to the first useful response.
+2. **C7 is accepted as it measures today:** from the request to the first checkpoint carrying model
+   text. If it fails, the remedy is progress shown within a turn, not a higher threshold (§3).
+3. **Participants:** P01, the owner, and at least one more, ideally two (P02, P03), recruited by
+   the owner (`PILOT.md` §1).
+   - Each works on their own machine, with their own Claude account. Model use is billed to that
+     account, under the participant's own cost cap.
+   - Any reimbursement is agreed before setup and stated in that participant's consent note.
+4. **The analysis checker** is a person who is neither the owner nor an implementer. A Claude or
+   Codex session that built ALTER is an implementer.
+   - The owner chooses the checker before the analysis starts.
+   - The name stays with the owner, outside the repository.
+5. **Pilot tasks go through goals only** (`PILOT.md` §4), added after the pilot dry run. That means
+   `alter "…"` or the `alter` conversation.
+   - `alter report` counts only goals, so work done through `alter runs`, `ci do`, the web dashboard
+     or MAYANK (`:goal`, `:do`, ask, debates) would not be measured.
+   - Looking at MAYANK or the dashboard is fine.
