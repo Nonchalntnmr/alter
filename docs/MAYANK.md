@@ -211,11 +211,13 @@ Gestures:
 Pinch detection uses hysteresis so it doesn't flicker, and swipes have a cooldown.
 
 **Two models debate (`:debate <claim>`).** Two models take opposite sides of a claim, citing your
-records. When your Claude login is permitted, Sonnet argues for and Opus against; otherwise ALTER's
-routing chooses.
+records. The server picks them: Sonnet argues for, Opus against and Haiku judges, through the Claude CLI
+if it is installed, else the Anthropic API if a key is set, and only if you allow Anthropic. Otherwise
+ALTER's routing chooses each turn's model, which may be one model playing every part; each turn shows
+which model served it either way.
 - They alternate for four turns, each answering the other's strongest point and ending with its
   honest estimate.
-- A third model (Haiku) judges which arguments the evidence supports.
+- A third model judges which arguments the evidence supports.
 - The debate appears as a peak on the hypotheses landscape, with its arguments on either side and the
   records each side was sent.
 - That is five routed model calls, and the page asks first.

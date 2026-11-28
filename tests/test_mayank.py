@@ -396,6 +396,26 @@ def test_a_debate_runs_turn_by_turn_and_reaches_the_field(world):
     assert mayank._p("long argument\nP(claim holds) = 0.35") == 0.35 and mayank._p("no estimate") is None
 
 
+def test_a_debate_gets_three_different_models_only_when_it_may(world, monkeypatch):
+    """Consent is stored per vendor: allowing claude-cli records a grant for "anthropic". The page once looked
+    for a "claude-cli" grant, never found one, and every part of a real debate went to the same model."""
+    from pcim import registry
+    ci = world["ci"]
+    monkeypatch.setattr(registry, "availability", lambda e: (e.provider in ("claude-cli", "mock"), "test"))
+    assert mayank.debate_start(ci, "ana", "Trees cool streets")["models"] == [None, None, None]   # only mock allowed
+    ci.consent("ana", "user", "egress", "claude-cli")
+    assert {g.provider for g in ci.ledger.grants("ana")} >= {"anthropic"}
+    assert mayank.debate_start(ci, "ana", "Trees cool streets")["models"] == [
+        "claude-cli:sonnet", "claude-cli:opus", "claude-cli:haiku"]
+    pinned = ["claude-cli:opus", None, None]                                                  # a choice is kept
+    assert mayank.debate_start(ci, "ana", "Trees cool streets", pinned)["models"] == pinned
+    monkeypatch.setattr(registry, "availability", lambda e: (e.provider in ("anthropic", "mock"), "test"))
+    assert mayank.debate_start(ci, "ana", "Trees cool streets")["models"] == [
+        "anthropic:claude-sonnet-5-5", "anthropic:claude-opus-5-5", "anthropic:claude-haiku-5-5"]
+    monkeypatch.setattr(registry, "availability", lambda e: (e.provider == "mock", "test"))
+    assert mayank.debate_start(ci, "ana", "Trees cool streets")["models"] == [None, None, None]   # none installed
+
+
 def test_the_time_lapse_has_what_it_needs(world):
     from pcim.types import Trust
     world["ci"].remember("ana", "Study hour: noon", "fact", key="study_hour", value="noon", trust=Trust.INFERRED, confidence=0.6)

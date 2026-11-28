@@ -1405,29 +1405,24 @@ $("#cam-yes").onclick = async () => {
 };
 
 // ------------------------------------------------------------------ two models debate
-async function debateModels() {
-  try {
-    const grants = await api("/v1/consent");
-    const providers = new Set(grants.filter(g => g.active).map(g => g.provider));
-    if (providers.has("claude-cli")) return ["claude-cli:sonnet", "claude-cli:opus", "claude-cli:haiku"];
-  } catch (_) {}
-  return [null, null, null];            // ALTER's routing chooses
-}
 async function startDebate(claim) {
   if (STATIC) { toast(READONLY); return; }
   claim = (claim || "").replace(/^\[demo\]\s*/, "").trim();
   if (!claim) { toast("Say the claim: :debate <claim>"); return; }
   if (!confirmModel()) return;
-  const models = await debateModels();
   const panel = $("#debate");
-  const head = `<button class="x" id="deb-close">×</button><span class="caps">two models debate</span><h3>${esc(claim)}</h3>
-    <div class="meta"><span>for: <b>${esc(models[0] || "ALTER's choice")}</b></span><span>against: <b>${esc(models[1] || "ALTER's choice")}</b></span><span>judge: <b>${esc(models[2] || "ALTER's choice")}</b></span></div>`;
-  let turns = "";
+  const top = caps => `<button class="x" id="deb-close">×</button><span class="caps">${caps}</span><h3>${esc(claim)}</h3>`;
+  let head = top("debate"), turns = "";
   const draw = (tail = "") => { panel.innerHTML = head + turns + tail; panel.classList.add("show"); $("#deb-close").onclick = () => panel.classList.remove("show"); };
   draw(`<div class="note">Opening the debate…</div>`);
   setForm("hypotheses");
   try {
-    const d = await api("/v1/mayank/debates", { method: "POST", body: { claim, models } });
+    // ALTER picks the models: different ones for each side and the judge when it has them and you allow
+    // their vendor, otherwise its routing chooses each turn (and every turn says what served it).
+    const d = await api("/v1/mayank/debates", { method: "POST", body: { claim } });
+    const m = d.models || [];
+    head = top(m[0] && m[1] && m[0] !== m[1] ? "two models debate" : "debate · ALTER chooses each turn's model") +
+      `<div class="meta"><span>for: <b>${esc(m[0] || "ALTER's choice")}</b></span><span>against: <b>${esc(m[1] || "ALTER's choice")}</b></span><span>judge: <b>${esc(m[2] || "ALTER's choice")}</b></span></div>`;
     for (let k = 0; k < 4; k++) {
       draw(`<div class="note">${k % 2 ? "AGAINST" : "FOR"} is thinking…</div>`);
       const t = await api(`/v1/mayank/debates/${d.id}/turn`, { method: "POST" });

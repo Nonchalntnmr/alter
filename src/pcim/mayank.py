@@ -703,12 +703,33 @@ def _p(text: str):
     return float(m.group(1)) if m else None
 
 
+# For, against, judge: a different model on each side and a third to judge.
+DEBATE_TRIOS = (
+    ("claude-cli:sonnet", "claude-cli:opus", "claude-cli:haiku"),
+    ("anthropic:claude-sonnet-5-5", "anthropic:claude-opus-5-5", "anthropic:claude-haiku-5-5"),
+)
+
+
+def debate_models(ci, uid: str) -> list:
+    """The first trio this machine can run and whose vendor the person allows; otherwise None for each part,
+    so ALTER's routing chooses (one model may then play every part; each turn records what served it).
+    Decided here because consent is recorded per vendor (a claude-cli grant is stored as "anthropic"), which
+    the page cannot work out from the grant list."""
+    from . import registry
+    allowed = ci.authorized_vendors(uid)
+    usable = {e.key for e in registry.entries()
+              if not e.test_double and e.vendor in allowed and registry.availability(e)[0]}
+    return next((list(t) for t in DEBATE_TRIOS if usable.issuperset(t)), [None, None, None])
+
+
 def debate_start(ci, uid: str, claim: str, models=(None, None, None)) -> dict:
     """Two models take opposite sides of a claim, citing the person's own records; a third judges."""
     claim = " ".join(str(claim or "").split())[:500]
     if len(claim) < 3:
         raise ValueError("the claim is empty")
     models = list(models or (None, None, None))[:3] + [None] * (3 - len(list(models or [])[:3]))
+    if not any(models):
+        models = debate_models(ci, uid)
     from . import registry
     ok = {r["key"] for r in registry.describe({}) if r.get("available")}
     for m in models:
