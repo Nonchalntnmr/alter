@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Literal
 
 import httpx
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -169,6 +169,20 @@ class GrantIn(BaseModel):
 class PrefIn(BaseModel):
     topic: str = Field(min_length=1, max_length=60)
     value: str = Field(min_length=1, max_length=300)
+
+
+class HypothesisIn(BaseModel):
+    claim: str = Field(min_length=3, max_length=2000)
+    project_id: str | None = None
+
+
+class HypothesisOutcomeIn(BaseModel):
+    outcome: Literal["held", "failed", "inconclusive"]
+    note: str | None = Field(default=None, max_length=500)
+
+
+class HypothesisEvidenceIn(BaseModel):
+    evidence: str = Field(min_length=3, max_length=1500)
 
 
 def _item_out(i) -> dict:
@@ -634,9 +648,53 @@ def create_app(ci: PersonalCI, *, run_service=None) -> FastAPI:
     def preference(body: PrefIn, uid: str = Depends(user)):
         return guard(agent.set_collaboration_preference, uid, body.topic, body.value)
 
+    # ------------------------------------------------------------------ MAYANK (/mayank)
+    # The field the page draws, its search, and the audit chain as a live feed. Every action the
+    # page takes goes through the routes above (approve, deny, pause, steer, halt, probe), so
+    # MAYANK has no authority of its own.
+    from . import challenge as challenge_mod
+    from . import mayank
+
+    def runs_or_none():
+        try:
+            return runs()
+        except HTTPException:
+            return None
+
+    def field_kw():
+        return {"ws": ws, "queue": queue, "ledger": ledger, "runs": runs_or_none()}
+
+    @app.get("/v1/mayank/field")
+    def mayank_field(uid: str = Depends(user)):
+        return mayank.field(ci, uid, **field_kw())
+
+    @app.get("/v1/mayank/search")
+    def mayank_search(q: str = Query(..., max_length=300), k: int = 24, uid: str = Depends(user)):
+        return mayank.search(ci, uid, q, k=k, **field_kw())
+
+    @app.get("/v1/mayank/events")
+    def mayank_events(after: int = 0, wait: float = 20.0, uid: str = Depends(user)):
+        return mayank.events(ci, uid, after, wait)
+
+    @app.post("/v1/mayank/hypotheses")
+    def mayank_challenge(body: HypothesisIn, uid: str = Depends(user)):
+        return guard(challenge_mod.challenge, ci, uid, body.claim, project_id=body.project_id)  # 409: routing refused
+
+    @app.post("/v1/mayank/hypotheses/{cid}/resolve")
+    def mayank_resolve(cid: str, body: HypothesisOutcomeIn, uid: str = Depends(user)):
+        return guard(challenge_mod.resolve, ci, uid, cid, body.outcome, body.note)
+
+    @app.post("/v1/mayank/hypotheses/{cid}/evidence")
+    def mayank_rebut(cid: str, body: HypothesisEvidenceIn, uid: str = Depends(user)):
+        return guard(mayank.challenge_with_evidence, ci, uid, cid, body.evidence)
+
     dash = Path(str(resources.files("pcim") / "dashboard"))
     if dash.exists():
         app.mount("/static", StaticFiles(directory=dash), name="static")
+
+        @app.get("/mayank", response_class=HTMLResponse)
+        def mayank_page():
+            return (dash / "mayank.html").read_text()
 
         @app.get("/", response_class=HTMLResponse)
         def index():
