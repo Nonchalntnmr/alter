@@ -176,6 +176,11 @@ def cmd_init(argv: list[str]) -> int:
           "first unless you grant autonomy.")
     print("  tests run " + ("only in a verified Linux sandbox (refused where none is available)" if a.confine_tests
                             else "on this machine, unconfined, after you approve them"))
+    if a.confine_tests:
+        from .sandbox import unavailable_reason
+        why = unavailable_reason()
+        print("  the sandbox works here: bubblewrap passed the confinement probe" if why is None else
+              f"  so no test can run here: {why}")
     print(f"  model providers that may see this project: {', '.join(ws.provider_vendors(uid, p.id)) or 'none'}")
     print("  goal outcomes are " + ("not stored" if a.no_memory else "stored in your memory (alter memory; forget any)"))
     if not set(ws.provider_vendors(uid, p.id)) - {"mock"}:
