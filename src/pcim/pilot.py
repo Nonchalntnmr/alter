@@ -191,6 +191,8 @@ def compute(ci, uid: str, days: int | None = 30, project_id: str | None = None, 
             "paused": g.id in paused,  # parked as paused, whatever the cause (the audit's goal.park)
             "interruptions": len(g.payload.get("interruptions") or []) + (shown == "interrupted"),
             "identifier_files": file_hits, "identifier_scan_failed": scan_failed,
+            "corrects": g.payload.get("corrects"),  # a follow-up to the person's correction of that goal
+            "done_by": g.payload.get("done_by") or ("alter" if g.status == "done" else None),
         })
 
     fin = [r for r in rows if r["final"]]
@@ -231,6 +233,8 @@ def compute(ci, uid: str, days: int | None = 30, project_id: str | None = None, 
         "verified_done": _rate(verified, len(fin)),
         "done_nothing_changed": sum(r["status"] == "done" and r["verdict"] == "unchanged" for r in fin),
         "false_done": {"n": len(false_done), "goals": false_done},
+        "corrections": {"follow_ups": sum(bool(r["corrects"]) for r in rows),
+                        "done_on_your_word": [r["goal"] for r in fin if r["done_by"] == "person"]},
         "identifiers": {"goals_with_hits": len(flagged), "files": sum(r["identifier_files"] for r in flagged),
                         "goals": [r["goal"] for r in flagged],
                         "scanned_goals": sum(r["identifier_files"] is not None for r in wrote_files),
@@ -312,6 +316,8 @@ def render(rep: dict, where: str) -> str:
         f"{rep['done_nothing_changed']}",
         f"False done (done without a verified or unchanged verdict): {rep['false_done']['n']}"
         + (f" ({', '.join(rep['false_done']['goals'])})" if rep["false_done"]["n"] else ""),
+        f"Follow-ups to your corrections: {rep['corrections']['follow_ups']} · done on your word (alter goals "
+        f"accept): {len(rep['corrections']['done_on_your_word'])}",
         f"Identifiers written into files (C10): {ids['files']} file(s) in {ids['goals_with_hits']} goal(s)"
         + (f" ({', '.join(ids['goals'])}: review before you commit)" if ids["files"] else "")
         + f" · {ids['scanned_goals']} scanned · {ids['unscanned_goals']} unscanned · {ids['scan_failures']} failed",

@@ -34,6 +34,14 @@ grant covers them (`alter permissions autonomy grant`).
   - The words can only withhold "done", never grant it.
   - eval_v7 found the case this closes: a goal added a helper that nothing calls, its own tests
     passed, and it ended `done` while its report said the preview was unchanged.
+- **A correction.** `alter say <goal> "…"` to a finished goal (`/fix …` in the `alter` conversation)
+  starts a follow-up goal that records the goal it corrects. If the follow-up changes nothing, it
+  waits for the person, whatever its outcome line says: its "reached" is the claim the person has
+  just rejected.
+  - eval_v8 found the case this closes (P01-t04): a follow-up after two corrections changed nothing,
+    said `Outcome: reached`, and ended `done` through the nothing-changed path.
+  - `alter goals accept <goal>` closes a goal that waits for you as done, on your word. It is
+    recorded as yours (`done_by: person`), never as ALTER's "done".
 
 **Learning.**
 - When a goal ends, its outcome is written to memory as an episode with full provenance (goal,
@@ -417,6 +425,41 @@ class GoalRunner:
         self._set_context(g, brief)
         return g
 
+    def correct(self, prev: Goal, correction: str) -> Goal:
+        """A follow-up goal from the person's correction of a finished goal: the request with every
+        correction so far, the same model while this project still allows its vendor, and the limits
+        the person gave. It records the goal it corrects, which `_after` reads."""
+        from .registry import vendor_of
+        correction = " ".join((correction or "").split())
+        if not correction:
+            raise GoalError(f'say what is still wrong: alter say {prev.id} "…"')
+        if prev.status not in FINAL:
+            raise GoalError(f"goal {prev.id} is {prev.status}: alter say adds to it while it runs")
+        provider, model = prev.payload.get("provider"), prev.payload.get("model")
+        try:
+            same = provider is not None and vendor_of(provider) in self.here.vendors
+        except ValueError:
+            same = False
+        g = self.start(f"{prev.objective}\n\nThat is not what I wanted yet: {correction}",
+                       provider=provider if same else None, model=model if same else None,
+                       use_github=prev.payload.get("use_github"), use_vault=prev.payload.get("use_vault"),
+                       **{k: prev.payload.get(k) for k in DEFAULTS})
+        g.payload["corrects"] = prev.id
+        self.gs.save(g)
+        self.ci.audit.append(self.uid, "goal.correct", goal=g.id, corrects=prev.id)
+        return g
+
+    def accept(self, gid: str) -> Goal:
+        """The person closes a goal that waits for their answer as done, on their own word. Recorded as
+        theirs (`done_by: person`), so a report never counts it as ALTER's "done". No model call."""
+        g = self.gs.get(self.uid, gid)
+        if g.status != "waiting_answer":
+            raise GoalError(f"goal {gid} is {g.status}: only a goal that waits for your answer can be accepted")
+        if self.gs.is_live(gid):
+            raise GoalError(f"goal {gid} is running")
+        g.payload["done_by"] = "person"
+        return self._finish(g, "done", "you accepted it")
+
     def _project_blocker(self, g: Goal | None) -> str | None:
         """One goal at a time per project folder: the agent keeps one open session per project, and a new
         session for one goal would close another's, with any approval it waits on."""
@@ -678,6 +721,12 @@ class GoalRunner:
                 self._finish(g, "stopped", f"{len(refused)} change(s) were refused, not allowed or expired; "
                                            "no file was changed")
                 return "stop"
+            if g.payload.get("corrects"):
+                # A follow-up to the person's correction that changed nothing: its "reached" is the claim the
+                # person has just rejected (eval_v8, P01-t04), so the person decides, not the model.
+                self._park(g, "waiting_answer", f"nothing changed after your correction to {g.payload['corrects']}; "
+                           f"check it: alter goals accept {g.id} if it is right, or alter say {g.id} \"…\"")
+                return "stop"
             self._finish(g, "done", "answered; no file was changed")
             return "stop"
         if g.payload["nudges"] < MAX_NUDGES and g.payload["turns"] < g.payload["max_turns"]:
@@ -869,6 +918,8 @@ def report(ci, uid: str, g: Goal, gs: GoalStore | None = None) -> str:
     cost = sum(c for c in g.payload["session_costs"].values() if c is not None)
     out = [f"Goal {g.id}: {gs.shown_status(g)}" + (f" ({g.payload['reason']})" if g.payload.get("reason") else ""),
            f"  objective: {g.objective}",
+           *([f"  corrects: {g.payload['corrects']} (a follow-up to your correction)"] if g.payload.get("corrects") else []),
+           *(["  done on your word (alter goals accept)"] if g.payload.get("done_by") == "person" else []),
            f"  turns {g.payload['turns']}/{g.payload['max_turns']} · cost ${cost:.2f}"
            f"{'+' if g.payload['cost_unknown'] else ''} of ${g.payload['max_cost_usd']:.2f}"]
     if g.payload.get("context"):

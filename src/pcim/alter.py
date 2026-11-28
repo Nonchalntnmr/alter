@@ -15,7 +15,10 @@
                 | say RUN "…" | advance RUN | approve RUN TASK | deny RUN TASK] [--json]
                                            shared specialist execution; same state as the web dashboard
     alter goals [list | show ID | start "…" [--background] | resume ID [--background]
-                 | say ID "…" | pause ID | cancel ID | forget ID]
+                 | say ID "…" | pause ID | cancel ID | accept ID | forget ID]
+    alter say GOAL "…"                     tell a goal something; to a finished goal it is a correction:
+                                           a follow-up goal that waits for you if it changes nothing
+                                           (alter goals accept GOAL closes a waiting goal as done, on your word)
     alter approve [TASK] · alter deny [TASK] ["why"]
                                            resolve what a goal waits on (no TASK: everything it waits on)
     alter tasks                            actions waiting for you, and the last actions in this project
@@ -511,7 +514,7 @@ def start_goal(ci, uid, here, objective: str, *, background: bool = False, limit
 def cmd_goals(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(prog="alter goals")
     ap.add_argument("action", nargs="?", default="list",
-                    choices=["list", "show", "start", "resume", "say", "pause", "cancel", "forget"])
+                    choices=["list", "show", "start", "resume", "say", "pause", "cancel", "accept", "forget"])
     ap.add_argument("rest", nargs="*")
     ap.add_argument("--background", action="store_true")
     ap.add_argument("--all", action="store_true", help="list goals of every project")
@@ -563,6 +566,14 @@ def cmd_goals(argv: list[str]) -> int:
         return 0
     if a.action in ("say", "pause", "cancel"):
         return _event(ci, uid, g, {"say": "steer"}.get(a.action, a.action), " ".join(a.rest[1:]))
+    if a.action == "accept":  # the person's word closes a waiting goal; no model call
+        try:
+            g = G.GoalRunner(ci, uid, G.here_for(ci, uid, g.project_id), out=lambda s: None).accept(g.id)
+        except G.GoalError as e:
+            print(f"alter: {e}", file=sys.stderr)
+            return 2
+        print(f"Goal {g.id} is done: you accepted it.")
+        return 0
     # resume
     h = G.here_for(ci, uid, g.project_id)
     if g.status in G.FINAL:
@@ -583,6 +594,8 @@ def _event(ci, uid, g: G.Goal, kind: str, text: str = "") -> int:
     if kind == "steer" and not text.strip():
         print('usage: alter say <goal> "what to change"', file=sys.stderr)
         return 2
+    if kind == "steer" and g.status in G.FINAL:  # a correction: a follow-up goal that knows what it corrects
+        return _correct(ci, uid, g, text)
     try:
         gs.add_event(uid, g.id, kind, text)
     except G.GoalError as e:
@@ -598,6 +611,21 @@ def _event(ci, uid, g: G.Goal, kind: str, text: str = "") -> int:
     return 0
 
 
+def _correct(ci, uid, prev: G.Goal, text: str) -> int:
+    """`alter say` to a finished goal: a follow-up goal with the correction, in that goal's own project
+    folder, worked on now like `alter "…"`."""
+    try:
+        here = G.here_for(ci, uid, prev.project_id)
+        g = G.GoalRunner(ci, uid, here).correct(prev, text)
+    except G.GoalError as e:
+        print(f"alter: {e}", file=sys.stderr)
+        return 2
+    c = g.payload["context"]
+    print(f"ALTER: goal {g.id} follows up goal {prev.id} ({prev.status}) with your correction · context: "
+          f"{c['remembered']} remembered, {c['sourced']} sourced")
+    return _run_foreground(ci, uid, here, g)
+
+
 def cmd_event(kind: str, argv: list[str]) -> int:
     ci, uid, here = _ctx()
     if argv and not (here is not None and kind == "steer" and len(argv) == 1):
@@ -606,7 +634,10 @@ def cmd_event(kind: str, argv: list[str]) -> int:
     else:
         g = _latest_active(ci, uid, here) if here else None
         if g is None:
-            print(f"alter: no active goal here; name one: alter {'say' if kind == 'steer' else kind} <goal>",
+            last = G.GoalStore(ci).list(uid, here.project_id, limit=1) if here and kind == "steer" else []
+            hint = (f'; to correct the last one ({last[0].id}, {last[0].status}): alter say {last[0].id} "…"'
+                    if last and last[0].status in G.FINAL else "")
+            print(f"alter: no active goal here; name one: alter {'say' if kind == 'steer' else kind} <goal>{hint}",
                   file=sys.stderr)
             return 2
     return _event(ci, uid, g, kind, " ".join(argv))
@@ -1017,6 +1048,8 @@ HELP = """Type a goal or a question in plain words. While a goal runs you can ke
   say anything      → added to the running goal at its next step
   "status" / "what have you finished?"  → what the records show (no model call)
   "pause" · "resume" · "cancel" · "yes" / "no" (approve or refuse what it waits on)
+  /fix <what is wrong>  correct the last finished goal: a follow-up that waits for you if it changes nothing
+  /accept  close the goal that waits for your answer as done, on your word
   /new <goal>  start another goal · /goals · /context · /status · /memory · /quit"""
 
 
@@ -1056,6 +1089,10 @@ class Conversation:
                                        + "."))
                 for t in G.pending_tasks(self.ci, self.uid, g):
                     self.out(terminal_safe(f"  waiting for you: {t['tool']} {t['what']}  (say yes or no)"))
+                if g.status in ("done", "unverified") and g.payload.get("done_by") != "person":
+                    self.out("  not what you wanted? /fix what is wrong (a new message starts a new goal)")
+                if g.status == "waiting_answer" and g.payload.get("corrects"):
+                    self.out("  right after all? /accept · otherwise say what is still wrong")
                 if g.status in G.FINAL:
                     self.watching = None
             self._last_status = shown
@@ -1068,6 +1105,38 @@ class Conversation:
     def _spawn(self, g: G.Goal, resume: bool = False) -> None:
         G.spawn_worker(self.ci, g.id, self.here.root, g.payload["window_s"], resume=resume)
         self.watch(g.id)
+
+    def _fix(self, what: str) -> bool:
+        """`/fix …`: a correction of the last goal in this project, once it has finished."""
+        if self.here is None:
+            self.out("ALTER: /fix works in a project folder.")
+            return True
+        last = self.gs.list(self.uid, self.here.project_id, limit=1)
+        if not last or last[0].status not in G.FINAL:
+            self.out("ALTER: " + ("the last goal here has not finished: say it to that goal directly." if last
+                                  else "there is no goal here to correct yet."))
+            return True
+        try:
+            g = G.GoalRunner(self.ci, self.uid, self.here, out=lambda s: None).correct(last[0], what)
+        except G.GoalError as e:
+            self.out(f"ALTER: {e}")
+            return True
+        self.out(f"ALTER: on it (goal {g.id}, a follow-up to {last[0].id} with your correction).")
+        self._spawn(g)
+        return True
+
+    def _accept(self) -> bool:
+        g = self.active()
+        if g is None or g.status != "waiting_answer":
+            self.out("ALTER: no goal here waits for your answer.")
+            return True
+        try:
+            g = G.GoalRunner(self.ci, self.uid, self.here, out=lambda s: None).accept(g.id)
+        except G.GoalError as e:
+            self.out(f"ALTER: {e}")
+            return True
+        self.out(f"ALTER: goal {g.id} is done: you accepted it.")
+        return True
 
     def handle(self, line: str) -> bool:
         """One utterance. Returns False to end the conversation."""
@@ -1087,6 +1156,10 @@ class Conversation:
         if self.here is None:
             cmd_ask([text])
             return True
+        if text.startswith("/fix ") or text == "/fix":
+            return self._fix(text[5:])
+        if text == "/accept":
+            return self._accept()
         g = self.active()
         if text.startswith("/new "):
             g, text = None, text[5:]
