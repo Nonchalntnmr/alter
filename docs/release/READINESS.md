@@ -57,9 +57,20 @@ autonomy grant:
 1. **The human pilot** (`PILOT.md`) measures C1–C11. It has not run.
 2. **Asking.** On both evaluations, G asked for a missing fact less often than direct. V1 does not
    claim better asking (V1_GATE.md §2 and §4), but a person using it should know.
-3. **A follow-up goal after a correction that changes nothing can still end "done"** on the model's
-   own word (eval_v8, P01-t04). Recommended: such a goal waits for the person. It is not
-   implemented here; it needs its own test and evaluation.
+3. **A follow-up goal after a correction that changes nothing could end "done"** on the model's
+   own word (eval_v8, P01-t04).
+   - **Implemented since (2026-11-28):** `alter say <goal> "…"` to a finished goal, or `/fix …`
+     in the `alter` conversation, starts a follow-up goal that records the goal it corrects. If
+     the follow-up changes nothing, it waits for the person whatever its outcome line says.
+     `alter goals accept` (`/accept`) closes it on the person's word, and `alter report` counts
+     that apart from ALTER's "done".
+   - **Tested offline only:** `tests/test_goal_corrections.py` reproduces P01-t04 with a scripted
+     agent, through the `alter` command and in the conversation. It is not evaluated live.
+     - PILOT.md §5 has participants finish or fix leftover work themselves after a final status,
+       so the pilot may rarely exercise this path.
+     - A live check needs its own scenario; eval_v8's P01-t04 is one.
+   - Corrections only count as follow-ups when they go through `alter say` or `/fix`. A
+     correction typed as a brand-new goal is still an unrelated goal.
 4. **The owner's decisions from the safety audit:** history (H1–H3, H7), GitHub settings (H9) and
    egress (E2, E3).
 
