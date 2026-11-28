@@ -11,7 +11,7 @@
 `ClaudeCLIAdapter` keys its version cache on `(resolved_path, inode, mtime_ns)`. After any `claude` CLI upgrade:
 
 ```sh
-python -m pcim.adapters.cli_probe --trials 4 --record
+~/.alter/venv/bin/python -m pcim.adapters.cli_probe --trials 4 --record
 ```
 
 Calls with `PCIM_CLI_REQUIRE_ISOLATION=1` will refuse to run until the new CLI version is recorded clean with a positive-control baseline showing the account email.
@@ -20,7 +20,7 @@ Calls with `PCIM_CLI_REQUIRE_ISOLATION=1` will refuse to run until the new CLI v
 add or change other traffic, so from a checkout, also run:
 
 ```sh
-HF_HUB_OFFLINE=1 PYTHONPATH=src python scripts/audit_egress.py --out /tmp/egress.json
+HF_HUB_OFFLINE=1 PYTHONPATH=src ~/.alter/venv/bin/python scripts/audit_egress.py --out /tmp/egress.json
 ```
 
 Then compare `analysis` with `docs/SECURITY_WHAT_LEAVES.md`. With the quiet switches,

@@ -589,12 +589,24 @@ def _event(ci, uid, g: G.Goal, kind: str, text: str = "") -> int:
         print(f"alter: {e}", file=sys.stderr)
         return 2
     live = gs.is_live(g.id)
+    if not live and kind in ("pause", "cancel"):  # nothing running reads the event: apply it now, no model call
+        now = G.GoalRunner(ci, uid, G.here_for(ci, uid, g.project_id), out=lambda s: None).apply_events(g.id)
+        if now is not None:  # say what it did: a goal that waits on the person is not running, and keeps waiting
+            waits = {"waiting_approval": "your approval (alter approve / alter deny)",
+                     "waiting_answer": f'your answer (alter say {g.id} "…")'}
+            if now.status in ("cancelled", "paused"):
+                print(f"{now.status.capitalize()} goal {g.id} at once: it was not running.")
+            elif now.status in waits:
+                print(f"Goal {g.id} is not running: it waits for {waits[now.status]}. There is nothing to pause, "
+                      "so it keeps waiting.")
+            else:
+                print(f"Goal {g.id} is {gs.shown_status(now)}.")
+            return 0
+        live = True  # a worker took the goal in between: it reads the event itself
     when = "at its next step" if live else "when the goal resumes (alter goals resume " + g.id + ")"
     print({"steer": f"Noted. ALTER will take it into account {when}.",
-           "pause": f"ALTER will pause {when if live else 'at once: it is not running'}.",
+           "pause": f"ALTER will pause {when}.",
            "cancel": f"ALTER will cancel the goal {when}."}[kind])
-    if not live and kind in ("pause", "cancel"):  # nothing running reads the event: apply it now, no model call
-        G.GoalRunner(ci, uid, G.here_for(ci, uid, g.project_id), out=lambda s: None).apply_events(g.id)
     return 0
 
 
@@ -642,6 +654,10 @@ def cmd_resolve(argv: list[str], approve: bool) -> int:
     except (G.GoalError, ValueError, RuntimeError) as e:
         print(f"alter: {e}", file=sys.stderr)
         return 2
+    except KeyboardInterrupt:  # Ctrl-C while the approved action, or the agent turn after it, ran here
+        print(f"\nALTER: stopped by you (Ctrl-C). Goal {g.id} shows as interrupted; "
+              f"resume it with: alter goals resume {g.id}", file=sys.stderr)
+        return 5
     print()
     print(G.report(ci, uid, g))
     return _exit_for(g)
