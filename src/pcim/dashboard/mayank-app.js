@@ -230,13 +230,13 @@ const FORM_NOTE = {
   timeline: () => "Time rises up the helix, oldest at the bottom. Each kind keeps its own lane.",
   grid: () => "One band per kind, oldest first, left to right: the record laid flat.",
   execution: () => "Read left to right: what each goal was given (its sources) and its project, then the goal or run, then the agents and every tool call made for it, then the claims those calls support. A cyan pulse is waiting for your approval.",
-  hypotheses: () => "Each peak is a hypothesis you put to MAYANK. Its height is the model's estimate that it holds: an estimate, not a measurement. Assumptions ring the base; counterexamples and the strongest alternative sit in the valleys.",
+  hypotheses: () => (S.model.entities.some(e => e.kind === "hypothesis" || e.kind === "debate") ? "" : "Nothing challenged yet: select any record and choose “challenge this” or “two models debate it”, or type :debate <claim>. ") + "Each peak is a hypothesis you put to MAYANK. Its height is the model's estimate that it holds: an estimate, not a measurement. Assumptions ring the base; counterexamples and the strongest alternative sit in the valleys.",
   mastery: () => {
     const now = Date.now(), due = S.model.entities.filter(e => e.kind === "skill" && e.meta.review && Date.parse(e.meta.review.due) <= now);
     return `Your skills, by path. Height is mastery, moved only by unassisted checks: an assisted success never counts.`
       + (S.field.next_challenge ? ` Next challenge: ${S.field.next_challenge.replace("[demo] ", "")}.` : "")
       + (due.length ? ` Due for review now (FSRS): ${due.slice(0, 5).map(e => e.meta.path[e.meta.path.length - 1]).join(", ")}${due.length > 5 ? ` and ${due.length - 5} more` : ""}.` : "")
-      + " Select a skill and press T to be tested.";
+      + (S.model.entities.some(e => e.kind === "skill") ? " Select a skill and press T to be tested." : " No skills recorded yet: `alter practice` or `ci practice` records unassisted checks, and each skill appears here as it is checked.");
   },
 };
 
