@@ -25,9 +25,11 @@ development set (experiments/e2/CALIBRATION.md), never on a test set.
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import re
 import threading
+from pathlib import Path
 from typing import Protocol
 
 import numpy as np
@@ -86,6 +88,39 @@ class HashingEmbedder:
         return out
 
 
+class _DropOfflineNotice(logging.Filter):
+    """huggingface_hub warns "Could not reach the Hub (... offline mode is enabled ...)" on every load in
+    offline mode, which SentenceEmbedder._load turns on itself for a cached model. Only that notice goes."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "offline mode is enabled" not in record.getMessage()
+
+
+_OFFLINE_NOTICE = _DropOfflineNotice()
+
+
+def _model_cached(model: str) -> bool:
+    return (Path.home() / ".cache" / "huggingface" / "hub" / ("models--" + model.replace("/", "--"))).exists()
+
+
+def _before_model_import(model: str = DEFAULT_SEMANTIC_MODEL) -> bool:
+    """Call before anything imports sentence-transformers. huggingface_hub reads HF_HUB_OFFLINE once, when it is
+    imported, so this decides then: a cached model loads offline and nothing is fetched. Returns whether it is."""
+    cached = _model_cached(model)
+    if cached:
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    _quiet_library_notices()
+    return cached
+
+
+def _quiet_library_notices() -> None:
+    """Silence the notices printed on every import or load of the local model that nobody can act on.
+    The same libraries' other warnings, and every error, still show."""
+    # torch, on macOS: it cannot redirect a child process's output, which ALTER never asks it to do
+    logging.getLogger("torch.distributed.elastic.multiprocessing.redirects").setLevel(logging.ERROR)
+    logging.getLogger("huggingface_hub.hf_api").addFilter(_OFFLINE_NOTICE)  # adds it once
+
+
 class SentenceEmbedder:
     """A local sentence-transformers model. Loaded on first use, so commands that never embed
     do not pay for importing torch."""
@@ -107,12 +142,7 @@ class SentenceEmbedder:
     def _load(self):
         with self._lock:
             if self._m is None:
-                import os
-                from pathlib import Path
-                cached = (Path.home() / ".cache" / "huggingface" / "hub" /
-                          ("models--" + self.model.replace("/", "--"))).exists()
-                if cached:
-                    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+                cached = _before_model_import(self.model)
                 try:
                     from sentence_transformers import SentenceTransformer
                 except ImportError as e:
@@ -120,8 +150,19 @@ class SentenceEmbedder:
                         f"this store's memory is embedded with {self.name}, which needs the `semantic` extra: "
                         "pip install 'contextual-intelligence[semantic]' (a store keeps the embedder it was "
                         "written with, so its memory never mixes two vector spaces)") from e
-                self._m = SentenceTransformer(self.model, device="cpu")
-                self.dim = self._m.get_sentence_embedding_dimension()
+                # From disk the "Loading weights" bar lasts under a second; a first download keeps its bars.
+                bars = _progress_bars() if cached else None
+                was_on = bars is not None and bars.is_progress_bar_enabled()
+                if was_on:
+                    bars.disable_progress_bar()
+                try:
+                    self._m = SentenceTransformer(self.model, device="cpu")
+                finally:
+                    if was_on:
+                        bars.enable_progress_bar()
+                # sentence-transformers 6 renamed get_sentence_embedding_dimension, and warns on the old name
+                dim = getattr(self._m, "get_embedding_dimension", None) or self._m.get_sentence_embedding_dimension
+                self.dim = dim()
         return self._m
 
     def embed(self, texts: list[str]) -> np.ndarray:
@@ -143,7 +184,17 @@ class EmbedderUnavailable(RuntimeError):
     """The store's recorded embedder cannot run here (for example, its extra is not installed)."""
 
 
+def _progress_bars():
+    """transformers' switch for its progress bars, or None without transformers."""
+    try:
+        from transformers.utils import logging as hf_logging
+    except ImportError:
+        return None
+    return hf_logging
+
+
 def semantic_available() -> bool:
+    _before_model_import()
     try:
         import sentence_transformers  # noqa: F401
     except ImportError:
