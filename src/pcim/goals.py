@@ -825,7 +825,8 @@ class GoalRunner:
                 why = self._limits_exhausted(g)
                 if why:  # approving would start another model turn past the limit: stop cleanly instead
                     return self._stop_at_limit(g, why)
-            g.status, g.worker_pid = "running", os.getpid()  # what the person sees while the turn runs
+            # what the person sees while the turn runs; "N action(s) wait for your approval" no longer holds
+            g.status, g.worker_pid, g.payload["reason"] = "running", os.getpid(), None
             self.gs.save(g)
             base = self.agent.limits
             self.agent.limits = dc.replace(base, max_seconds=max(30.0, min(base.max_seconds, g.payload["window_s"])))

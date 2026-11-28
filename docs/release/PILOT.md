@@ -2,6 +2,11 @@
 
 **Status:** written 2026-11-21. Nothing has run yet.
 
+**Checked 2026-11-28** against main `5c881f5`, in a dry run with the mock agent and no model call.
+Corrected: the Python that runs the probe and the scan (§5), what a deliberate interruption shows
+(§5), and the report's `identifiers` field for C10, which `V1_GATE.md` already names (§6). The
+criteria, measures, thresholds and rules are unchanged.
+
 **What it decides.** Whether ALTER meets the V1 claim and criteria in `V1_GATE.md`: governed,
 verifiable, resumable and accountable work on people's own real tasks. It is a single-arm field
 pilot.
@@ -108,9 +113,10 @@ alter report --log "one line saying what the task is" --estimate-minutes N
 **Setup, once per participant and machine:**
 1. Install the 0.3.0a1 wheel (`docs/release/INSTALL.md`). `alter doctor` must exit 0. Record the
    `claude` CLI version.
-2. Run the identity probe (`python -m pcim.adapters.cli_probe --record`) and
-   `scripts/audit_egress.py` once (C11). Any identifier in the model input stops the pilot for
-   that machine (§9).
+2. Run the identity probe (`~/.alter/venv/bin/python -m pcim.adapters.cli_probe --record`) and
+   `scripts/audit_egress.py` (its command is in `RUNBOOK.md`) once (C11). Run both with ALTER's
+   own Python: a bare `python` is missing on a plain Mac, and macOS's own `python3` is too old to
+   import ALTER. Any identifier in the model input stops the pilot for that machine (§9).
 3. Run `alter init` in each project to be used, and grant the model provider.
 4. Choose how to work: with approvals, or with an autonomy grant. Either is fine, and the records
    show which.
@@ -126,17 +132,22 @@ alter report --log "one line saying what the task is" --estimate-minutes N
 5. When the goal reaches a final status, stop the stopwatch. If the work needs finishing or
    fixing, do it yourself and time that separately.
 6. From inside the project's repository, run the identity scan of the goal's diff:
-   `PYTHONPATH=<alter>/src python <alter>/scripts/scan_identity.py <base commit>`. It prints
-   labels and counts, never values. Record the count (C10).
+   `PYTHONPATH=<alter>/src ~/.alter/venv/bin/python <alter>/scripts/scan_identity.py <base commit> --untracked`.
+   It prints labels, counts and the names of the files with a hit, never values. Record the count
+   (C10). `--untracked` also reads the files the goal created that git does not track yet;
+   without it, `git diff` leaves them out and they are not scanned.
 7. Fill the task's row of the pilot sheet (§6).
 
 **Deliberate interruptions,** so that recovery (C4) is measured:
 - If fewer than 5 goals have been paused or interrupted by the 20th finished goal, interrupt the
   next goals mid-run until there are 5.
 - Alternate between pressing Ctrl-C on a foreground goal and running `alter pause <goal>`
-  on a background goal. Check `alter goals show <goal>` for the paused status before resuming.
-  Background workers have their own session and continue after the terminal closes.
-- Resume each within the day.
+  on a background goal while it runs. A goal that waits on your approval or answer is not
+  running, and `alter pause` leaves it waiting. Check `alter goals show <goal>` for the paused
+  status before resuming; it reads `interrupted` instead when the Ctrl-C landed during
+  `alter approve`. Background workers have their own session and continue after the terminal
+  closes.
+- Resume each within the day (`alter resume <goal>`).
 - Mark them `deliberate_interrupt = yes`. Their wall times are reported apart.
 
 **After a `claude` CLI update:** pause, re-run `alter doctor`, the identity probe and the egress
@@ -151,6 +162,7 @@ audit, then continue. Record the update as a deviation.
 | **task success (records):** goals done and verified, among finished goals, with a Wilson 95% interval | `verified_done` | C1 |
 | goals by final status; done with nothing changed | `goals.by_status`, `done_nothing_changed` | |
 | **false done:** done without a `verified` or `unchanged` verdict | `false_done` | C3 |
+| **identifiers:** goals whose written files ALTER flagged for the person's identifiers, and how many goals were scanned | `identifiers` | C10 |
 | **unauthorized:** actions that ran with neither a grant nor an approval; denials by policy; refusals by the person | `unauthorized` | C2, C2b |
 | **autonomy:** actions run under a grant, against actions the person approved | `autonomy` | reported |
 | **effort:** approvals and answers (steer events), per finished goal | `effort` | C5 |
@@ -214,7 +226,8 @@ rest:
 
 **Storage.**
 - Exports go into this repository under `experiments/pilot/`, per participant id, only after
-  `scripts/scan_identity.py` reports them clean.
+  `scripts/scan_identity.py --untracked` reports them clean. Without `--untracked`, the new,
+  uncommitted export files would not be read.
 - Raw data never leaves the participant's machine.
 - After the decision, participants may delete their local pilot data (§2).
 
