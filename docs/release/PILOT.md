@@ -2,6 +2,14 @@
 
 **Status:** written 2026-11-21. Nothing has run yet.
 
+**The owner's decisions are recorded, 2026-11-28, before any data** (`V1_GATE.md` §6):
+- the thresholds are unchanged, and C7 is accepted as it measures;
+- P01 and at least one more participant (§1);
+- an analysis checker who is neither the owner nor an implementer;
+- pilot tasks go through goals only (§4).
+
+The consent note and blank sheets to start from are in `docs/release/pilot/`.
+
 **Checked 2026-11-28** against main `5c881f5`, in a dry run with the mock agent and no model call.
 Corrected: the Python that runs the probe and the scan (§5), what a deliberate interruption shows
 (§5), and the report's `identifiers` field for C10, which `V1_GATE.md` already names (§6). The
@@ -29,6 +37,10 @@ evaluation (`HUMAN_EVAL.md`), a separate study with 12 participants and two cond
 The ids are pseudonymous. The mapping from id to person stays with the owner, outside the
 repository.
 
+**Decided 2026-11-28:** P01 and at least one more participant, ideally two (P02, P03). P01 alone
+is the builder rating their own system, so a pilot that ends with P01 alone says so as a
+deviation.
+
 ## 2. Consent
 
 Each participant other than the owner signs a short written consent before setup. The owner
@@ -52,7 +64,9 @@ writes and signs the same note, for the record. The consent states:
 - ALTER can copy identifiers it saw into files it writes. The scan in §5 checks for that.
 
 **Cost.** Model usage is billed to the participant's own account. Each participant sets a cost cap
-before starting (§9), and the facilitator states beforehand who pays.
+before starting (§9), and the facilitator states beforehand who pays. **Decided 2026-11-28:** use
+is billed to each participant's own Claude account. Any reimbursement is stated in that
+participant's consent note (`docs/release/pilot/CONSENT.md`).
 
 **Withdrawal.** At any time, with no reason needed. Their exports are deleted from the analysis
 and from the repository. Locally:
@@ -103,6 +117,12 @@ alter report --log "one line saying what the task is" --estimate-minutes N
 - **Every goal is a pilot goal.** During the window, every goal a participant runs is a pilot goal,
   and is logged first. A goal run without a log entry is a protocol deviation. It is still counted
   and flagged, never dropped.
+- **Pilot tasks go through goals only** (decided 2026-11-28): `alter "…"` or the `alter`
+  conversation.
+  - `alter report` counts only goals. Work on a pilot task through `alter runs`, `ci do`, the web
+    dashboard or MAYANK (`:goal`, `:do`, ask, debates) would not be measured.
+  - Doing that is a protocol deviation: note it in that task's sheet row.
+  - Looking at MAYANK or the dashboard is fine.
 - **At the close,** every goal still active is resumed to a final status or cancelled. A cancelled
   goal counts as not verified-done.
 - **The window** runs at least 10 calendar days, and until the minimum sample in `V1_GATE.md` §5
@@ -172,7 +192,8 @@ audit, then continue. Record the update as a deviation.
 | **the pilot log:** each entry's estimate, its goal, status, verdict and elapsed minutes | `pilot_log` | time saved |
 | **skills:** alone against with help, and the flags | `skills` | C9 |
 
-**The pilot sheet,** one row per logged task. The participant fills it right after the task.
+**The pilot sheet,** one row per logged task. The participant fills it right after the task. A
+blank one is `docs/release/pilot/PILOT_SHEET.csv`.
 
 | column | values |
 |---|---|
@@ -195,7 +216,8 @@ audit, then continue. Record the update as a deviation.
   on the clock and less of the person's attention.
 - **The estimate is a counterfactual nobody observes.** As a check, each participant also does 3
   comparable tasks alone during the pilot, timing them against their estimates. The result is
-  reported, and never used to adjust anything.
+  reported, and never used to adjust anything. A blank sheet for them is
+  `docs/release/pilot/SOLO_CHECKS.csv`; its `notes` follow the same rule as the pilot sheet's.
 
 ## 7. What is recorded, and what never is
 
