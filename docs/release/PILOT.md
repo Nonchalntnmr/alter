@@ -132,9 +132,10 @@ alter report --log "one line saying what the task is" --estimate-minutes N
 5. When the goal reaches a final status, stop the stopwatch. If the work needs finishing or
    fixing, do it yourself and time that separately.
 6. From inside the project's repository, run the identity scan of the goal's diff:
-   `PYTHONPATH=<alter>/src ~/.alter/venv/bin/python <alter>/scripts/scan_identity.py <base commit>`.
+   `PYTHONPATH=<alter>/src ~/.alter/venv/bin/python <alter>/scripts/scan_identity.py <base commit> --untracked`.
    It prints labels, counts and the names of the files with a hit, never values. Record the count
-   (C10).
+   (C10). `--untracked` also reads the files the goal created that git does not track yet;
+   without it, `git diff` leaves them out and they are not scanned.
 7. Fill the task's row of the pilot sheet (§6).
 
 **Deliberate interruptions,** so that recovery (C4) is measured:
@@ -225,7 +226,8 @@ rest:
 
 **Storage.**
 - Exports go into this repository under `experiments/pilot/`, per participant id, only after
-  `scripts/scan_identity.py` reports them clean.
+  `scripts/scan_identity.py --untracked` reports them clean. Without `--untracked`, the new,
+  uncommitted export files would not be read.
 - Raw data never leaves the participant's machine.
 - After the decision, participants may delete their local pilot data (§2).
 

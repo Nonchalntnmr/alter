@@ -1,6 +1,6 @@
 """Release gate: does a branch add this machine's identifiers? Prints counts and locations, never values.
 
-    PYTHONPATH=src python scripts/scan_identity.py [BASE]             # the diff against BASE
+    PYTHONPATH=src python scripts/scan_identity.py [BASE] [--untracked]   # the diff against BASE
     PYTHONPATH=src python scripts/scan_identity.py --history [BASE] [--head REF]   # every commit in BASE..REF
 
 Default BASE: origin/main.
@@ -12,6 +12,8 @@ The identifiers are read from this machine at run time, the same set the CLI ide
 So nothing personal has to be written into the repository to check for it.
 
 Diff mode scans only the lines the diff adds. It answers "does the final tree add an identifier?".
+`git diff` never shows a file git does not track yet. With --untracked, the scan also reads every
+such file whole, minus ignored ones: what a goal created belongs to its diff (the pilot's C10).
 
 History mode answers "would pushing this branch publish an identifier?". It scans three things.
 1. Each commit's own added lines. Merges count only lines that differ from every parent, so a
@@ -84,13 +86,28 @@ def _inherited(base: str, path: str, value: str) -> int:
     return r.stdout.decode("utf-8", errors="replace").lower().count(value) if r.returncode == 0 else 0
 
 
-def scan_diff(base: str) -> int:
+def _new_files() -> tuple[str, list[str]]:
+    """The repository's top, and the files in it git does not track yet, minus ignored ones."""
+    top = _git("rev-parse", "--show-toplevel").strip()
+    return top, [n for n in _git("-C", top, "ls-files", "--others", "--exclude-standard", "-z").split("\0") if n]
+
+
+def scan_diff(base: str, untracked: bool = False) -> int:
     diff = _git("diff", base)
     marks = _marks()
     hits = {label: 0 for label in marks}
     files: dict[str, set[str]] = {}
-    current = None
     added = 0
+
+    def count(low: str, where: str | None) -> None:
+        for label, value in marks.items():
+            n = low.count(value)
+            if n:
+                hits[label] += n
+                if where:
+                    files.setdefault(label, set()).add(where)
+
+    current = None
     for line in diff.splitlines():
         if line.startswith("+++ "):
             current = line[6:] if line.startswith("+++ b/") else None
@@ -98,14 +115,26 @@ def scan_diff(base: str) -> int:
         if not line.startswith("+"):
             continue
         added += 1
-        low = line[1:].lower()
-        for label, value in marks.items():
-            n = low.count(value)
-            if n:
-                hits[label] += n
-                if current:
-                    files.setdefault(label, set()).add(current)
-    print(f"scanned {added} added lines against {base}")
+        count(line[1:].lower(), current)
+    new: list[str] = []
+    unreadable: list[str] = []
+    if untracked:
+        top, new = _new_files()
+        for name in new:
+            try:
+                with open(os.path.join(top, name), "rb") as f:
+                    data = f.read()
+            except OSError:  # a dangling symlink, say: named below, never silently skipped
+                unreadable.append(name)
+                continue
+            for line in data.decode("utf-8", errors="replace").splitlines():
+                added += 1
+                count(line.lower(), name)
+    print(f"scanned {added} added lines against {base}"
+          + (f", including {len(new) - len(unreadable)} untracked file(s) read whole" if untracked else
+             " (untracked files not read: --untracked reads them)"))
+    if unreadable:
+        print(f"  could not read: {', '.join(unreadable)}")
     for label in sorted(hits):
         where = f"   in: {', '.join(sorted(files.get(label, ())))}" if hits[label] else ""
         print(f"  {label:22} {hits[label]}{where}")
@@ -194,9 +223,13 @@ def main(argv: list[str]) -> int:
         i = argv.index("--head")
         head = argv[i + 1]
         argv = argv[:i] + argv[i + 2:]
-    rest = [a for a in argv if a != "--history"]
+    untracked = "--untracked" in argv
+    if history and untracked:
+        print("scan_identity: --untracked reads the working tree; it works with the diff mode only", file=sys.stderr)
+        return 2
+    rest = [a for a in argv if a not in ("--history", "--untracked")]
     base = rest[0] if rest else "origin/main"
-    return scan_history(base, head) if history else scan_diff(base)
+    return scan_history(base, head) if history else scan_diff(base, untracked)
 
 
 if __name__ == "__main__":
