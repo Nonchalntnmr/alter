@@ -278,7 +278,11 @@ def live(home: Path, ci: PersonalCI, interval: float) -> None:
     ws = Workspace(ci)
     ledger = ClaimLedger(ws)
     queue = TaskQueue(ws, Governor(ws), claims=ledger)
-    research = next(p for p in ws.list_projects(uid) if "heat" in p.name.lower())
+    # the demo project ALTER may write in (found by its workspace, not its name, so older seeds work too)
+    research = next((p for p in ws.list_projects(uid)
+                     if (ws.briefing(uid, p.id).get("workspace") or {}).get("can_write")), None)
+    if research is None:
+        refuse("no demo project with a writable workspace here; seed a fresh home")
     rnd, n = random.Random(), 0
     print(f"live: one governed action every {interval:.0f}s (Ctrl-C stops)")
     while True:
