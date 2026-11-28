@@ -57,7 +57,8 @@ offline lexical embedder. A store created with the semantic extra installed keep
 `alter doctor` fails its `embedder` check without it. A store's embedder never changes on its own.
 
 **The web dashboard.** `pcim serve` starts it at http://127.0.0.1:8765; paste the token from
-`~/.pcim/token` (`pbcopy < ~/.pcim/token`). It shows the same runs as `alter runs`. `--no-web`
+`~/.pcim/token` (`pbcopy < ~/.pcim/token`). It shows the same runs as `alter runs`; `/mayank` shows
+everything ALTER holds as one explorable field (`docs/MAYANK.md`). `--no-web`
 leaves out `fastapi` and `uvicorn`. Then `pcim serve` says how to add them, and `alter doctor`
 reports `web_dashboard: not installed`. Running the script again without `--no-web` adds them.
 
